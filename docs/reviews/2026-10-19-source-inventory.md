@@ -536,4 +536,3 @@
 | 路径 | 行数 | SHA-256 前 12 位 |
 | --- | ---: | --- |
 | `reference/public-v1.openapi.json` | 3568 | `a227900ab6f6` |
-
