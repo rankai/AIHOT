@@ -1,41 +1,32 @@
 # 给 Agent 的说明
 
-这是一个行业热点网站的框架：采集信源、用模型筛选和写作、归组事件、出日报，并通过网站、RSS、公开 API 和 MCP 对外提供。默认配置是一个 AI 行业的示例站。先读 README，再按任务读 `docs/` 里对应的文档。
+AIHOT 是行业热点网站框架：采集材料、模型筛选与写作、归组事件、生成报告，再通过网站、RSS、公开 API 和 MCP 提供给读者。
 
-## 最常见的任务：改成另一个行业
+## 先读什么
 
-按 `docs/customize.md` 的顺序做。行业相关的一切都在 `industry/`：站名文案（`site.ts`）、分类标签（`taxonomy.ts`）、主题（`topics.json`）、示范信源（`sources.json`）、提示词（`prompts/`）、门槛（`selection.ts`）、模块开关（`features.ts`）、品牌（`brand/`）、条款页（`pages/`）。通常不需要改 `apps/` 和 `packages/`。
+1. [README](README.md)：项目用途与运行入口。
+2. [开发原则](docs/development-principles.md)：项目级强制规则；实现、评审和重构均适用。
+3. [工程手册](docs/engineering-playbook.md)：按任务查边界、验证和恢复方法，不要求每次通读。
+4. 对应领域文档：改行业读 [customize](docs/customize.md)，改信源读 [sources](docs/sources.md)，改筛选读 [selection](docs/selection.md)，改事件读 [grouping](docs/grouping.md)，部署读 [deploy](docs/deploy.md)。
 
-这些事要问使用者本人，不要替他决定：站名；要盯哪些信源；什么消息重要、什么是噪声；分类怎么分；条款和隐私说明的内容（`industry/pages/` 是模板，上线前需要他本人确认）。
+[2026-10-19 审查](docs/reviews/2026-10-19-project-review.md)和[模块清单](docs/reviews/2026-10-19-source-inventory.md)是历史证据，不是另一套开发规则，也不表示其中的问题已修复。
 
-改评分标准时保留原有结构（内容类型、五个维度加权、噪声压制、安全边界），替换的是“什么算重要”“什么算噪声”的例子。门槛要用使用者标注的样本重新校准（`docs/selection.md`），不要凭感觉改数字。
+## 开始任务
 
-## 运行与检查
+- 先明确目标、真实入口、影响范围和最小验收方式；沿当前代码调查，不从熟悉的技术方案倒推需求。
+- 授权范围内持续完成实施、必要验证和收尾，不因常规细节重复询问。扩大范围、真实付费、外部推送、生产数据或发布需要相应授权。
+- 保留已有未提交改动；发现来源不明的新改动先停止核实。不擅自提交、推送、重置、重建仓库或重启生产服务。
+- Node.js >=24.11，原生运行 TypeScript；后端没有构建步骤。沿用 npm workspaces 和现有代码风格。
+- 验证按风险选择，不把全量测试、浏览器截图、额外文档或新抽象当作所有任务的固定步骤。命令与环境隔离见工程手册。
 
-- Node.js 24 直接运行 TypeScript，后端没有构建步骤。npm workspaces：`apps/*`、`packages/*`、`industry`。
-- 本机运行和 Docker 见 `docs/deploy.md`。
-- 改完至少跑：
-  ```bash
-  npm run typecheck
-  DATABASE_URL=postgres://127.0.0.1:5432/<名字>_test npm test   # 空库，名字必须以 _test 或 _ci 结尾，先 node scripts/migrate.ts
-  npm run build -w @aihot/web && node --test apps/web/tests/*.test.ts
-  node scripts/smoke.ts --base http://localhost:3000             # 站点跑起来以后
-  ```
-- `tests/` 里部分测试用的是示例行业的分类、标签和公司，改了 `industry/taxonomy.ts` 后把这些例子换成新行业的对应项。
+## 换一个行业
 
-## 要守住的规则
+按 `docs/customize.md` 操作；行业配置、分类、提示词、门槛、品牌和页面模板在 `industry/`，通常不用修改框架。
 
-- 前端（`apps/web`）只通过 HTTP 读 `apps/api`，数据库、模型调用和密钥只在后端。
-- 所有公开出口都从 `packages/backend/src/publication/` 这一个读取层读，新增公开出口也一样。
-- 读者打开页面不触发模型调用；模型只在 worker 的任务里调用。
-- 付费请求都经过回执（`providers/receipts.ts`）和预算熔断，不要绕开。
-- 开发和测试时保持安全阀关闭：`COLLECT_ENABLED`、`MODEL_CALLS_ENABLED`、`FEISHU_*_ENABLED`、`INDEXNOW_SUBMIT_ENABLED`。测试不访问任何外部服务。
-- 信源默认只展示摘要和原文链接（`site_fulltext` 关）；只有来源明确允许时才打开全文。
-- 公开内容匿名，管理员和访客看到的一样；后台只允许管理员。
-- 数据库迁移只做向后兼容的增量，新迁移按编号加在 `database/migrations/` 末尾。
-- 不要提交 `.env`、密钥和 `.data/`。
-- 不要使用 AIHOT 的名字和 Logo。
+站名、信源、重要性与噪声定义、分类、条款及隐私说明由使用者确认；不要替其决定。评分标准保留现有结构，以真实标注样本校准，不凭感觉调阈值。对外使用自己的品牌，不使用 AIHOT 名称和 Logo。
 
-## 写代码
+## 本地安全
 
-匹配周围代码的写法、命名和注释密度。选能清楚解决问题的简单方案，只定义正在使用的抽象。验证改动涉及的重要行为，不为简单的样式改动写测试。
+- 不读取、输出或提交 `.env`、真实密钥、会话、令牌和 `.data/` 运行数据；需要配置时先看 `.env.example` 与配置代码。
+- 默认关闭采集、模型、飞书和 IndexNow 外部副作用。测试使用独立 `_test` / `_ci` 数据库与本地桩；这些开关不等于网络隔离。
+- 普通读者请求不得触发付费模型；前端不接数据库和后端密钥。付费请求、公开内容与信源权限的具体不变量以开发原则为准。

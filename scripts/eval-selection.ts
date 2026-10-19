@@ -6,10 +6,10 @@
 // Usage: node --env-file=.env scripts/eval-selection.ts --gold .data/gold.jsonl [--models default,deepseek-flash] [--n 200] [--label "..."]
 // Receipts make re-runs free; "either" cases are excluded from decisive metrics. Each run is also
 // imported into SelectBench (admin → SelectBench) with every case, unless --no-import is given.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { accessSync, constants, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { REPO_ROOT } from "@aihot/backend/config";
+import { config, REPO_ROOT } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { ANALYZE_PROMPT_VERSION, normalizeAnalysis, runAnalysis, type AnalyzeInputArticle } from "@aihot/backend/editorial/analyze";
 import { importSelectBenchRun } from "@aihot/backend/admin/selectbench";
@@ -80,6 +80,10 @@ async function pmap<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): 
   }));
   return out;
 }
+
+const outDir = path.join(config.dataDir, "eval");
+mkdirSync(outDir, { recursive: true });
+accessSync(outDir, constants.W_OK);
 
 const report: Record<string, unknown> = {};
 for (const model of values.models!.split(",")) {
@@ -154,8 +158,6 @@ for (const model of values.models!.split(",")) {
   }));
   report[model] = { summary, sweep, mistakes, cases };
 }
-const outDir = path.join(REPO_ROOT, ".data/eval");
-mkdirSync(outDir, { recursive: true });
 const file = path.join(outDir, `selection-${values.split}-${values.n}-${Date.now()}.json`);
 const meta = { split: values.split, n: sample.length, seed: Number(values.seed), promptVersion: ANALYZE_PROMPT_VERSION, createdAt: new Date().toISOString() };
 writeFileSync(file, JSON.stringify({ meta, models: report }, null, 2));

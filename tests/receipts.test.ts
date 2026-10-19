@@ -7,7 +7,7 @@ import { after, before, test } from "node:test";
 import { z } from "zod";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
-import { chatJson, ModelOutputError } from "@aihot/backend/providers/llm";
+import { chatJson, ModelOutputError, MODELS } from "@aihot/backend/providers/llm";
 import { embeddingsAvailable } from "@aihot/backend/providers/embeddings";
 import { BudgetExceededError, paidRequest, ReceiptUnknownError } from "@aihot/backend/providers/receipts";
 import { autoReleaseUnknownReceipts } from "@aihot/backend/admin/runs";
@@ -47,6 +47,50 @@ test("an answer already received is reused instead of bought again", async () =>
   assert.equal(first.reused, false);
   assert.equal(second.reused, true);
   assert.equal(second.receiptId, first.receiptId);
+});
+
+test("receipt identity follows the endpoint and effective response format, retaining explicit attempts", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const second = await stub((_hit, req) => {
+    bodies.push(JSON.parse(req.body));
+    return { choices: [{ message: { content: '{"ok":true}' } }], usage };
+  });
+  const spec = MODELS["deepseek-flash"]!;
+  const original = { base: process.env.DEEPSEEK_BASE_URL, jsonMode: spec.jsonMode, extra: spec.extra };
+  const subject = `identity-${tag()}`;
+  const options = { model: spec.key, purpose: "invariant_test", subject, promptVersion: "t1", system: "s", user: subject, schema: z.object({ ok: z.boolean() }) };
+  try {
+    answer = () => '{"ok":true}';
+    const first = await chatJson(options);
+    process.env.DEEPSEEK_BASE_URL = `${provider.url}/v1/`;
+    assert.equal((await chatJson(options)).receiptId, first.receiptId, "trailing slash is equivalent");
+    process.env.DEEPSEEK_BASE_URL = `${second.url}/v1`;
+    const moved = await chatJson(options);
+    assert.notEqual(moved.receiptId, first.receiptId);
+    assert.equal((await chatJson(options)).reused, true);
+    assert.deepEqual(bodies[0]!.response_format, { type: "json_object" });
+    spec.jsonMode = false;
+    const plain = await chatJson(options);
+    assert.notEqual(plain.receiptId, moved.receiptId);
+    assert.equal(bodies[1]!.response_format, undefined);
+    spec.jsonMode = true;
+    assert.equal((await chatJson({ ...options, json: false })).receiptId, plain.receiptId);
+    spec.extra = { ...original.extra, response_format: { type: "text" } };
+    const override = await chatJson(options);
+    assert.equal((await chatJson({ ...options, json: false })).receiptId, override.receiptId, "extra overrides the JSON switch");
+    assert.deepEqual(bodies[2]!.response_format, { type: "text" });
+    const manual = await chatJson({ ...options, attemptTag: "manual-test" });
+    assert.notEqual(manual.receiptId, override.receiptId);
+    assert.equal((await chatJson({ ...options, attemptTag: "manual-test" })).receiptId, manual.receiptId);
+    assert.equal(second.hits(), 4);
+    const rows = await sql`SELECT request, logical_key FROM receipts WHERE subject = ${subject}`;
+    assert.ok(rows.every((row) => !JSON.stringify(row).includes("test-key")));
+  } finally {
+    process.env.DEEPSEEK_BASE_URL = original.base;
+    spec.jsonMode = original.jsonMode;
+    spec.extra = original.extra;
+    await second.close();
+  }
 });
 
 test("retries of unusable answers stop at the budget, and every request sent is counted", async () => {
