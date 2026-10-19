@@ -64,6 +64,7 @@ async function heatRows(at: Date, behind: string[] = []): Promise<HeatRow[]> {
              bool_or(source_id = ANY(${behind}::text[])) AS behind
       FROM story_signals
       WHERE observed_at > ${at}::timestamptz - make_interval(hours => ${WINDOW_HOURS}) AND observed_at <= ${at}
+        AND EXISTS (SELECT 1 FROM sources s WHERE s.id = story_signals.source_id AND s.participation_mode <> 'isolated')
       GROUP BY story_id, participant_key
     ), agg AS (
       SELECT story_id,
@@ -109,6 +110,7 @@ export async function computeHotRanking(at = new Date()): Promise<{ id: number; 
       SELECT DISTINCT ON (ss.participant_key) s.name, ss.kind, s.tier, ss.observed_at AS at
       FROM story_signals ss JOIN sources s ON s.id = ss.source_id
       WHERE ss.story_id = ${r.story_id} AND ss.observed_at > ${at}::timestamptz - make_interval(hours => ${WINDOW_HOURS}) AND ss.observed_at <= ${at}
+        AND s.participation_mode <> 'isolated'
       ORDER BY ss.participant_key, (ss.kind = 'editorial') DESC, ss.observed_at DESC`;
     // The reporting sources of the window, latest first (signal participants are counted separately).
     const reporting = participants.filter((p) => p.kind === "editorial").sort((x, y) => y.at.getTime() - x.at.getTime());

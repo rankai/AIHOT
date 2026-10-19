@@ -84,6 +84,7 @@ async function queryExtras(ranking: HotRanking): Promise<Extras> {
       FROM story_signals ss JOIN sources s ON s.id = ss.source_id
       LEFT JOIN articles a ON a.id = ss.article_id AND a.x_post ? 'avatarUrl'
       WHERE ss.story_id = ANY(${ids}::bigint[])
+        AND s.participation_mode <> 'isolated'
       ORDER BY s.id, (a.id IS NULL), a.discovered_at DESC`,
     sql<{ id: number; digest: string | null; summary: string | null; latest: string | null }[]>`
       SELECT id, digest, summary, latest FROM stories WHERE id = ANY(${ids}::bigint[])`,

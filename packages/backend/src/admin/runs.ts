@@ -4,6 +4,7 @@ import { sql } from "../db.ts";
 import { audit } from "./auth.ts";
 import { Conflict } from "./sources.ts";
 import { failureGroupSql, queueProcessing, requeueFailed } from "../jobs/content.ts";
+import { CAPABILITIES } from "../editorial/models.ts";
 
 const STALE_HEARTBEAT_MS = 3 * 60_000;
 
@@ -78,25 +79,44 @@ export async function runsOverview() {
   };
 }
 
+function analysisAttemptTag(receipt: { service: string; purpose: string; model: string | null; logical_key: string }): string | undefined {
+  // Match persisted fields first: service/model may contain colons. Only the hash and tag remain.
+  const prefix = [receipt.service, receipt.purpose, receipt.model ?? "-", ""].join(":");
+  if (!receipt.logical_key.startsWith(prefix)) return undefined;
+  const match = /^[a-f0-9]{64}:(admin:[\w-]{8,80})(?::(score-1|score-2|structure|understand|summarize))?$/.exec(receipt.logical_key.slice(prefix.length));
+  if (!match) return undefined;
+  // These are the exact suffixes appended by analyze.ts; prefilter keeps the workflow tag intact.
+  const suffixes: Record<string, (string | undefined)[]> = {
+    prefilter_article: [undefined], score_article: ["score-1", "score-2"],
+    structure_article: ["structure"], understand_article: ["understand"], summarize_article: ["summarize"],
+  };
+  return suffixes[receipt.purpose]?.includes(match[2]) ? match[1] : undefined;
+}
+
 /**
  * A receipt whose outcome is unknown is not re-sent by the request that lost it. Releasing it marks it
  * failed, so the next attempt calls again; an article that stopped on it goes straight back to
  * processing (one action, not two). Only an unknown receipt is released, once.
  */
 async function release(id: number, error: string, actor: string, note: string, billed: boolean | null) {
-  const [before] = await sql<{ subject: string | null; purpose: string }[]>`
-    UPDATE receipts SET status = 'failed', error = ${error}, updated_at = now() WHERE id = ${id} AND status = 'unknown' RETURNING subject, purpose`;
-  if (!before) return null;
-  await sql`UPDATE receipt_attempts SET status = 'failed', error = ${error} WHERE receipt_id = ${id} AND status = 'unknown'`;
-  const article = before.purpose === "analyze_article" ? /^article:([^@]+)@/.exec(before.subject ?? "")?.[1] : undefined;
-  let requeued = false;
-  if (article) {
-    const [a] = await sql`UPDATE articles SET processing_state = 'new', processing_attempts = 0, processing_retry_at = NULL, processing_error = NULL
-                          WHERE id = ${article} AND processing_state = 'failed' RETURNING id`;
-    if (a) requeued = !!(await queueProcessing(article, { step: "analyze" }));
-  }
-  await audit(actor, "receipt.release", `receipt:${id}`, note, { status: "unknown" }, { status: "failed", billed, requeued });
-  return { id, status: "failed", subject: before.subject, purpose: before.purpose, requeued };
+  const result = await sql.begin(async (tx) => {
+    const [before] = await tx<{ subject: string | null; purpose: string; service: string; model: string | null; logical_key: string }[]>`
+    UPDATE receipts SET status = 'failed', error = ${error}, updated_at = now() WHERE id = ${id} AND status = 'unknown' RETURNING subject, purpose, service, model, logical_key`;
+    if (!before) return null;
+    await tx`UPDATE receipt_attempts SET status = 'failed', error = ${error} WHERE receipt_id = ${id} AND status = 'unknown'`;
+    const analysis = [CAPABILITIES.prefilter, CAPABILITIES.score, CAPABILITIES.structure, CAPABILITIES.understand, CAPABILITIES.summarize]
+      .some((capability) => capability.purposes.includes(before.purpose));
+    const article = analysis ? /^article:([^@]+)@(\d+)$/.exec(before.subject ?? "") : null;
+    let requeued = false;
+    if (article) {
+      const [a] = await tx`UPDATE articles SET processing_state = 'new', processing_attempts = 0, processing_retry_at = NULL, processing_error = NULL
+                            WHERE id = ${article[1]!} AND revision::text = ${article[2]!} AND processing_state = 'failed' RETURNING id`;
+      if (a) requeued = !!(await queueProcessing(article[1]!, { step: "analyze", attemptTag: analysisAttemptTag(before), db: tx }));
+    }
+    return { id, status: "failed", subject: before.subject, purpose: before.purpose, requeued };
+  });
+  if (result) await audit(actor, "receipt.release", `receipt:${id}`, note, { status: "unknown" }, { status: "failed", billed, requeued: result.requeued });
+  return result;
 }
 
 /** Admin, after checking the provider's console: records whether it was billed and releases it. */

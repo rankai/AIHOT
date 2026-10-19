@@ -2,10 +2,10 @@
 // Usage: node --env-file=.env scripts/eval-relations.ts --gold .data/relation-gold.jsonl
 //        [--models default,deepseek-flash] [--split development] [--n 200] [--thresholds 0.75,0.8]
 // The same pair prompt/schema as production is used; receipts make identical re-runs reusable.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { REPO_ROOT } from "@aihot/backend/config";
+import { config, REPO_ROOT } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { modelFor } from "@aihot/backend/editorial/models";
 import { PAIR_SYSTEM, PairSchema, RELATE_PROMPT_VERSION, pairUser } from "@aihot/backend/events/relate";
@@ -80,6 +80,10 @@ async function main() {
   const rows = parseRelationGoldJsonl(readFileSync(path.resolve(REPO_ROOT, values.gold!), "utf8"));
   const sample = sampleRelationGold(rows, { split: values.split, n, seed });
   if (!sample.length) throw new Error(`no cases for split ${values.split}`);
+
+  const outDir = path.join(config.dataDir, "eval");
+  mkdirSync(outDir, { recursive: true });
+  accessSync(outDir, constants.W_OK);
 
   const models = values.models
     ? values.models.split(",").map((model) => model.trim()).filter(Boolean)
@@ -175,8 +179,6 @@ async function main() {
     };
   }
 
-  const outDir = path.join(REPO_ROOT, ".data/eval");
-  mkdirSync(outDir, { recursive: true });
   const splitName = safeReportNamePart(values.split!);
   const file = path.join(outDir, `relations-${splitName}-${sample.length}-${Date.now()}.json`);
   const meta = {

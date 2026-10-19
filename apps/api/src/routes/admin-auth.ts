@@ -1,5 +1,6 @@
 // Admin sign-in and the /api/admin guard. Public routes never read the session.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { ZodError } from "zod";
 import { config } from "@aihot/backend/config";
 import {
   completeLogin,
@@ -56,7 +57,7 @@ export function adminHandler(fn: AdminHandler) {
     try {
       return await fn(req, reply, admin);
     } catch (error) {
-      if ((error as { statusCode?: number }).statusCode === 400 || error instanceof SyntaxError) {
+      if ((error as { statusCode?: number }).statusCode === 400 || error instanceof SyntaxError || error instanceof ZodError) {
         return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: String((error as Error).message).slice(0, 300) });
       }
       if ((error as { code?: string }).code === "conflict") return sendProblem(req, reply, { status: 409, code: "conflict", detail: (error as Error).message });
