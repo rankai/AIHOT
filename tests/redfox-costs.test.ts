@@ -41,6 +41,14 @@ test('attempts do not multiply with shared run results, groups preserve cost bas
  assert.equal(groups.find(g=>g.base?.startsWith('http:'))!.environment,'other');assert.equal(groups.find(g=>g.base===null)!.environment,'unknown');
  assert.equal(groups.find(g=>g.origin==='replay')!.knownCost,null);assert.equal(groups.find(g=>g.currency==='USD')!.costBasis,'actual');
 });
+test('AgentKey credit estimates and reported charges share the existing attempt view without treating missing values as zero',async()=>{
+ const [r]=await sql`INSERT INTO receipts(logical_key,service,model,purpose,status,request,response) VALUES (${randomUUID()},'agentkey.collect','TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post','agentkey.douyin.search','received',${sql.json({endpoint:'http://local-synthetic.test/v1/mcp',params:{keyword:'synthetic'}})},${sql.json({status:200,body:'{}'})}) RETURNING id`;
+ ids.push(r!.id);
+ await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,cost,currency,cost_basis,started_at,usage) VALUES (${r!.id},1,'agentkey.collect','TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post','live','received',NULL,NULL,NULL,${interval.start},${sql.json({estimatedCredits:0.2,chargedCredits:0.2})})`;
+ await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,cost,currency,cost_basis,started_at,usage) VALUES (${r!.id},2,'agentkey.collect','TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post','live','unknown',NULL,NULL,NULL,${interval.start},${sql.json({estimatedCredits:0.3})})`;
+ const result=await redfoxCosts(interval),group=result.local.groups.find(g=>g.service==='agentkey.collect')!;
+ assert.deepEqual({attempts:group.attempts,estimatedCredits:group.estimatedCredits,chargedCredits:group.chargedCredits,unknownEstimatedCreditsCount:group.unknownEstimatedCreditsCount,unknownChargedCreditsCount:group.unknownChargedCreditsCount},{attempts:2,estimatedCredits:'0.5',chargedCredits:'0.2',unknownEstimatedCreditsCount:0,unknownChargedCreditsCount:1});
+});
 test('one complete bill snapshot keeps duplicate rows and raw times, blocks unrelated or incomplete results',async()=>{
  const id=await receipt(),run=await bill(id),other=await bill(id);
  const result=await redfoxCosts({...interval,billRunId:String(run)}),page=result.selectedBill!;

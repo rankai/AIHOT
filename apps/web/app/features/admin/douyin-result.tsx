@@ -26,7 +26,7 @@ export function DouyinResult({ result: r }: { result: OperationResult }) {
   const fields = douyinImportFields(r.kind, r.data, url);
   const record = r.data.record && typeof r.data.record === "object" && !Array.isArray(r.data.record) ? r.data.record as Record<string, unknown> : {};
   const missing = Array.isArray(r.data.missing) ? r.data.missing.filter((item): item is string => typeof item === "string") : [];
-  const body = record.content ?? record.aweme_desc;
+  const body = record.content ?? record.aweme_desc ?? record.desc;
   const time = record.publishTime ?? record.create_time_str ?? record.create_time ?? record.gmtCreate;
   const upstream = safeExternalUrl(fields.receivedUrl);
   const media = [...new Set([...(Array.isArray(record.imageUrlList) ? record.imageUrlList : []), record.coverUrl, record.cover_url, record.audioUrl, record.avatarUrl, record.authorLink, record.authorUrl, record.accountLink].map(safeExternalUrl).filter((address): address is string => address !== null))];
@@ -36,9 +36,9 @@ export function DouyinResult({ result: r }: { result: OperationResult }) {
   return <article className="space-y-3 border-b border-line pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center gap-2 text-[14px] font-medium"><span>{typeof r.data.title === "string" ? r.data.title : "抖音查询结果"}</span><Badge>{r.kind === "douyin_account_rank" ? "账号研究榜单" : fields.account ? "抖音账号" : "抖音作品"}</Badge></div>
     {r.kind === "douyin_account_rank" && <p className="text-[12.5px] text-ink-3">账号榜单只作研究，主页和昵称不能证明稳定身份，也不能作为文章导入；请显式查询账号信息核实。</p>}
-    <KV items={[["已收到作者 UID", fields.uid ?? "未提供"], ["已收到安全 ID（secUserId）", fields.secUserId ?? "未提供"], ...(fields.work ? [["已收到作品 ID", fields.workId ?? "未提供"], ["原生链接可确认作品 ID", fields.native?.id ?? "未确认"]] as Array<[string, string]> : [])]} />
+    <KV items={[["已收到作者 UID", fields.uid ?? "未提供"], ["已收到安全 ID（secUserId）", fields.secUserId ?? "未提供"], ...(fields.work ? [["已收到作品 ID", fields.workId ?? "未提供"], ["原生链接中的作品 ID", fields.native?.id ?? "未确认"]] as Array<[string, string]> : [])]} />
     {r.kind === "douyin_account_rank" && <KV items={[["上游排名", typeof record.accountRanking === "number" ? String(record.accountRanking) : "未提供"], ["上游榜单日期原串", typeof record.rankDate === "string" ? record.rankDate : "未提供"], ["上游榜单周期", typeof record.rankPeriod === "string" ? record.rankPeriod : "未提供"]]} />}
-    {fields.work && !fields.workId && fields.receivedNative && <p className="text-[12px] text-ink-3">接口未单列已确认作品 ID；本原生链接含作品 ID，可由服务端据此核实。AI photoId 不参与身份确认。</p>}
+    {r.data.provider!=="agentkey" && fields.work && !fields.workId && fields.receivedNative && <p className="text-[12px] text-ink-3">接口未单列已确认作品 ID；本原生链接含作品 ID，可由服务端据此核实。AI photoId 不参与身份确认。</p>}
     <p className="text-[12px] text-ink-4">UID 与安全 ID 分类型保留完整字符串；展示抖音号、AI authorId/photoId 和未确认的 secUid 不作为稳定作者或作品身份。</p>
     {typeof body === "string" && <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink-2">{body}</p>}
     {(typeof time === "string" || typeof time === "number") && <p className="text-[12px] text-ink-3">上游原始时间：{String(time)}</p>}
@@ -49,7 +49,8 @@ export function DouyinResult({ result: r }: { result: OperationResult }) {
     {fields.blockedReason && <p className="rounded-control bg-amber/10 p-3 text-[13px] text-amber">{fields.blockedReason}</p>}
     <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>{fields.account ? "查看已绑定信源" : "查看作者绑定信源"}</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!imported && r.kind !== "douyin_account_rank" && <Button size="sm" disabled={!fields.canImport || !!pending} onClick={() => setOpen(true)}>{fields.account ? "绑定账号信源" : "本地导入作品"}</Button>}</div>
     {!imported && fields.account && !fields.canImport && <p className="text-[12px] text-amber">账号必须收到 UID 或已确认安全 ID 才可绑定，不允许手补账号身份；请显式查询账号详情。</p>}
-    <DetailQueryActions result={r} />
+    {r.data.provider!=="agentkey" && <DetailQueryActions result={r} />}
+    {typeof r.data.pendingReason==="string"&&<p className="text-[13px] text-amber">待导入：{r.data.pendingReason}</p>}
     <Json value={{ resultId: r.id, receiptId: r.receiptId, operationId: r.data.operationId, workId: r.data.workId, identity: r.data.identity, record }} label="原始字段与溯源诊断" />
     <ReasonDialog open={open} title={fields.account ? "绑定抖音账号身份" : "本地导入抖音作品"} description={fields.account ? "仅使用已收到的稳定 UID 或安全 ID，按绑定复用，否则新建隔离 external 信源并关闭全文权限。可显式选择已核实为同一账号的 external 信源，不按昵称匹配。此命令不请求供应商。" : "作品按真实作者身份归属，不指定任意目标信源。收到的身份、作品 ID 和地址不可替换；只补缺失项并记录证据。人工作者身份不能继承已有非隔离权限，文章去重后保留原归属。此命令不请求供应商。"} busy={!!pending} onClose={close} onSubmit={async reason => {
       setError(null);

@@ -14,7 +14,8 @@ export async function scheduleNativeCollections(kind: "x_search" | "mp_account",
     c.config, c.progress AS cursor, c.interval_minutes,
     (c.next_run_at IS NULL OR c.next_run_at <= ${now}) AS due
     FROM collection_subscriptions c JOIN sources s ON s.id = c.control_source_id
-    WHERE s.kind = ${kind} AND (c.provider <> 'redfox' OR ${process.env.REDFOX_CALLS_ENABLED === "true"}) AND s.enabled AND c.enabled AND c.active_run_id IS NULL`;
+    WHERE s.kind = ${kind} AND c.provider IN ('socialdata','dajiala','redfox')
+      AND (c.provider <> 'redfox' OR ${process.env.REDFOX_CALLS_ENABLED === "true"}) AND s.enabled AND c.enabled AND c.active_run_id IS NULL`;
   const due = new Set(rows.filter((r) => r.due).map((r) => r.id));
   let enqueued = 0, shards = 0;
   const batched = new Set<string>();

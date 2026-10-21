@@ -27,7 +27,7 @@ test("source collection entry, legacy redirect, query draft and task return use 
     load(id) { if (id.startsWith("\0unrelated:")) return `export function ${unrelated[id.slice("\0unrelated:".length)]}(){return null}`; },
   }] });
   const operation: PlatformOperation = { id: "OWIBYU1V", platform: "douyin", label: "作品搜索", purpose: "query", schedulableType: "search", collectionCapabilities: { detailEnrichment: false }, fields: [{ name: "keyword", label: "关键词", type: "string", required: true }] };
-  const subscription: CollectionSubscription = { id: 12, platform: "douyin", name: "已有订阅", operationId: operation.id, parameters: { keyword: "服务端条件" }, enabled: true, enrichDetails: false, intervalMinutes: 15, limits: { pages: 3, items: 100, details: 0 }, editVersion: 7, executionVersion: 3, nextRunAt: null, activeRun: null };
+  const subscription: CollectionSubscription = { id: 12, provider: "redfox", platform: "douyin", name: "已有订阅", operationId: operation.id, parameters: { keyword: "服务端条件" }, enabled: true, enrichDetails: false, intervalMinutes: 15, limits: { pages: 3, items: 100, details: 0 }, editVersion: 7, executionVersion: 3, nextRunAt: null, activeRun: null };
   const render = (element: ReactElement, entry: string | { pathname: string; search: string; state: unknown }) => {
     const router = createMemoryRouter([{ path: "*", element }], { initialEntries: [entry] });
     try { return renderToStaticMarkup(createElement(RouterProvider,{router})); } finally { router.dispose(); }

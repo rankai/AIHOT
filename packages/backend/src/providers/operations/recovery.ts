@@ -1,3 +1,4 @@
+import { agentKeyRouteFor, agentKeyOutboundAllowed, douyinSearchRoute } from "../agentkey/douyin-contract.ts";
 import { hasCompleteLocalFile } from "../../operations/assets.ts";
 import { sql, type Tx } from "../../db.ts";
 import { queueOperationStep } from "./queue.ts";
@@ -10,6 +11,7 @@ export const governedReceipt = (id: number) => sql`EXISTS (
     OR o.progress->'retainedReceiptIds' @> ${sql.json([id])}
   UNION ALL SELECT 1 FROM operation_results z WHERE z.receipt_id = ${id})`;
 function outboundAllowed(run: RunRow) {
+  if (run.provider === "agentkey") return agentKeyOutboundAllowed(run);
   if(run.step_key.startsWith("redfox.ai_search."))return process.env.REDFOX_CALLS_ENABLED === "true" && process.env.MODEL_CALLS_ENABLED === "true";
   if(run.step_key.startsWith("redfox.image.")||run.step_key.startsWith("redfox.video."))return process.env.REDFOX_CALLS_ENABLED === "true" && process.env.MODEL_CALLS_ENABLED === "true";
   return run.provider === "redfox" ? process.env.REDFOX_CALLS_ENABLED === "true" && (run.input.mode !== "collection" || process.env.COLLECT_ENABLED !== "false") : process.env.COLLECT_ENABLED !== "false";
@@ -18,6 +20,7 @@ const AUTO_NOTE = "自动放行：结果未知超过 30 分钟，未核对是否
 
 /** Only implemented read operations may automatically retry an unknown request. */
 function isReadOnlyStep(run: RunRow): boolean {
+  if (run.provider === "agentkey") return agentKeyRouteFor(run)?.recovery === "readOnly";
   return run.provider === "redfox" ? ["redfox.xhs_comments.poll","redfox.video.poll","redfox.ai_search.poll","redfox.wechat.page","redfox.wechat.detail","redfox.platform.page","redfox.platform.item","redfox.platform.detail","redfox.weibo.page","redfox.weibo.item","redfox.weibo.detail","redfox.sync.query","redfox.x.account","redfox.x.detail","redfox.x.page","redfox.x.item","redfox.image.poll","redfox.transcript.poll"].includes(run.step_key)
     : run.provider === "socialdata" ? run.step_key === "x.page"
     : run.provider === "dajiala" && ["mp.list","mp.body"].includes(run.step_key);
@@ -56,6 +59,7 @@ export async function releaseOperationReceipt(receiptId: number, manual = false)
       if (run.input.members.length && !eligible.length) continue;
       if (await settleExpiredCommentTask(tx,run)) continue;
       if (!isReadOnlyStep(run)) continue;
+      if (!outboundAllowed(run)) continue;
       valid.push(run);
     }
     if (!valid.length) return { released: false, requeued: 0 };
@@ -84,7 +88,7 @@ export async function releaseOperationReceipt(receiptId: number, manual = false)
 export async function recoverOperations() {
   const [cursor]=await sql`SELECT value FROM settings WHERE key='operations.recovery-cursor'`;
   const lastId=typeof cursor?.value === "number" ? cursor.value : 0;
-  const rows = await sql<RunRow[]>`SELECT * FROM operation_runs WHERE status IN ('active','waiting') AND operation_key IN ('redfox.xhs_comments.submit','redfox.xhs_comments.query','redfox.video.generate','redfox.video.query','redfox.ai_search.submit','redfox.ai_search.query','redfox.media.upload','x.search','mp.history','redfox.x.account','redfox.x.detail','redfox.x.timeline','redfox.image.generate','redfox.image.query','redfox.transcript.submit','redfox.transcript.query','redfox.sync.query','redfox.weibo.collection','redfox.platform.collection','redfox.wechat.collection') AND id > ${lastId} ORDER BY id LIMIT 200`;
+  const rows = await sql<RunRow[]>`SELECT * FROM operation_runs WHERE status IN ('active','waiting') AND operation_key IN ('redfox.xhs_comments.submit','redfox.xhs_comments.query','redfox.video.generate','redfox.video.query','redfox.ai_search.submit','redfox.ai_search.query','redfox.media.upload','x.search','mp.history','redfox.x.account','redfox.x.detail','redfox.x.timeline','redfox.image.generate','redfox.image.query','redfox.transcript.submit','redfox.transcript.query','redfox.sync.query','redfox.weibo.collection','redfox.platform.collection','redfox.wechat.collection',${douyinSearchRoute.operationKey}) AND id > ${lastId} ORDER BY id LIMIT 200`;
   let requeued = 0, released = 0;
   for (const snapshot of rows) {
     try {

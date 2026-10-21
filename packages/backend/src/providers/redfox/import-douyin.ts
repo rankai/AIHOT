@@ -1,3 +1,5 @@
+import {parseDouyinSearch} from "../agentkey/douyin-parser.ts";
+import {agentKeyRouteFor,douyinSearchInput,douyinSearchRoute} from "../agentkey/douyin-contract.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -31,21 +33,11 @@ function publicationTime(operation:string,record:Record<string,unknown>):Date|nu
 export async function importDouyinResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
-    const operation=DouyinOperationId.safeParse(executionInput.operationId);
-    if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="douyin"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Douyin result");
-    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"douyin",operation.data);
-    const shape=douyinOperations[operation.data].shape;
-    if(!["douyin_account","douyin_work"].includes(snapshot.kind))throw new UnsupportedReplacement("Account ranking links require explicit stable identity verification");
-    const payload=shape==="accounts"||shape==="works"?{list:[snapshot.data.record]}:shape==="work_rank"||shape==="growth_rank"?[snapshot.data.record]:snapshot.data.record;
-    const parsed=parseDouyin(operation.data,payload,executionInput.parameters)[0];
-    if(!parsed||parsed.kind!==snapshot.kind)throw new UnsupportedReplacement("Result kind does not match its received operation record");
-    const accountOrigin=executionInput.origin?.kind==="account";
-    if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
-    const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    const {parsed,origin,sourceDiscoveredAt,operationId}=snapshot.provider==="agentkey"?await agentKeyEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="douyin_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as DouyinIdentity,identity:DouyinIdentity={...received};
+    if(snapshot.provider==="agentkey"&&(!received.uid&&!received.secUserId||!parsed.data.workId))throw new UnsupportedReplacement("A received stable author and work identity is required");
     if(account&&input.supplement)throw new UnsupportedReplacement("Account import requires received stable IDs");
     for(const kind of ["uid","secUserId"] as const){const extra=input.supplement?.[kind];if(extra&&received[kind]&&extra!==received[kind])throw new StaleOperationError("Received stable identity cannot be replaced");if(extra)identity[kind]=extra;}
     const original=typeof parsed.data.url==="string"?parsed.data.url:null,url=original??input.supplement?.url;
@@ -79,10 +71,10 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
     for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"douyin",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
-      const body=record.content??record.aweme_desc,publishedAt=publicationTime(operation.data,record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
-      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
+      const body=record.content??record.aweme_desc??(snapshot.provider==="agentkey"?record.desc:undefined),publishedAt=snapshot.provider==="agentkey"?(typeof parsed.data.publishedAt==="string"?new Date(parsed.data.publishedAt):null):publicationTime(operationId,record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
+      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const author=record.authorName??record.accountName??record.user_nickname??record.userName;
-      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`douyin:aweme_id:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??record.create_time??null,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`douyin:aweme_id:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.publishTime??record.create_time??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({douyinImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
@@ -90,4 +82,34 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
     return {resultId,sourceId,articleId};
   };
   return db?execute(db):sql.begin(execute);
+}
+
+async function redfoxEvidence(tx:Tx,snapshot:any){
+  const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    const operation=DouyinOperationId.safeParse(executionInput.operationId);
+    if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="douyin"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Douyin result");
+    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"douyin",operation.data);
+    const shape=douyinOperations[operation.data].shape;
+    if(!["douyin_account","douyin_work"].includes(snapshot.kind))throw new UnsupportedReplacement("Account ranking links require explicit stable identity verification");
+    const payload=shape==="accounts"||shape==="works"?{list:[snapshot.data.record]}:shape==="work_rank"||shape==="growth_rank"?[snapshot.data.record]:snapshot.data.record;
+    const parsed=parseDouyin(operation.data,payload,executionInput.parameters)[0];
+    if(!parsed||parsed.kind!==snapshot.kind)throw new UnsupportedReplacement("Result kind does not match its received operation record");
+    const accountOrigin=executionInput.origin?.kind==="account";
+    if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    return {parsed,origin,sourceDiscoveredAt,operationId:operation.data};
+}
+
+async function agentKeyEvidence(tx:Tx,snapshot:any){
+  requireLiveResult(snapshot,"douyin_work");
+  if(!agentKeyRouteFor(snapshot)||snapshot.receipt_model!==douyinSearchRoute.tool||!["received","completed"].includes(snapshot.receipt_status)||snapshot.kind!=="douyin_work")throw new UnsupportedReplacement("Not a confirmed AgentKey Douyin result");
+  const [summary]=await tx`SELECT * FROM operation_results WHERE id=${Number(snapshot.data.querySummaryId)||0} AND run_id=${snapshot.run_id} AND step_version=${snapshot.step_version} AND receipt_id=${snapshot.receipt_id} AND kind='query_summary'`;
+  requireLiveResult(summary,"query_summary");
+  if(!summary||summary.data.provider!=="agentkey"||summary.data.tool!==douyinSearchRoute.tool)throw new UnsupportedReplacement("Missing AgentKey page receipt evidence");
+  const query=douyinSearchInput.parse(summary.data.query);
+  if(snapshot.receipt_purpose!==douyinSearchRoute.operationKey||snapshot.receipt_subject!==`operation:${snapshot.run_id}`||snapshot.receipt_service!==(snapshot.input.mode==="collection"?"agentkey.collect":"agentkey.query")||stableJson(snapshot.receipt_request?.params)!==stableJson(query))throw new UnsupportedReplacement("AgentKey receipt does not prove this page query");
+  const page=parseDouyinSearch(snapshot.receipt_response,query);
+  const parsed=page.candidates.find(item=>item.itemKey===snapshot.item_key);
+  if(!parsed||stableJson({...snapshot.data,pendingReason:undefined,querySummaryId:undefined})!==stableJson(parsed.data))throw new UnsupportedReplacement("AgentKey result differs from its received page");
+  return {parsed,origin:undefined,sourceDiscoveredAt:new Date(snapshot.received_at??snapshot.created_at),operationId:"OWIBYU1V"};
 }
