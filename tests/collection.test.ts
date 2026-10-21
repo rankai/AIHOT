@@ -7,8 +7,8 @@ import { after, before, test } from "node:test";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
-import { collectSource } from "@aihot/backend/sources/collect";
-import { checkMpAccount } from "@aihot/backend/sources/mp";
+import { collectNative } from "./native-helpers.ts";
+import { migrateNativeSources } from "@aihot/backend/sources/native-migration";
 
 const T = tag();
 const X_SOURCE = `test-x-${T}`;
@@ -47,6 +47,7 @@ process.env.SOCIALDATA_API_KEY = "test-key";
 process.env.DAJIALA_BASE_URL = dajiala.url;
 process.env.DAJIALA_KEY = "test-key";
 config.allowPrivateNetworkFetch = true;
+process.env.COLLECT_ENABLED = "true";
 
 let savedBudgets: Array<{ service: string; per_minute: number; per_hour: number; per_day: number }> = [];
 before(async () => {
@@ -57,6 +58,7 @@ before(async () => {
                     ${sql.json({ initializedAt: new Date().toISOString(), lastTweetId: String(WATERMARK) })}, '2100-01-01'),
                    (${MP_SOURCE}, 'Test mp', 'mp_account', ${sql.json({ ghid: `gh_${T}` })}, 'T1', 'editorial',
                     ${sql.json({ lastCheckedAt: new Date().toISOString() })}, '2100-01-01')`;
+  await migrateNativeSources({ oldWritersStopped: true, sourceIds: [X_SOURCE, MP_SOURCE] });
 });
 after(async () => {
   for (const b of savedBudgets) await sql`UPDATE budgets SET per_minute = ${b.per_minute}, per_hour = ${b.per_hour}, per_day = ${b.per_day} WHERE service = ${b.service}`;
@@ -68,20 +70,20 @@ after(async () => {
 
 test("an X search longer than one run is read to the old watermark over the next runs", async () => {
   const stored = async () => Number((await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM articles WHERE source_id = ${X_SOURCE}`)[0]!.n);
-  const cursor = async () => (await sql<{ cursor: { lastTweetId: string; xBacklog?: unknown[] } }[]>`SELECT cursor FROM sources WHERE id = ${X_SOURCE}`)[0]!.cursor;
+  const cursor = async () => (await sql<{ cursor: { lastTweetId: string; xBacklog?: unknown[] } }[]>`SELECT progress AS cursor FROM collection_subscriptions WHERE control_source_id = ${X_SOURCE}`)[0]!.cursor;
 
-  const first = await collectSource(X_SOURCE, { force: true });
-  assert.equal(first.status, "ok");
+  const first = await collectNative(X_SOURCE);
+  assert.equal(first.status, "completed");
   assert.equal(await stored(), 400, "a run reads its own pages and ten more of the stretch left over");
   assert.equal((await cursor()).lastTweetId, String(BASE + 550n), "the watermark moves to the newest post");
   assert.equal((await cursor()).xBacklog?.length, 1, "the unread stretch is kept for the next run");
-  const [run] = await sql<{ detail: { truncated: boolean; backlog: number } }[]>`SELECT detail FROM fetch_runs WHERE source_id = ${X_SOURCE} ORDER BY id DESC LIMIT 1`;
-  assert.deepEqual([run!.detail.truncated, run!.detail.backlog], [true, 1], "the admin sees the stretch still to read");
+  assert.equal((await sql`SELECT count(*)::int AS n FROM operation_results WHERE run_id = ${first.id} AND kind = 'page'`)[0]!.n, 20);
 
-  const second = await collectSource(X_SOURCE, { force: true });
-  assert.equal(second.status, "ok");
+
+  const second = await collectNative(X_SOURCE);
+  assert.equal(second.status, "completed");
   assert.equal(await stored(), 450, "every post between the old watermark and the newest is stored");
-  assert.equal((await cursor()).xBacklog, undefined, "nothing is left to read");
+  assert.equal((await cursor()).xBacklog?.length, 0, "nothing is left to read");
   assert.equal(socialdata.hits(), 20 + 1 + 3, "no page is requested twice");
 });
 
@@ -90,18 +92,18 @@ test("a WeChat body that failed for a passing reason is fetched on the next chec
     (await sql<{ body_status: string; revision: number; retry: { attempts: number } | null }[]>`
       SELECT body_status, revision, raw->'dajiala'->'bodyRetry' AS retry FROM articles WHERE source_id = ${MP_SOURCE}`)[0]!;
 
-  const first = await checkMpAccount(MP_SOURCE, "manual");
-  assert.equal(first.status, "ok");
+  const first = await collectNative(MP_SOURCE);
+  assert.equal(first.status, "completed");
   assert.deepEqual({ ...(await article()) }, { body_status: "none", revision: 1, retry: { attempts: 1, error: "dajiala HTTP 503" } });
 
-  const second = await checkMpAccount(MP_SOURCE, "manual");
-  assert.equal(second.status, "ok");
+  const second = await collectNative(MP_SOURCE);
+  assert.equal(second.status, "completed");
   assert.equal(bodyCalls, 2, "the body is asked for once more");
   const now = await article();
   assert.deepEqual([now.body_status, now.revision, now.retry], ["ok", 2, null], "the body arrives as a new revision and retrying stops");
   const [queued] = await sql<{ processing_state: string }[]>`SELECT processing_state FROM articles WHERE source_id = ${MP_SOURCE}`;
   assert.equal(queued!.processing_state, "new", "the article goes back to analysis");
 
-  await checkMpAccount(MP_SOURCE, "manual");
+  await collectNative(MP_SOURCE);
   assert.equal(bodyCalls, 2, "a body already stored is not bought again");
 });

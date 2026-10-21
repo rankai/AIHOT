@@ -9,6 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { config, credential } from "../config.ts";
 import { sql } from "../db.ts";
+import { ASSET_BACKUP_LOCK } from "./assets.ts";
 
 const run = promisify(execFile);
 const KEEP_LOCAL = 3;
@@ -74,29 +75,46 @@ async function upload(s: Store, key: string, file: string, sha: string, size: nu
   if (!res.ok) throw new Error(`backup upload ${key}: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
 }
 
+/** A dedicated connection holds a session lock, not a long-running business transaction. */
+export async function withAssetBackupLock<T>(work: () => Promise<T>): Promise<T> {
+  const connection = await sql.reserve();
+  let locked = false;
+  try {
+    await connection`SELECT pg_advisory_lock(${ASSET_BACKUP_LOCK})`;
+    locked = true;
+    return await work();
+  } finally {
+    try { if (locked) await connection`SELECT pg_advisory_unlock(${ASSET_BACKUP_LOCK})`; }
+    finally { connection.release(); }
+  }
+}
+
 export async function runBackup(now = new Date()) {
   const s = store();
   const dir = path.join(config.dataDir, "backups");
   await mkdir(dir, { recursive: true });
   const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, "");
   const dump = path.join(dir, `aihot-${stamp}.dump`);
-  await run("pg_dump", ["--format=custom", "--compress=6", "--no-owner", "--file", dump, config.databaseUrl], { maxBuffer: 16 * 1024 * 1024 });
-  // Verify before shipping: the archive must list cleanly.
-  await run("pg_restore", ["--list", dump], { maxBuffer: 64 * 1024 * 1024 });
   const files = path.join(dir, `aihot-files-${stamp}.tar.gz`);
-  // An empty archive only when there is nothing to keep. A failure to read or pack existing files is
-  // tried once more and otherwise reported: the database dump still ships, but the run fails.
-  const kept: string[] = [];
-  // Feedback screenshots waiting to be forwarded are not kept: the privacy notice keeps only Feishu image keys.
-  for (const d of ["uploads"]) if (await stat(path.join(config.dataDir, d)).then((i) => i.isDirectory(), () => false)) kept.push(d);
-  let filesError: string | null = null;
-  if (!kept.length) await run("tar", ["-czf", files, "-T", "/dev/null"]);
-  else {
-    const pack = () => run("tar", ["-czf", files, "-C", config.dataDir, ...kept]);
-    await pack().catch(() => pack()).catch((error: unknown) => {
-      filesError = String(error instanceof Error ? error.message : error).slice(0, 300);
-    });
-  }
+  const filesError = await withAssetBackupLock(async () => {
+    await run("pg_dump", ["--format=custom", "--compress=6", "--no-owner", "--file", dump, config.databaseUrl], { maxBuffer: 16 * 1024 * 1024 });
+    // Verify before shipping: the archive must list cleanly.
+    await run("pg_restore", ["--list", dump], { maxBuffer: 64 * 1024 * 1024 });
+    // An empty archive only when there is nothing to keep. A failure to read or pack existing files is
+    // tried once more and otherwise reported: the database dump still ships, but the run fails.
+    const kept: string[] = [];
+    // Feedback screenshots waiting to be forwarded are not kept: the privacy notice keeps only Feishu image keys.
+    for (const d of ["uploads"]) if (await stat(path.join(config.dataDir, d)).then((i) => i.isDirectory(), () => false)) kept.push(d);
+    let filesError: string | null = null;
+    if (!kept.length) await run("tar", ["-czf", files, "-T", "/dev/null"]);
+    else {
+      const pack = () => run("tar", ["-czf", files, "-C", config.dataDir, ...kept]);
+      await pack().catch(() => pack()).catch((error: unknown) => {
+        filesError = String(error instanceof Error ? error.message : error).slice(0, 300);
+      });
+    }
+    return filesError;
+  });
   const out: Array<{ key: string; bytes: number; sha256: string }> = [];
   const bj = new Date(now.getTime() + 8 * 3600_000);
   const prefixes = ["daily"];

@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useRevalidator, useRouteLoaderData } from "react-router";
 import { toast } from "./toast";
+import { prepareAdminBody } from "./action-body";
 
 export interface AdminMe {
   name: string;
@@ -30,26 +31,33 @@ export function useAdminAction() {
   const me = useAdminMe();
   const revalidator = useRevalidator();
   const [pending, setPending] = useState<string | null>(null);
-  const keys = useRef(new Map<string, string>());
+  const keys = useRef(new Map<string, { key: string; fingerprint: string }>());
+  const submitting = useRef(false);
 
   const run = useCallback(
     async <T = unknown>(
       method: "POST" | "PATCH" | "PUT" | "DELETE",
       path: string,
       body?: unknown,
-      opts: { success?: string; label?: string; revalidate?: boolean } = {},
+      opts: { success?: string; label?: string; revalidate?: boolean; signal?: AbortSignal } = {},
     ): Promise<T | null> => {
+      if (submitting.current) return null;
       const label = opts.label ?? `${method} ${path}`;
       // The same command retried after a failure keeps its key, so paid work is not repeated.
-      const key = keys.current.get(label) ?? newKey();
-      keys.current.set(label, key);
+      const prepared = prepareAdminBody(body);
+      const fingerprint = JSON.stringify([method, path, prepared.fingerprint]);
+      const previous = keys.current.get(label);
+      const key = previous?.fingerprint === fingerprint ? previous.key : newKey();
+      keys.current.set(label, { key, fingerprint });
+      submitting.current = true;
       setPending(label);
       try {
         const res = await fetch(path, {
           method,
           credentials: "same-origin",
-          headers: { "content-type": "application/json", "x-csrf-token": me.csrf, "idempotency-key": key },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          headers: { ...(prepared.json ? { "content-type": "application/json" } : {}), "x-csrf-token": me.csrf, "idempotency-key": key },
+          body: prepared.body,
+          signal: opts.signal,
         });
         if (res.status === 401) {
           window.location.href = `/api/auth/login?return=${encodeURIComponent(window.location.pathname)}`;
@@ -64,10 +72,15 @@ export function useAdminAction() {
         // null means failure to callers; an empty success (204) is an empty object.
         return (json ?? {}) as T;
       } catch (error) {
+        if (opts.signal?.aborted) {
+          toast("上传已取消，文件与输入已保留，可重试", "info");
+          return null;
+        }
         const message = error instanceof AdminError ? error.message : "网络错误，请稍后再试";
         toast(error instanceof AdminError && error.status === 409 ? `${message}` : message, "error");
         return null;
       } finally {
+        submitting.current = false;
         setPending(null);
       }
     },

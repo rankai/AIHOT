@@ -1,10 +1,14 @@
 import { SITE } from "@aihot/industry/site";
-import { Form, Link, useNavigate, useSearchParams } from "react-router";
+import { Form, Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/sources";
 import { adminGet } from "../../lib/admin.server";
 import { num } from "../../features/admin/format";
 import { HEALTH_LABEL, KIND_LABEL, MODE_LABEL } from "../../features/admin/labels";
 import { AdminPage, Badge, ButtonLink, Card, DataTable, Dot, FilterChips, healthTone, Input, Pager, Select, Stat, Time } from "../../features/admin/ui";
+import { CollectionSubscriptions } from "../../features/admin/collection-subscriptions";
+import { collectionOperations, collectionSeedFromState, collectionSubscriptionsHref } from "../../features/admin/collection-subscription-data";
+import type { CollectionSubscription } from "../../features/admin/collection-subscription-types";
+import type { PlatformOperation } from "../../features/admin/platform-types";
 
 interface SourceRow {
   id: string;
@@ -33,21 +37,39 @@ interface SourcesData {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  return adminGet<SourcesData>(request, `/api/admin/sources${url.search}`);
+  if (url.searchParams.get("view") === "collections") {
+    const [subscriptions, operations] = await Promise.all([
+      adminGet<CollectionSubscription[]>(request, "/api/admin/redfox/collections"),
+      adminGet<PlatformOperation[]>(request, "/api/admin/redfox/operations"),
+    ]);
+    return { view: "collections" as const, subscriptions, operations, requestedId: Number(url.searchParams.get("subscription")) || null };
+  }
+  return { view: "sources" as const, ...await adminGet<SourcesData>(request, `/api/admin/sources${url.search}`) };
 }
 
 export const meta: Route.MetaFunction = () => [{ title: `信源 · ${SITE.name} 后台` }];
 
 export default function Sources({ loaderData }: Route.ComponentProps) {
-  const { rows, totals, page } = loaderData;
   const [sp] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
+  const views = <nav className="mb-5 flex flex-wrap gap-2" aria-label="信源管理视图"><ButtonLink to="/admin/sources" tone={loaderData.view === "sources" ? "primary" : "secondary"}>信源列表</ButtonLink><ButtonLink to={collectionSubscriptionsHref()} tone={loaderData.view === "collections" ? "primary" : "secondary"}>采集任务</ButtonLink></nav>;
+  if (loaderData.view === "collections") {
+    const incoming = collectionSeedFromState(location.state);
+    const seed = incoming && collectionOperations(loaderData.operations).some(operation => operation.id === incoming.operationId) ? incoming : null;
+    return <AdminPage title="信源" subtitle="采集任务统一在此配置、启停与查看运行。已有信源的主订阅、参与方式与公开权限在对应信源详情中管理。" actions={<ButtonLink to="/admin/sources/new">新建信源</ButtonLink>}>
+      {views}
+      <CollectionSubscriptions key={location.key} seed={seed} subscriptions={loaderData.subscriptions} operations={loaderData.operations} requestedId={loaderData.requestedId} />
+    </AdminPage>;
+  }
+  const { rows, totals, page } = loaderData;
   return (
     <AdminPage
       title="信源"
       subtitle="列表按健康度排序：失败的在最前。点进详情可以预览抓取、手动采集、调整频率与参与方式。"
       actions={<ButtonLink to="/admin/sources/new" tone="primary">新建信源</ButtonLink>}
     >
+      {views}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="全部" value={num(totals.total)} />
         <Stat label="启用" value={num(totals.enabled)} />

@@ -1,0 +1,48 @@
+import {tag} from './setup.ts';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {randomUUID} from 'node:crypto';
+import {before,after,test} from 'node:test';
+import {sql,closeDb} from '@aihot/backend/db';
+import {config} from '@aihot/backend/config';
+import {stopBoss} from '@aihot/backend/jobs/queue';
+import {createSubscription} from '@aihot/backend/sources/subscriptions';
+import {createNativeCollection,createNativeBatch,createNativePreview} from '@aihot/backend/sources/native-commands';
+import {createRun,resumeRun,abandonRun} from '@aihot/backend/providers/operations/store';
+import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
+import {sourceDetail} from '@aihot/backend/admin/sources';
+let body='{broken',status=200,hits=0,disconnect=false;
+const server=http.createServer((req,res)=>{req.resume();req.on('end',()=>{hits++;if(disconnect){req.socket.destroy();return;}res.writeHead(status,{'Content-Type':'application/json'});res.end(body);});});
+let budgets:Record<string,unknown>[]=[];
+before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.SOCIALDATA_BASE_URL=base;process.env.REDFOX_TEST_BASE_URL=base;process.env.SOCIALDATA_API_KEY='fake';process.env.REDFOX_API_KEY='fake';process.env.COLLECT_ENABLED='true';process.env.REDFOX_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;budgets=await sql`SELECT * FROM budgets WHERE service IN ('socialdata','redfox.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('socialdata','redfox.collect')`;});
+after(async()=>{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute as number},per_hour=${b.per_hour as number},per_day=${b.per_day as number} WHERE service=${b.service as string}`;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+async function source(provider='socialdata'){const id=tag(),handle='s'+randomUUID().replaceAll('-','').slice(0,12),restId=String(BigInt('0x'+randomUUID().replaceAll('-','').slice(0,20))),conf={query:`from:${handle} -filter:replies`,restId};await sql`INSERT INTO sources(id,name,kind,config,participation_mode,fail_count,last_error,health) VALUES (${id},'Synthetic health','x_search',${sql.json(conf)},'isolated',2,'Previous confirmed rejection','degraded')`;const sub=await sql.begin(tx=>createSubscription(tx,{sourceId:id,provider,platform:'x',operationKey:provider==='redfox'?'redfox.x.timeline':'x.search',contractVersion:1,config:conf,enabled:true,intervalMinutes:30}));return {id,sub,conf,restId};}
+const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
+const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
+const resume=async(id:number)=>{const r=await row(id);await sql.begin(tx=>resumeRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation}));};
+const abandon=async(id:number)=>{const r=await row(id);await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'Synthetic cleanup'));};
+async function redfox(s:Awaited<ReturnType<typeof source>>){return sql.begin(tx=>createRun(tx,{actor:'test',commandKey:tag(),provider:'redfox',operationKey:'redfox.x.timeline',contractVersion:1,subscriptionIds:[s.sub],stepKey:'redfox.x.page',input:{mode:'collection',source:{id:s.id,config:s.conf,cursor:{}},restId:s.restId,window:tag(),startedAt:new Date().toISOString()},limits:{steps:120,retries:3}}));}
+test('source history includes each shared formal run once, keeps legacy and excludes previews after release',async()=>{
+ const a=await source(),b=await source();await sql`UPDATE collection_subscriptions SET progress=' {"lastTweetId":"100"}'::jsonb WHERE id IN (${a.sub},${b.sub})`;const batch=await createNativeBatch([a.id,b.id],{actor:'test',key:tag(),shardKey:tag()});assert.equal((await row(batch.id)).subscription_id,null);
+ const [stored]=await sql`SELECT * FROM sources WHERE id=${a.id}`;const preview=await createNativePreview(stored as never,'test',tag());await sql`INSERT INTO fetch_runs(source_id,status,found_count,new_count) VALUES (${a.id},'ok',4,2)`;
+ for(const s of [a,b]){const detail=await sourceDetail(s.id);assert.equal(detail!.runs.filter(r=>r.kind==='operation'&&r.id===batch.id).length,1);assert.equal(detail!.runs.some(r=>r.kind==='operation'&&r.id===preview.id),false);assert.equal(detail!.activeOperation!.id,batch.id);const r=detail!.runs.find(r=>r.kind==='operation')!;assert.equal(r.started_at,null);assert.equal(r.new_count,null);assert.equal(r.time_basis,'operation_created_at');assert.equal(r.provider,'socialdata');}
+ assert.equal((await sourceDetail(a.id))!.runs.find(r=>r.kind==='fetch')!.found_count,4);await abandon(batch.id);const after=await sourceDetail(a.id);assert.equal(after!.activeOperation,null);assert.ok(after!.runs.some(r=>r.kind==='operation'&&r.id===batch.id));await abandon(preview.id);
+});
+test('native bad received JSON replays without health failure or new external request',async()=>{
+ status=200;body='{broken';const s=await source(),run=await createNativeCollection(s.id,{actor:'test',key:tag(),reason:'schedule'});const initial=hits;await step(run.id);assert.equal((await row(run.id)).status,'needs_review');await resume(run.id);await step(run.id);assert.equal(hits,initial+1);const [current]=await sql`SELECT * FROM sources WHERE id=${s.id}`;assert.equal(current!.fail_count,2);assert.equal(current!.last_error,'Previous confirmed rejection');const detail=await sourceDetail(s.id);assert.equal(detail!.activeOperation!.status,'needs_review');assert.ok(detail!.activeOperation!.waitReason);await abandon(run.id);
+});
+test('Redfox explicit HTTP and business rejection counts each receipt attempt once, success resets eligible source',async()=>{
+ const s=await source('redfox');status=403;body=JSON.stringify({code:403});const first=await redfox(s);await step(first.id);const [failed]=await sql`SELECT * FROM sources WHERE id=${s.id}`;assert.equal(failed!.fail_count,3);const at=failed!.last_fetch_at.toISOString(),initial=hits;await resume(first.id);await step(first.id);assert.equal(hits,initial);const [replayed]=await sql`SELECT * FROM sources WHERE id=${s.id}`;assert.equal(replayed!.fail_count,3);assert.equal(replayed!.last_fetch_at.toISOString(),at);await abandon(first.id);
+ status=200;body=JSON.stringify({code:4001});const second=await redfox(s);await step(second.id);await resume(second.id);await step(second.id);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,4);await abandon(second.id);
+ body=JSON.stringify({code:2000,data:{user:{userId:s.restId,username:'synthetic'},pinned:null,timeline:[],nextCursor:null}});const success=await redfox(s);await step(success.id);assert.equal((await row(success.id)).status,'completed');const [ok]=await sql`SELECT fail_count,last_error,health FROM sources WHERE id=${s.id}`;assert.equal(ok!.fail_count,0);assert.equal(ok!.last_error,null);assert.equal(ok!.health,'ok');
+});
+test('budget and uncertain transport retain prior health and expose waiting state separately',async()=>{
+ const s=await source('redfox');await sql`UPDATE budgets SET per_day=0 WHERE service='redfox.collect'`;const run=await redfox(s),initial=hits;await step(run.id);assert.equal(hits,initial);assert.equal((await sourceDetail(s.id))!.activeOperation!.status,'waiting');assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,2);await abandon(run.id);await sql`UPDATE budgets SET per_day=100000 WHERE service='redfox.collect'`;
+ status=200;body='{broken';const malformed=await redfox(s);await step(malformed.id);await resume(malformed.id);await step(malformed.id);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,2);await abandon(malformed.id);
+ disconnect=true;try{const uncertain=await redfox(s);await step(uncertain.id);assert.equal((await row(uncertain.id)).status,'waiting');const [current]=await sql`SELECT fail_count,last_error FROM sources WHERE id=${s.id}`;assert.equal(current!.fail_count,2);assert.equal(current!.last_error,'Previous confirmed rejection');await abandon(uncertain.id);}finally{disconnect=false;}
+});
+test('a genuinely new native rejected attempt counts again, preview and stale member never change health',async()=>{
+ status=403;body=JSON.stringify({message:'Synthetic refusal'});const s=await source();const run=await createNativeCollection(s.id,{actor:'test',key:tag(),reason:'schedule'});await step(run.id);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,3);const first=await row(run.id);await resume(run.id);await step(run.id);assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${first.current_receipt_id}`)[0]!.attempts,2);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,4);await abandon(run.id);
+ const [stored]=await sql`SELECT * FROM sources WHERE id=${s.id}`;const preview=await createNativePreview(stored as never,'test',tag());await step(preview.id);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${s.id}`)[0]!.fail_count,4);await abandon(preview.id);
+ const changed=await source('redfox'),stale=await redfox(changed),initial=hits;await sql`UPDATE sources SET execution_version=execution_version+1 WHERE id=${changed.id}`;await step(stale.id);assert.equal(hits,initial);assert.equal((await sql`SELECT fail_count FROM sources WHERE id=${changed.id}`)[0]!.fail_count,2);
+});

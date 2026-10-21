@@ -272,6 +272,7 @@ export function ReasonDialog({
   confirmLabel = "确认",
   danger,
   requireReason = true,
+  showOptionalReason = true,
   children,
   onClose,
   onSubmit,
@@ -283,6 +284,7 @@ export function ReasonDialog({
   confirmLabel?: string;
   danger?: boolean;
   requireReason?: boolean;
+  showOptionalReason?: boolean;
   children?: ReactNode;
   onClose: () => void;
   onSubmit: (reason: string) => Promise<boolean | void> | boolean | void;
@@ -290,30 +292,37 @@ export function ReasonDialog({
 }) {
   const [reason, setReason] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     setReason("");
-    const t = setTimeout(() => ref.current?.focus(), 60);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const t = setTimeout(() => {
+      if (ref.current) ref.current.focus();
+      else formRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    }, 60);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     window.addEventListener("keydown", onKey);
     return () => {
       clearTimeout(t);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose]);
+  }, [open]);
   return (
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-[75] flex items-end justify-center p-3 sm:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <div className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" onClick={onClose} />
           <motion.form
+            ref={formRef}
             role="dialog"
             aria-modal="true"
             initial={{ y: 16, scale: 0.98, opacity: 0 }}
             animate={{ y: 0, scale: 1, opacity: 1 }}
             exit={{ y: 10, scale: 0.98, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
-            className="relative w-full max-w-lg rounded-sheet bg-raised p-5 shadow-2xl ring-1 ring-line-strong"
+            className="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-sheet bg-raised p-5 shadow-2xl ring-1 ring-line-strong"
             onSubmit={async (e) => {
               e.preventDefault();
               if (requireReason && !reason.trim()) return;
@@ -324,11 +333,11 @@ export function ReasonDialog({
             <h2 className="text-[16px] font-semibold text-ink">{title}</h2>
             {description && <div className="mt-1.5 text-[13px] leading-relaxed text-ink-3">{description}</div>}
             {children && <div className="mt-4 space-y-3">{children}</div>}
-            <div className="mt-4">
+            {(requireReason || showOptionalReason) && <div className="mt-4">
               <Field label={requireReason ? "原因（写进审计记录）" : "备注（可选）"}>
                 <Textarea ref={ref} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={requireReason ? "为什么做这个改动" : ""} rows={2} />
               </Field>
-            </div>
+            </div>}
             <div className="mt-5 flex justify-end gap-2">
               <Button tone="ghost" onClick={onClose}>取消</Button>
               <Button type="submit" tone={danger ? "danger" : "primary"} busy={busy} disabled={requireReason && !reason.trim()}>
