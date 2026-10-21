@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { collectionConfig, collectionDetailOperations, collectionDetailPriceNote, collectionDraft, collectionLegacyDetail, collectionPreviewBody } from "../app/features/admin/collection-subscription-data.ts";
+import { subscriptionExecutionChanges, type CollectionSubscription } from "../app/features/admin/collection-subscription-types.ts";
+import type { PlatformOperation } from "../app/features/admin/platform-types.ts";
+const target = (operationId: string) => ({ operationId, label: `${operationId}详情库`, fields: operationId === "LLCI8QTE" ? [{ name: "page", label: "页码", type: "integer" as const, required: true }] : [], price: { amount: 0, currency: "CNY", basis: "estimated" as const } });
+const operation: PlatformOperation = { id: "PW97QFBS", platform: "wechat", label: "优质搜索", purpose: "query", schedulableType: "search", fields: [{ name: "keyword", label: "关键词", type: "string", required: true }], collectionCapabilities: { detailEnrichment: true, detailOperations: [target("XEO0QQNF"), target("I3CIBRI2")] } };
+const draft = () => ({ ...collectionDraft(operation), name: "订阅", values: { keyword: "原参数" }, enrichDetails: true });
+const current: CollectionSubscription = { id: 3, platform: "weibo", operationId: "TXQPVGJG", name: "旧微博", parameters: {}, enabled: false, intervalMinutes: 30, enrichDetails: true, detailOperationId: null, detailPage: null, limits: { pages: 3, items: 100, details: 20 }, editVersion: 1, executionVersion: 1, nextRunAt: null, activeRun: null };
+test("new enrichment always requires explicit metadata target without choosing first; disabled commands strip all detail fields", () => {
+  const initial = draft(); assert.equal(initial.detailOperationId, ""); assert.equal(initial.detailPage, ""); assert.throws(() => collectionConfig(operation, initial));
+  const config = collectionConfig(operation, { ...initial, detailOperationId: "I3CIBRI2", detailPage: "99" });
+  assert.equal(config.detailOperationId, "I3CIBRI2"); assert(!Object.hasOwn(config, "detailPage")); assert.deepEqual(config.parameters, { keyword: "原参数" });
+  const disabled = collectionConfig(operation, { ...initial, enrichDetails: false, detailOperationId: "XEO0QQNF", detailPage: "2" });
+  assert(!Object.hasOwn(disabled, "detailOperationId")); assert(!Object.hasOwn(disabled, "detailPage"));
+  assert.throws(() => collectionConfig(operation, { ...initial, detailOperationId: "unmapped" }));
+  assert.throws(() => collectionConfig({ ...operation, collectionCapabilities: { detailEnrichment: true } }, { ...initial, detailOperationId: "XEO0QQNF" }));
+});
+test("LL page has no default and accepts only explicit safe integers, with no invented positive minimum", () => {
+  const car: PlatformOperation = { ...operation, id: "CI7VW144", platform: "qichezhijia", fields: [{ name: "sourceType", label: "类型", type: "string", required: true }], collectionCapabilities: { detailEnrichment: true, detailOperations: [target("TE6AGWAF"), target("LLCI8QTE")] } };
+  const article = { ...collectionDraft(car), name: "文章", enrichDetails: true, values: { sourceType: "article" }, detailOperationId: "LLCI8QTE" };
+  for (const detailPage of ["", " ", "1.5", "9007199254740992", "NaN"]) assert.throws(() => collectionConfig(car, { ...article, detailPage }));
+  for (const detailPage of ["0", "-1", "2"]) assert.equal(collectionConfig(car, { ...article, detailPage }).detailPage, Number(detailPage));
+  assert.deepEqual(collectionDetailOperations(car, { sourceType: "video" }).map(t => t.operationId), ["TE6AGWAF"]);
+  assert.deepEqual(collectionDetailOperations(car, { sourceType: "club" }), []);
+  assert.throws(() => collectionConfig(car, { ...article, values: { sourceType: "video" }, detailPage: "1" }));
+  const yiche = { ...car, id: "YIGCY5US", collectionCapabilities: { detailEnrichment: true, detailOperations: [target("3BXWEB6Y"), target("VYSP68M2")] } };
+  assert.deepEqual(collectionDetailOperations(yiche, { sourceType: "xinwen" }).map(t => t.operationId), ["VYSP68M2"]);
+  assert.deepEqual(collectionDetailOperations(yiche, { sourceType: "shipin" }).map(t => t.operationId), ["3BXWEB6Y"]);
+});
+test("only existing legacy WB implicit target is initialized as fact; explicit targets/pages remain operation-local drafts", () => {
+  const weibo: PlatformOperation = { ...operation, id: "TXQPVGJG", platform: "weibo", fields: [], collectionCapabilities: { detailEnrichment: true, detailOperations: [target("API_1789098514899")] } };
+  assert.equal(collectionLegacyDetail(weibo, current)?.operationId, "API_1789098514899");
+  const old = collectionDraft(weibo, current); assert.equal(old.detailOperationId, "API_1789098514899");
+  assert.equal(collectionDraft(weibo).detailOperationId, "");
+  assert.equal(collectionLegacyDetail(operation, { ...current, operationId: operation.id, platform: operation.platform }), null);
+  const next = collectionConfig(weibo, { ...old, name: "改名", intervalMinutes: 60 }); assert.equal(subscriptionExecutionChanges(current, next), false);
+  const explicit = { ...current, operationId: operation.id, platform: operation.platform, detailOperationId: "I3CIBRI2", detailPage: 0 };
+  const stored = collectionDraft(operation, explicit); assert.equal(stored.detailPage, "0"); assert.equal(stored.detailOperationId, "I3CIBRI2");
+  const independent = collectionDraft(weibo, explicit); assert.equal(independent.detailOperationId, ""); assert.equal(independent.detailPage, "");
+  stored.detailOperationId = "XEO0QQNF"; assert.equal(explicit.detailOperationId, "I3CIBRI2");
+});
+test("CAS execution impact includes target/page but not period/name; previews remain a single list query only", () => {
+  const config = collectionConfig(operation, { ...draft(), detailOperationId: "XEO0QQNF" });
+  assert.equal(subscriptionExecutionChanges(config, { ...config, name: "改名", intervalMinutes: 60 }), false);
+  assert.equal(subscriptionExecutionChanges(config, { ...config, detailOperationId: "I3CIBRI2" }), true);
+  assert.equal(subscriptionExecutionChanges({ ...config, detailPage: 0 }, { ...config, detailPage: 1 }), true);
+  assert.deepEqual(collectionPreviewBody(operation, { keyword: "条件" }), { operationId: operation.id, parameters: { keyword: "条件" } });
+  assert.match(collectionDetailPriceNote(target("XEO0QQNF")), /0 CNY/); assert.match(collectionDetailPriceNote({ ...target("XEO0QQNF"), price: null }), /未知/);
+  assert.match(collectionDetailPriceNote({ ...target("XEO0QQNF"), price: { amount: null, currency: "CNY", basis: "estimated" } }), /未知/);
+});

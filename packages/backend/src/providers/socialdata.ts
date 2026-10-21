@@ -1,7 +1,7 @@
 // SocialData (X search). Paid per request: every call goes through receipts and the budget.
 import { credential } from "../config.ts";
 import { guardedFetch } from "../lib/http-fetch.ts";
-import { paidRequest, ProviderRejectedError } from "./receipts.ts";
+import { paidRequest, ProviderRejectedError, type PaidRequestOptions } from "./receipts.ts";
 
 export interface SdUser {
   name: string;
@@ -60,13 +60,13 @@ function apiBase(): string {
  * Searches recent tweets. `window` makes the receipt identity time-bucketed so a retry in the same
  * bucket reuses the stored response instead of paying again.
  */
-export async function searchTweets(query: string, opts: { purpose: string; subject: string; window: string; type?: "Latest" | "Top"; cursor?: string | null }): Promise<SearchResult> {
+export async function searchTweets(query: string, opts: { purpose: string; subject: string; window: string; type?: "Latest" | "Top"; cursor?: string | null; paid?: PaidRequestOptions }): Promise<SearchResult> {
   const key = credential("collectors", "SOCIALDATA_API_KEY");
-  if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
   const type = opts.type ?? "Latest";
   const receipt = await paidRequest(
     { service: "socialdata", purpose: opts.purpose, subject: opts.subject, identity: { query, type, cursor: opts.cursor ?? null, window: opts.window }, requestSummary: { query, type } },
     async () => {
+      if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
       const sp = new URLSearchParams({ query, type });
       if (opts.cursor) sp.set("cursor", opts.cursor);
       const res = await guardedFetch(`${apiBase()}/twitter/search?${sp}`, {
@@ -81,13 +81,21 @@ export async function searchTweets(query: string, opts: { purpose: string; subje
         throw new ProviderRejectedError(`socialdata HTTP ${res.status}: ${text.slice(0, 200)}`, res.status, false);
       }
       if (res.status === 429 || res.status >= 500) throw new ProviderRejectedError(`socialdata HTTP ${res.status}`, res.status, true);
-      const json = JSON.parse(text) as { tweets?: SdTweet[]; next_cursor?: string | null };
-      const tweets = json.tweets?.length ?? 0;
+      let json: { tweets?: SdTweet[]; next_cursor?: string | null };
+      try { json = JSON.parse(text); } catch {
+        // A billable answer exists. Persist the exceptional body before rejecting its contract.
+        return { response: { _invalidJson: text } };
+      }
+      const tweets = json && Array.isArray(json.tweets) ? json.tweets.length : 0;
       return { response: json, usage: { tweets }, cost: objectsCost(tweets) };
-    },
+    }, { ...opts.paid, onReceipt: async (tx, id, info) => {
+      if (info.kind === "call" && !key) throw new Error("SOCIALDATA_API_KEY is not configured");
+      await opts.paid?.onReceipt?.(tx, id, info);
+    } },
   );
   const json = receipt.response as { tweets?: SdTweet[]; next_cursor?: string | null };
-  return { tweets: json.tweets ?? [], nextCursor: json.next_cursor ?? null, receiptId: receipt.receiptId, reused: receipt.reused };
+  if (!json || !Array.isArray(json.tweets) || json.tweets.some((t) => !/^\d+$/.test(t.id_str) || !t.user?.screen_name || !t.tweet_created_at)) throw new Error(`Invalid SocialData search response (receipt ${receipt.receiptId})`);
+  return { tweets: json.tweets, nextCursor: json.next_cursor ?? null, receiptId: receipt.receiptId, reused: receipt.reused };
 }
 
 export function tweetText(t: SdTweet): string {

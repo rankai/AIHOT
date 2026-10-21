@@ -12,7 +12,8 @@ import { upsertMaterial } from "@aihot/backend/content/materials";
 import { loadAnalyzeInput } from "@aihot/backend/editorial/input";
 import { renderContext } from "@aihot/backend/editorial/writing";
 import { stopBoss } from "@aihot/backend/jobs/queue";
-import { collectXShard } from "@aihot/backend/sources/collect";
+import { collectBatch } from "./native-helpers.ts";
+import { migrateNativeSources } from "@aihot/backend/sources/native-migration";
 import { tweetToCandidate } from "@aihot/backend/sources/x";
 import type { SdTweet } from "@aihot/backend/providers/socialdata";
 
@@ -46,6 +47,7 @@ const socialdata = await stub((_hit, req) => {
 process.env.SOCIALDATA_BASE_URL = socialdata.url;
 process.env.SOCIALDATA_API_KEY = "test-key";
 config.allowPrivateNetworkFetch = true;
+process.env.COLLECT_ENABLED = "true";
 
 const idOf = async (tweetId: string) => (await sql<{ id: string }[]>`SELECT id FROM articles WHERE identity_key = ${`x:${tweetId}`}`)[0]!.id;
 
@@ -54,6 +56,7 @@ before(async () => {
   await sql`INSERT INTO sources (id, name, kind, config, tier, participation_mode, cursor, next_fetch_at)
             VALUES (${SOURCE}, ${HANDLE}, 'x_search', ${sql.json({ query: `from:${HANDLE} -filter:replies`, searchType: "Latest" })}, 'T1_5', 'editorial',
                     ${sql.json({ initializedAt: new Date().toISOString(), lastTweetId: String(BASE) })}, '2100-01-01')`;
+  await migrateNativeSources({ oldWritersStopped: true, sourceIds: [SOURCE] });
 });
 after(async () => {
   await sql`UPDATE sources SET enabled = false WHERE id = ${SOURCE}`;
@@ -63,7 +66,7 @@ after(async () => {
 });
 
 test("a post that links an X Article waits for extraction, which brings the article in as a new revision", async () => {
-  assert.equal((await collectXShard(`editorial:test-${T}`, [SOURCE])).status, "ok");
+  assert.equal((await collectBatch([SOURCE])).status, "completed");
   const id = await idOf(WITH_ARTICLE);
   const [queued] = await sql<{ name: string }[]>`SELECT name FROM pgboss.job WHERE singleton_key = ${id} ORDER BY created_on DESC LIMIT 1`;
   assert.equal(queued?.name, "content.extract-body", "the article comes before judging");

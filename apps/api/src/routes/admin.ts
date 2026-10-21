@@ -1,5 +1,7 @@
 // /api/admin/*: queries are GET, creation POST, edits PATCH, business commands POST.
 // Every route goes through adminHandler (session + CSRF); manual changes are audited in the modules.
+import { listOperations, operationDetail, operationResults, controlOperation } from "@aihot/backend/providers/operations/read";
+import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { actorOf } from "@aihot/backend/admin/auth";
@@ -16,6 +18,7 @@ import { createSource, fetchNow, listSources, previewSource, sourceDetail, updat
 import { sql } from "@aihot/backend/db";
 import { loadContact } from "@aihot/backend/site/contact";
 import { sendProblem } from "../http/respond.ts";
+import { registerAdminRedfox } from "./admin-redfox.ts";
 import { adminHandler } from "./admin-auth.ts";
 
 type Q = Record<string, string | undefined>;
@@ -33,23 +36,53 @@ function decodeImage(dataUrl: unknown): Buffer {
 }
 
 export function registerAdmin(app: FastifyInstance) {
+  registerAdminRedfox(app);
   // Sources (F18)
   app.get("/api/admin/sources", adminHandler(async (req) => {
     const f = q(req);
     return listSources({ q: f.q, kind: f.kind, health: f.health, mode: f.mode, enabled: f.enabled as "true" | "false" | undefined, page: page(req) });
   }));
   app.post("/api/admin/sources", adminHandler(async (req, _reply, admin) => createSource(body(req), actorOf(admin))));
-  app.post("/api/admin/sources/preview", adminHandler(async (req) => previewSource(body(req) as never)));
+  app.post("/api/admin/sources/preview", adminHandler(async (req, reply, admin) => {
+    const result = await previewSource(body(req) as never, actorOf(admin), typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined);
+    if ("runId" in result) reply.code(202);
+    return result;
+  }));
   app.get("/api/admin/sources/:id", adminHandler(async (req, reply) => orNotFound(req, reply, await sourceDetail(param(req, "id")))));
   app.patch("/api/admin/sources/:id", adminHandler(async (req, reply, admin) => {
     const b = body<{ patch: unknown; version: string; reason?: string }>(req);
     return orNotFound(req, reply, await updateSource(param(req, "id"), b, actorOf(admin)));
   }));
-  app.post("/api/admin/sources/:id/preview", adminHandler(async (req, reply) => {
-    const [s] = await sql`SELECT * FROM sources WHERE id = ${param(req, "id")}`;
-    return s ? previewSource(s as never) : notFound(req, reply);
+  app.post("/api/admin/sources/:id/preview", adminHandler(async (req, reply, admin) => {
+    const detail = await sourceDetail(param(req, "id"));
+    if (!detail) return notFound(req, reply);
+    const result = await previewSource(detail.source as never, actorOf(admin), typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined, true);
+    if ("runId" in result) reply.code(202);
+    return result;
   }));
-  app.post("/api/admin/sources/:id/fetch", adminHandler(async (req, reply, admin) => orNotFound(req, reply, await fetchNow(param(req, "id"), actorOf(admin)))));
+  app.post("/api/admin/sources/:id/fetch", adminHandler(async (req, reply, admin) => {
+    const result = await fetchNow(param(req, "id"), actorOf(admin), typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined);
+    if (result && "runId" in result) reply.code(202);
+    return orNotFound(req, reply, result);
+  }));
+  app.get("/api/admin/operations/runs", adminHandler(async () => ({ rows: await listOperations() })));
+  app.get("/api/admin/operations/runs/:id", adminHandler(async (req, reply) => orNotFound(req, reply, await operationDetail(Number(param(req, "id"))))));
+  app.get("/api/admin/operations/runs/:id/results", adminHandler(async (req, reply) => {
+    const detail = await operationDetail(Number(param(req, "id")));
+    return detail ? operationResults(Number(param(req, "id")), Number(q(req).cursor ?? 0), Number(q(req).limit ?? 100)) : notFound(req, reply);
+  }));
+  app.get("/api/admin/operations/runs/:id/results/export", adminHandler(async (req, reply) => {
+    const runId = z.coerce.number().int().safe().positive().parse(param(req, "id"));
+    const { cursor } = z.object({ cursor: z.coerce.number().int().safe().nonnegative().default(0) }).strict().parse(req.query);
+    // Same 100-result page and DTO as the task detail, without exporting diagnostic receipts.
+    const [run] = await sql`SELECT id FROM operation_runs WHERE id = ${runId}`;
+    if (!run) return notFound(req, reply);
+    const page = await operationResults(runId, cursor, 100);
+    return reply.header("Content-Disposition", `attachment; filename="operation-${runId}-results-${cursor}.json"`)
+      .type("application/json; charset=utf-8").send({ runId, scope: "page", cursor, limit: 100, ...page });
+  }));
+  for (const action of ["resume", "stop", "abandon"] as const) app.post(`/api/admin/operations/runs/:id/${action}`, adminHandler(async (req, _reply, admin) => controlOperation(Number(param(req, "id")), action, body(req), actorOf(admin))));
+
 
   // Content and events (F19)
   app.get("/api/admin/content", adminHandler(async (req) => ({ rows: await searchContent(q(req).q ?? "") })));

@@ -6,7 +6,11 @@ import { sql } from "@aihot/backend/db";
 import { registerSite } from "./routes/site.ts";
 import { registerLeaderboard } from "./routes/leaderboard.ts";
 import { registerOg } from "./routes/og.ts";
+import { registerAdminOperationDetails } from "./routes/admin-operation-details.ts";
+import { registerAdminRedfoxCosts } from "./routes/admin-redfox-costs.ts";
 import { registerAdminAuth } from "./routes/admin-auth.ts";
+import {registerAdminOperationResults} from "./routes/admin-operation-results.ts";
+import { registerAdminAssets } from "./routes/admin-assets.ts";
 import { registerAdmin } from "./routes/admin.ts";
 import { registerIngest } from "./routes/ingest.ts";
 import { registerV1, registerV1Fallbacks } from "./routes/v1.ts";
@@ -67,7 +71,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (FEATURES.leaderboard) registerLeaderboard(app);
   registerOg(app);
   registerAdminAuth(app);
+  registerAdminRedfoxCosts(app);
+  registerAdminOperationDetails(app);
   registerAdmin(app);
+  registerAdminOperationResults(app);
+  app.register(registerAdminAssets);
 
   registerIngest(app);
   registerV1(app);

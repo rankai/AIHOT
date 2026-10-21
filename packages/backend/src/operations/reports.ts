@@ -16,19 +16,20 @@ export async function sourceHealthWeekly(now = Date.now()) {
              count(*) FILTER (WHERE enabled AND health = 'failing')::int AS failing,
              count(*) FILTER (WHERE enabled AND health = 'degraded')::int AS degraded,
              count(*) FILTER (WHERE created_at >= ${since})::int AS added
-      FROM sources`,
+      FROM (SELECT s.created_at, s.health, s.enabled AND coalesce(c.enabled,true) AS enabled
+        FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id = s.id) effective`,
     sql<{ week: number; prev: number; selected: number }[]>`
       SELECT count(*) FILTER (WHERE discovered_at >= ${since})::int AS week,
              count(*) FILTER (WHERE discovered_at >= ${before} AND discovered_at < ${since})::int AS prev,
              (SELECT count(*)::int FROM publications p WHERE p.selected AND p.visibility <> 'withdrawn' AND p.discovered_at >= ${since}) AS selected
       FROM articles WHERE discovered_at >= ${before}`,
     sql<{ name: string; fail_count: number; last_ok_at: Date | null; last_error: string | null }[]>`
-      SELECT name, fail_count, last_ok_at, left(regexp_replace(last_error, '\s+', ' ', 'g'), 80) AS last_error FROM sources
+      SELECT name, fail_count, last_ok_at, left(regexp_replace(last_error, '\s+', ' ', 'g'), 80) AS last_error FROM (SELECT s.name, s.fail_count, s.last_ok_at, s.last_error, s.health, s.enabled AND coalesce(c.enabled,true) AS enabled FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id=s.id) effective
       WHERE enabled AND health = 'failing' ORDER BY fail_count DESC LIMIT 10`,
     // Enabled sources that fetched fine but produced nothing for a week (external and WeChat ones report on their own).
     sql<{ name: string; last: Date | null }[]>`
-      SELECT s.name, max(a.discovered_at) AS last FROM sources s LEFT JOIN articles a ON a.source_id = s.id
-      WHERE s.enabled AND s.health <> 'failing' AND s.kind NOT IN ('external', 'mp_account') AND s.created_at < ${since}
+      SELECT s.name, max(a.discovered_at) AS last FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id=s.id LEFT JOIN articles a ON a.source_id = s.id
+      WHERE s.enabled AND coalesce(c.enabled,true) AND s.health <> 'failing' AND s.kind NOT IN ('external', 'mp_account') AND s.created_at < ${since}
       GROUP BY s.id, s.name HAVING max(a.discovered_at) IS NULL OR max(a.discovered_at) < ${since}
       ORDER BY max(a.discovered_at) NULLS FIRST LIMIT 15`,
   ]);
