@@ -10,6 +10,7 @@ const database = new URL(process.env.DATABASE_URL ?? "postgres://unset/unset").p
 if (!/_(test|ci)$/.test(database)) {
   throw new Error(`Invariant tests write rows: point DATABASE_URL at a throwaway database named *_test or *_ci (got "${database}")`);
 }
+process.env.NODE_ENV ??= "test";
 /** Verify the connected database against the configured throwaway database without exposing credentials. */
 export function assertConfiguredTestDatabase(actualName: string, actualPort?: number) {
   const configured = new URL(process.env.DATABASE_URL ?? "postgres://unset/unset");
