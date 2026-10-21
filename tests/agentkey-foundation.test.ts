@@ -18,9 +18,15 @@ import { BudgetExceededError, paidRequest, ProviderRejectedError, StaleReceiptAt
 const actor = `test-agentkey-${tag()}`;
 const fakeKey = "test-agentkey-foundation-fake-key";
 const envFor = (url: string): NodeJS.ProcessEnv => ({ NODE_ENV: "test", AIHOT_ENVIRONMENT: "test", AGENTKEY_CALLS_ENABLED: "true", AGENTKEY_API_KEY: fakeKey, AGENTKEY_MCP_URL: url });
-const envelope = (items: unknown[] = []) => ({ provider: "TikHub", category: "social/douyin", credits_charged: 0.2, took_ms: 12, request_id: "test-agentkey-request",
-  data: { data: { items, pagination: { offset: 10, search_id: "test-search-session", backtrace: "test-backtrace", has_more: false, next_page: 2 } } } });
-const item = { aweme_id: "7460000000000000001", desc: "测试作品说明", create_time: 1729400000, author: { uid: "1234567890123456789", sec_uid: "test-sec-uid" }, share_url: "https://www.douyin.com/video/7460000000000000001" };
+const envelope = (itemList: unknown[] = [], cursor = 12, hasMore = false) => ({ provider: "TikHub", category: "social/douyin", credits_charged: 0.2, took_ms: 12, request_id: "test-agentkey-request",
+  data: { code: 200, data: { code: 0, msg: "success", data: { itemList, cursor, hasMore } } } });
+const douyinItem = (overrides: Record<string, unknown> = {}) => ({ AwemeInfo: {
+  AwemeId: "7460000000000000001", Desc: "测试作品说明", CreateTime: "1729400000000",
+  Author: { Uid: "1234567890123456789", SecUid: "test-sec-uid", Nickname: "测试作者" },
+  Video: { ItemID: "7460000000000000001", Title: "测试作品说明", CreateTime: "1729400000", Cover: { UrlList: ["https://p3.douyinpic.com/test.jpeg"] } },
+  ...overrides,
+} });
+const item = douyinItem();
 
 type ResponseSpec = { result?: unknown; error?: unknown; status?: number; headers?: Record<string,string>; raw?: string; sse?: boolean; truncated?: boolean; redirect?: string };
 async function mcpStub(answer: () => ResponseSpec) {
@@ -90,7 +96,7 @@ test("configuration rejects disabled/missing credentials and non-allowlisted URL
     assert.equal(server.requests.length, 0);
     assert.equal(agentKeyConfig({ ...good, AGENTKEY_MCP_URL: undefined }).url.href, "https://api.agentkey.app/v1/mcp");
     assert.throws(() => douyinSearchInput.parse({ keyword: "test", sort: "new" }));
-    assert.throws(() => douyinSearchInput.parse({ keyword: "test", page: 201 }));
+    assert.throws(() => douyinSearchInput.parse({ keyword: "test", cursor: -1 }));
   } finally { await server.close(); }
 });
 
@@ -103,10 +109,10 @@ test("real SDK sends Bearer, fixed execute_tool and exact parameters; results an
     assert.equal(calls.length, 1);
     assert.ok(server.requests.every((request) => request.authorization === `Bearer ${fakeKey}`));
     assert.deepEqual(calls[0].body.params, { name: "execute_tool", arguments: { name: douyinSearchRoute.tool,
-      params: { keyword: "测试", backtrace: "", offset: 0, page: 1, search_id: "" } } });
-    assert.equal(result.candidates[0].data.aweme_id, item.aweme_id);
-    assert.deepEqual(result.candidates[0].data.author, item.author);
-    assert.equal(result.candidates[0].data.create_time, item.create_time);
+      params: { keyword: "测试", cursor: 0 } } });
+    assert.equal(result.candidates[0].data.aweme_id, item.AwemeInfo.AwemeId);
+    assert.deepEqual(result.candidates[0].data.author, { uid: item.AwemeInfo.Author.Uid, sec_uid: item.AwemeInfo.Author.SecUid, name: item.AwemeInfo.Author.Nickname });
+    assert.equal(result.candidates[0].data.create_time, 1729400000);
     assert.deepEqual(result.candidates[0].data.missingFields, []);
     const results = await sql`SELECT kind,data,receipt_id FROM operation_results WHERE run_id=${execution.runId} ORDER BY id`;
     assert.deepEqual(results.map((row) => row.kind), ["query_summary", "douyin_work"]);
@@ -126,8 +132,8 @@ test("real SDK sends Bearer, fixed execute_tool and exact parameters; results an
 test("text fallback and SSE preserve integer literals; an empty successful page still writes count zero", async () => {
   for (const sse of [false, true]) {
     const big = "9223372036854775807123456789";
-    const e = envelope([{ ...item, aweme_id: "BIG_WORK", author: { uid: "BIG_AUTHOR", sec_uid: "test-sec" } }]);
-    const content = JSON.stringify(e).replace('"BIG_WORK"', big).replace('"BIG_AUTHOR"', big);
+    const e = envelope([douyinItem({ AwemeId: "BIG_WORK", Author: { Uid: "BIG_AUTHOR", SecUid: "test-sec" }, Video: { ItemID: "BIG_WORK" } })]);
+    const content = JSON.stringify(e).replaceAll('"BIG_WORK"', big).replace('"BIG_AUTHOR"', big);
     const server = await mcpStub(() => ({ sse, result: { content: [{ type: "text", text: content }] } }));
     try {
       const result = await executeDouyinSearch(await runFor(), { env: envFor(server.url) });
@@ -149,17 +155,17 @@ test("text fallback and SSE preserve integer literals; an empty successful page 
 
 test("structured numeric literals retain original identity, while already rounded objects block import", async () => {
   const big = "9223372036854775807123456789";
-  const e = envelope([{ ...item, aweme_id: "BIG" }]);
-  const rawEnvelope = JSON.stringify(e).replace('"BIG"', big);
+  const e = envelope([douyinItem({ AwemeId: "BIG", Video: { ItemID: "BIG" } })]);
+  const rawEnvelope = JSON.stringify(e).replaceAll('"BIG"', big);
   const server = await mcpStub(() => ({ raw: `{"jsonrpc":"2.0","id":$REQUEST_ID,"result":{"content":[],"structuredContent":${rawEnvelope}}}` }));
   try {
     const result = await executeDouyinSearch(await runFor(), { env: envFor(server.url) });
     assert.equal(result.candidates[0].data.aweme_id, big);
     const [saved] = await sql`SELECT response FROM receipts WHERE id=${result.receiptId}`;
-    assert.equal(saved.response.envelope.data.data.items[0].aweme_id, big);
+    assert.equal(saved.response.envelope.data.data.data.itemList[0].AwemeInfo.AwemeId, big);
   } finally { await server.close(); }
   assert.equal((parseLosslessJson(`{"id":${big}}`) as { id: string }).id, big);
-  const parsed = parseDouyinSearch({ envelope: envelope([{ ...item, aweme_id: Number(big), author: {} }]) }, { keyword: "x" });
+  const parsed = parseDouyinSearch({ envelope: envelope([douyinItem({ AwemeId: Number(big), Author: {}, Video: {} })]) }, { keyword: "x" });
   assert.ok(parsed.candidates[0].data.importBlockers.includes("lossless_work_id_required"));
   assert.ok(parsed.candidates[0].data.importBlockers.includes("lossless_author_id_required"));
   assert.equal(parsed.candidates[0].data.aweme_id, undefined);

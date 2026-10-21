@@ -241,7 +241,7 @@ run 和 subscription 已有 `contract_version`。方案再引入 `toolContractVe
 
 已完成的范围如下：
 
-- 仅开放抖音 V5 搜索 `agentkey.douyin.search` / `agentkey.douyin.search.query`，固定工具为 `TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post`。
+- 仅开放抖音 V4 搜索 `agentkey.douyin.search` / `agentkey.douyin.search.query`，固定工具为 `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post`。
 - 233 条矩阵仍为 212 条 AgentKey 与 21 条直连 Redfox；其余 211 条 AgentKey 路线继续按证据阻断，没有自动扩充白名单。
 - 复用既有 `collection_subscriptions`、`operation_runs`、`receipts` / `receipt_attempts`、`operation_results`、`articles`、`sources` 和 `source_account_bindings`，没有增加 AgentKey 专属订阅、任务、结果、身份或账单生命周期。
 - 数据层唯一新增迁移为 `database/migrations/0078_agentkey_budgets.sql`，只写入 `agentkey.collect` 与 `agentkey.query` 两条默认 0 预算。

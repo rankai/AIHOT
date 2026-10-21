@@ -17,7 +17,7 @@ async function requireRoute(execution: Execution) {
   return sql.begin(async (tx) => {
     const run = await requireExecution(tx, execution);
     if (!agentKeyRouteFor(run)) {
-      throw new AgentKeyPayloadError("Execution is not bound to the fixed Douyin V5 route");
+      throw new AgentKeyPayloadError("Execution is not bound to the fixed Douyin V4 route");
     }
     return run;
   });
@@ -42,19 +42,19 @@ export async function consumeDouyinSearch(execution: Execution, expected?: Pick<
   const [row] = await sql`SELECT id,attempts,status,response FROM receipts WHERE id=${run.current_receipt_id ?? 0}
     AND model=${douyinSearchRoute.tool} AND service=${run.input.mode === 'collection' ? 'agentkey.collect' : 'agentkey.query'} AND purpose=${douyinSearchRoute.operationKey}`;
   if (!row || row.status !== "received" || (expected && (row.id !== expected.receiptId || row.attempts !== expected.attempt))) {
-    throw new AgentKeyPayloadError("No current received Douyin V5 receipt available");
+    throw new AgentKeyPayloadError("No current received Douyin V4 receipt available");
   }
   const receipt: ReceiptResult = { receiptId: row.id, attempt: row.attempts, response: row.response, reused: expected?.reused ?? true };
   let parsed: ReturnType<typeof parseDouyinSearch>;
   try { parsed = parseDouyinSearch(receipt.response, input); }
   catch {
-    await sql.begin((tx) => setRunState(tx, execution, "needs_review", "Douyin V5 parser/identity evidence requires review; reuse retained receipt"));
-    throw new AgentKeyPayloadError("Douyin V5 payload requires review; retained receipt remains received", receipt.receiptId);
+    await sql.begin((tx) => setRunState(tx, execution, "needs_review", "Douyin V4 parser/identity evidence requires review; reuse retained receipt"));
+    throw new AgentKeyPayloadError("Douyin V4 payload requires review; retained receipt remains received", receipt.receiptId);
   }
   await sql.begin(async (tx) => {
     await requireExecution(tx, execution);
     const [current] = await tx`SELECT id FROM receipts WHERE id=${receipt.receiptId} AND attempts=${receipt.attempt} AND status='received' FOR UPDATE`;
-    if (!current) throw new AgentKeyPayloadError("Douyin V5 receipt attempt was superseded");
+    if (!current) throw new AgentKeyPayloadError("Douyin V4 receipt attempt was superseded");
     const collection=run.input.mode==="collection", pages=Number(run.progress.pages??0)+1, previousItems=Number(run.progress.items??0);
     const selected=collection?parsed.candidates.slice(0,Math.max(0,(run.limits.items??100)-previousItems)):parsed.candidates;
     const items=previousItems+selected.length;
@@ -135,10 +135,10 @@ export async function executeDouyinSearch(execution: Execution, options: AgentKe
 
 /** Continuation is entirely upstream supplied: never infer page arithmetic. */
 export function nextDouyinPage(input: DouyinSearchInput,pagination:Record<string,unknown>|undefined,seen:string[]=[]):{parameters?:ReturnType<typeof douyinSearchInput.parse>;stopReason?:string}{
-  if(!pagination||![true,false,1,0].includes(pagination.has_more as boolean|number))return {stopReason:"invalid-pagination-needs-review"};
-  if(pagination.has_more===false||pagination.has_more===0)return {stopReason:"upstream-no-more"};
-  if(!Number.isSafeInteger(pagination.offset)||Number(pagination.offset)<0||!Number.isSafeInteger(pagination.next_page)||Number(pagination.next_page)<1||typeof pagination.search_id!=="string"||!pagination.search_id.trim()||typeof pagination.backtrace!=="string")return {stopReason:"missing-next-token-needs-review"};
-  const next=douyinSearchInput.safeParse({keyword:input.keyword,page:pagination.next_page,offset:pagination.offset,search_id:pagination.search_id,backtrace:pagination.backtrace});
+  if(!pagination||typeof pagination.hasMore!=="boolean")return {stopReason:"invalid-pagination-needs-review"};
+  if(!pagination.hasMore)return {stopReason:"upstream-no-more"};
+  if(!Number.isSafeInteger(pagination.cursor)||Number(pagination.cursor)<0)return {stopReason:"missing-next-token-needs-review"};
+  const next=douyinSearchInput.safeParse({keyword:input.keyword,cursor:pagination.cursor});
   if(!next.success)return {stopReason:"missing-next-token-needs-review"};
   const token=stableJson(next.data);
   if(token===stableJson(input)||seen.includes(token))return {stopReason:"repeated-next-token-needs-review"};

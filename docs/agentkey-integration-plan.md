@@ -1,6 +1,6 @@
 # AgentKey 接入完整方案（2026-10-21 修订）
 
-> 状态：最小可用纵向链路已实现，并通过隔离 PostgreSQL、本机 MCP/HTTP 桩和 Web 定向测试验收。当前运行时代码白名单只开放抖音 V5 搜索（`agentkey.douyin.search` / `agentkey.douyin.search.query`，工具 `TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post`）；其余 211 条 AgentKey 路线仍按矩阵证据缺口阻断，21 条 Redfox 路线继续由既有直连接口承担。没有发起真实 AgentKey/TikHub 调用、读取真实密钥、提交、推送或部署。原评审的 6 项问题与 3 项精简见[评审记录](reviews/2026-10-21-agentkey-plan-review.md)。逐项固定路线、输入输出及阻断见[固定路线矩阵](reviews/2026-10-21-agentkey-route-matrix.md)，字段证据及尚缺证据见[输出证据清单](reviews/2026-10-21-agentkey-output-evidence.md)。
+> 状态：最小可用纵向链路已实现，并通过隔离 PostgreSQL、本机 MCP/HTTP 桩和 Web 定向测试验收。当前运行时代码白名单只开放抖音 V4 搜索（`agentkey.douyin.search` / `agentkey.douyin.search.query`，工具 `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post`）；其余 211 条 AgentKey 路线仍按矩阵证据缺口阻断，21 条 Redfox 路线继续由既有直连接口承担。一次经授权的最小只读真实调用已成功返回 12 条抖音作品、`hasMore=true/cursor=12` 并实扣 0.2 credits；原先选择的 V5 在文档默认参数下返回 HTTP 400，因此改固定为 V4，不自动兜底。没有读取、输出或提交真实密钥，也没有执行生成、上传、生产写入、提交、推送或部署。原评审的 6 项问题与 3 项精简见[评审记录](reviews/2026-10-21-agentkey-plan-review.md)。逐项固定路线、输入输出及阻断见[固定路线矩阵](reviews/2026-10-21-agentkey-route-matrix.md)，字段证据及尚缺证据见[输出证据清单](reviews/2026-10-21-agentkey-output-evidence.md)。
 
 ## 1. 已确认的范围与供应商分工
 
@@ -107,7 +107,7 @@ search / scrape 的 36 个接口均不属于 TikHub，分别来自 Brave、Exa�
 
 | 能力 | 精确 AgentKey 工具 | 元数据 credits/次 |
 | --- | --- | ---: |
-| 抖音搜索候选 V5 | TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post | 0.2 |
+| 抖音搜索固定路线 V4 | TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post | 0.2 |
 | 抖音带筛选搜索对照 V1 | TikHub/fetch_video_search_v1_api_v1_douyin_search_fetch_video_search_v1_post | 0.2 |
 | 小红书笔记搜索 | TikHub/search_notes_api_v1_xiaohongshu_app_v2_search_notes_get | 2 |
 | B 站 App 搜索候选 | TikHub/fetch_search_all_api_v1_bilibili_app_fetch_search_all_get | 0.2 |
@@ -123,7 +123,7 @@ search / scrape 的 36 个接口均不属于 TikHub，分别来自 Brave、Exa�
 
 本轮已经明确、实施时直接遵循的边界：
 
-- 抖音 V5 的作品/作者/原文及分页字段已明确，但不支持 V1 的日期/排序筛选；小红书图文详情可读取视频笔记内容和封面，不默认追加购买播放地址。
+- 抖音固定采用真实联调可用的 V4：`AwemeInfo/Author/Video` 与 `hasMore/cursor` 已明确，典型作者稳定字段是 SecUid；V5 以文档默认参数实测 HTTP 400，因此不保留自动兜底，也不支持 V1 的日期/排序筛选。小红书图文详情可读取视频笔记内容和封面，不默认追加购买播放地址。
 - B 站 App 搜索用返回游标，不是页码；公众号列表忽略 page_size，详情可通过 bizUin、user_name、mid/idx/link 提供身份映射，通过秒级时间戳与正文类型区分完整文章和摘要。
 - 视频号 TikHub 路线可返回明文作品 ID 与 finder username，不能把 Redfox 某路线缺作者 ID 的结论推广到 TikHub；CDN 地址不能当原文链接。
 - YouTube 账号列表仅首页有频道元信息、视频描述为空；按需补详情。Threads 多个接口分页无效，只能单页快照；IMDb 资讯样例有游标但入参不接收游标，不能假定可以翻页。
@@ -414,7 +414,7 @@ UI 已按上述入口接通，验收截图使用隔离库、假凭证和关闭�
 
 ## 12. 已执行阶段与后续开放条件
 
-1. **第一条完整链路已完成本地验收**：抖音 V5 搜索连通 provider 中立表单/预览、订阅保存、按供应商调度、`paidRequest`、原始 MCP 响应、分页、结果解析、去重导入、权限与订阅释放。测试只使用独立 `*_test` 库和本机 MCP 桩。
+1. **第一条完整链路已完成本地验收与最小真实首页验证**：抖音 V4 搜索连通 provider 中立表单/预览、订阅保存、按供应商调度、`paidRequest`、原始 MCP 响应、分页、结果解析、去重导入、权限与订阅释放。数据库与分页行为使用独立 `*_test` 库和本机 MCP 桩；真实调用仅验证固定工具、首页响应、实扣与字段形态。
 2. **独立订阅显式切换已完成本地验收**：仅 `OWIBYU1V` 可从 Redfox 切到 AgentKey 及反向切回；保留同一订阅 ID、启停、周期、限额、权限与历史，停止旧在途轮、递增执行版本、清空旧游标，不自动回切或失败兜底。
 3. **恢复与费用已接入现有生命周期**：未知只读请求沿用最多一次自动放行；当前恢复重试复用同一付费回执逻辑键。费用页沿用 attempts 展示估价 credits、报告实扣和缺失计数。迟到旧 generation 仍不能提交结果。
 4. **其余 211 条 AgentKey 路线保持阻断**：exact 输入、完整输出、身份、原文、分页或恢复证据不闭合时，不开放查询、导入、定时采集或切换。补齐证据后按矩阵逐行开放，不因目录新增自动进入白名单。

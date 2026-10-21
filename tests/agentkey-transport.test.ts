@@ -11,7 +11,7 @@ import { ProviderRejectedError } from "@aihot/backend/providers/receipts";
 const key = "test-agentkey-transport-fake-key";
 const env: NodeJS.ProcessEnv = { NODE_ENV: "test", AIHOT_ENVIRONMENT: "test", AGENTKEY_API_KEY: key, AGENTKEY_CALLS_ENABLED: "true", AGENTKEY_MCP_URL: "http://127.0.0.1:10000/v1/mcp" };
 const big = "9223372036854775807123456789";
-const rawEnvelope = `{"provider":"TikHub","credits_charged":0,"request_id":"test-id","data":{"data":{"items":[{"aweme_id":${big},"author":{"uid":${big},"sec_uid":"test-sec"},"desc":"说明","create_time":1729400000,"share_url":"https://www.douyin.com/video/${big}"}],"pagination":{"has_more":false,"offset":10}}}}`;
+const rawEnvelope = `{"provider":"TikHub","credits_charged":0,"request_id":"test-id","data":{"code":200,"data":{"code":0,"msg":"success","data":{"hasMore":false,"cursor":12,"itemList":[{"AwemeInfo":{"AwemeId":${big},"Author":{"Uid":${big},"SecUid":"test-sec","Nickname":"测试作者"},"Desc":"说明","CreateTime":"1729400000000","Video":{"ItemID":${big},"Title":"说明","CreateTime":"1729400000","Cover":{"UrlList":["https://p3.douyinpic.com/test.jpeg"]}}}}]}}}}`;
 
 function stubFetch(answer: (id: unknown) => Response) {
   const calls: { url: string; init: RequestInit; request: Record<string, any> }[] = [];
@@ -38,7 +38,7 @@ test("guards fail before injected fetch; production and non-test processes rejec
   assert.equal(stub.calls.length, 0);
   assert.equal(agentKeyConfig({ ...env, AGENTKEY_MCP_URL: undefined }).url.href, "https://api.agentkey.app/v1/mcp");
   assert.throws(() => douyinSearchInput.parse({ keyword: "x", sort: "latest" }));
-  assert.throws(() => douyinSearchInput.parse({ keyword: "x", page: 201 }));
+  assert.throws(() => douyinSearchInput.parse({ keyword: "x", cursor: -1 }));
 });
 
 test("real SDK uses Bearer and fixed execute_tool once, retaining unrounded structured IDs", async () => {
@@ -47,8 +47,8 @@ test("real SDK uses Bearer and fixed execute_tool once, retaining unrounded stru
   const calls = stub.calls.filter((call) => call.request.method === "tools/call");
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].request.params, { name: "execute_tool", arguments: {
-    name: "TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post",
-    params: { keyword: "测试", offset: 0, page: 1, backtrace: "", search_id: "" },
+    name: "TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post",
+    params: { keyword: "测试", cursor: 0 },
   } });
   assert.ok(stub.calls.every((call) => new Headers(call.init.headers).get("authorization") === `Bearer ${key}`));
   assert.ok(stub.calls.every((call) => call.init.redirect === "error"));
@@ -100,11 +100,12 @@ test("unrecognized complete payload is returned for receipt storage and then fai
   const outcome = await agentKeyTransport({ env, fetch: stub.fetch }).execute({ keyword: "x" });
   assert.throws(() => parseDouyinSearch(outcome.response, { keyword: "x" }), /Unrecognized/);
   assert.ok(outcome.response);
-  const noIdentity = parseDouyinSearch({ envelope: { provider: "TikHub", data: { data: { items: [{ aweme_id: Number(big), author: {} }] } } } }, { keyword: "x" });
+  const noIdentity = parseDouyinSearch({ envelope: { provider: "TikHub", data: { code: 200, data: { code: 0, msg: "success", data: { hasMore: false, cursor: 12, itemList: [{ AwemeInfo: { AwemeId: Number(big) } }] } } } } }, { keyword: "x" });
   assert.deepEqual(noIdentity.candidates[0].data.importBlockers, ["lossless_work_id_required", "lossless_author_id_required"]);
-  const empty = parseDouyinSearch({ envelope: { provider: "TikHub", data: { data: { items: [] } } } }, { keyword: "x" });
+  const empty = parseDouyinSearch({ envelope: { provider: "TikHub", data: { code: 200, data: { code: 0, msg: "success", data: { hasMore: false, cursor: 0, itemList: [] } } } } }, { keyword: "x" });
   assert.equal(empty.summary.count, 0);
-  assert.equal(empty.summary.stopReason, undefined, "an empty page alone proves no end condition");
+  assert.equal(empty.summary.stopReason, "upstream_no_more");
+  assert.throws(() => parseDouyinSearch({ envelope: { provider: "TikHub", data: { code: 200, data: { code: 1, msg: "failed", data: { hasMore: false, cursor: 0, itemList: [] } } } } }, { keyword: "x" }), /non-success business status/);
   assert.equal((parseLosslessJson(`{"id":${big}}`) as { id: string }).id, big);
 });
 

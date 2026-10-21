@@ -1,6 +1,6 @@
 # AgentKey 固定路由与输入输出矩阵（2026-10-21）
 
-> 状态：抖音 V5 搜索首行已通过本地 MCP 桩完成实现与验收；当前运行白名单只包含 `agentkey.douyin.search` / `agentkey.douyin.search.query` 与精确工具 `TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post`。其余 211 条 AgentKey 行继续按证据阻断，21 条 Redfox 行表示既有直连分工。矩阵记录候选和阻断边界，不表示 233 条路线均已真实可用；本轮没有使用真实凭据或发起供应商调用。
+> 状态：抖音 V4 搜索首行已通过本地 MCP 桩和一次经授权的真实只读调用完成实现与验收；当前运行白名单只包含 `agentkey.douyin.search` / `agentkey.douyin.search.query` 与精确工具 `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post`。真实联调先发现 V5 对文档默认参数返回 HTTP 400，随后由 V4 成功返回 12 条作品、`hasMore=true/cursor=12`，实扣 0.2 credits；因此固定路线改为 V4，没有同时保留版本选择器。其余 211 条 AgentKey 行继续按证据阻断，21 条 Redfox 行表示既有直连分工。矩阵记录候选和阻断边界，不表示 233 条路线均已真实可用。
 
 ## 口径与执行门槛
 
@@ -41,7 +41,7 @@
 
 | 业务能力 / AIHOT结果 | provider/upstream | 精确工具 | 必需输入 / 固定条件 | 已证实输出 | 分页 / 末页 | recovery；operation；step | 查询 / 导入 / 定时 / 切换 | 证据状态与阻断 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 普通作品搜索 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post` | 业务必填 keyword；page=1/offset=0；续页回传 search_id/backtrace | P.data.items[].aweme_id/desc/create_time/author.uid/author.sec_uid/share_url | P.data.pagination.offset/search_id/backtrace/has_more/next_page；10条/页，page≤200 | `readOnly`；`agentkey.douyin.search`；`agentkey.douyin.search.query` | Q=已开放；I=已开放但缺稳定作者/作品 ID阻断；S=已开放（有界）；X=已开放（有界） | **本地已实现**；真实供应商响应/分页/实扣待授权验证；无日期/排序/精准匹配保证。desc 仅作品说明，需完整语音正文的任务阻断 |
+| 普通作品搜索 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post` | 业务必填 keyword；cursor=0；续页原样回传 cursor | `P.data.data.itemList[].AwemeInfo` 的 `AwemeId/Desc/CreateTime`（毫秒字符串）、`Author.Uid?/SecUid/Nickname`、`Video.ItemID/Title/CreateTime/Cover.UrlList`；标准作品 URL 由稳定 AwemeId 生成 | `P.data.data.hasMore/cursor`；固定 12 条/页；按上游 cursor 续页，不推算页码 | `readOnly`；`agentkey.douyin.search`；`agentkey.douyin.search.query` | Q=已开放；I=已开放但缺稳定作者/作品 ID阻断；S=已开放（有界）；X=已开放（有界） | **本地已实现并完成一次真实只读验证（0.2 credits）**；无日期/排序/精准匹配保证。Desc 仅作品说明，需完整语音正文的任务阻断；V5 同参数实测 HTTP 400，不作为兜底 |
 | 账号作品 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_user_post_videos_api_v1_douyin_app_v3_fetch_user_post_videos_get` | sec_user_id；max_cursor=0；count≤20；channel=normal | 已确认调用用途；列表完整嵌套/作者/原文输出缺失 | max_cursor 入参已确认；终止字段缺失 | `readOnly`；`agentkey.douyin.account_posts`；`agentkey.douyin.account_posts.query` | Q=条件；I=阻断；S=阻断；X=阻断 | doc T2（输入）；gap：作品/作者/URL/正文/时间、末页 |
 | 单作品详情 V2 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_one_video_v2_api_v1_douyin_app_v3_fetch_one_video_v2_get` | aweme_id（字段级 schema 未收入快照，需核 exact V2） | P.data.filter_list[0].reason；reason=8 可能多原因 | 单对象；不分页 | `readOnly`；`agentkey.douyin.detail`；`agentkey.douyin.detail.query` | Q=条件；I=阻断；S=仅补全步骤，阻断；X=阻断 | doc T2；gap：完整内容/身份/URL/时间；不沿用搜索结构，不将 reason=8 唯一解释为删除 |
 
@@ -776,7 +776,7 @@ Threads 的 recent/top 是两个排序用途，本矩阵先固定 recent，不�
 方案获批后，第一阶段只实现了矩阵首行：
 
 - `agentkey.douyin.search` / `agentkey.douyin.search.query`
-- 固定工具 `TikHub/fetch_video_search_v5_api_v1_douyin_search_fetch_video_search_v5_post`
+- 固定工具 `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post`
 
 该行已经贯通供应商中立表单/预览、订阅保存、按供应商调度、既有 `operation_runs` / `receipts` / `operation_results` 生命周期、分页和材料导入。Redfox 与 AgentKey 的显式切换也只对这一条有双向合同的路线开放。
 
@@ -786,4 +786,4 @@ Threads 的 recent/top 是两个排序用途，本矩阵先固定 recent，不�
 - 运行时白名单、恢复分类、供应商选择器、预检和切换资格都只开放上述一行；其余 211 条 AgentKey 路线不会因矩阵存在而被执行。
 - 异常分页会先保存已收结果和 received 回执，再进入 `needs_review`；关闭一个供应商不会在调度 SQL 的 `LIMIT` 前阻塞另一供应商。
 - AgentKey 缺少稳定作者或作品身份时禁用导入；不会根据昵称、请求参数或手工填写补造身份。
-- 当前完成的是隔离数据库和本机桩验收，不包含真实 AgentKey/TikHub 权限、响应、分页或实扣验证。
+- 当前完成的是隔离数据库、本机桩和一次真实只读首页验证；真实第二页、定时多轮和失败恢复仍由桩覆盖，不额外消耗供应商额度。

@@ -63,7 +63,7 @@ SocialData、Dajiala、Redfox、AgentKey 的主采集共用采集订阅和任务
 
 Redfox 凭证只配置在后端，`REDFOX_CALLS_ENABLED` 默认关闭，9 个用途预算默认均为 0；填 key 不等于启用。启用采集还需 `COLLECT_ENABLED=true`、相应预算及有效订阅；查询/上传等操作也受 Redfox 总阀及各自用途预算约束。`MODEL_CALLS_ENABLED` 控制模型处理，不能代替 Redfox 外发开关。关闭 Redfox 后保留当前 operation Worker，以便处理已收回执和本地恢复；需要换回原厂时仍走同一主订阅预检，不运行旧 Worker。
 
-AgentKey 凭证只配置在后端，`AGENTKEY_CALLS_ENABLED` 默认关闭；`agentkey.collect`、`agentkey.query` 两个用途预算默认均为 0，缺预算行直接拒绝外发。预检只检查本地配置，不请求 Tool Catalog 或供应商。当前只开放抖音 V5 搜索；页面显示预订工具、TikHub 上游和 credits 估计，实扣缺失不会当作 0。关闭 AgentKey 后保留当前 Worker 处理已收回执的本地解析和收尾；旧 Worker 不了解 AgentKey 契约，不能直接接手在途 AgentKey 任务。
+AgentKey 凭证只配置在后端，`AGENTKEY_CALLS_ENABLED` 默认关闭；`agentkey.collect`、`agentkey.query` 两个用途预算默认均为 0，缺预算行直接拒绝外发。预检只检查本地配置，不请求 Tool Catalog 或供应商。当前只开放抖音 V4 搜索；页面显示预订工具、TikHub 上游和 credits 估计，实扣缺失不会当作 0。关闭 AgentKey 后保留当前 Worker 处理已收回执的本地解析和收尾；旧 Worker 不了解 AgentKey 契约，不能直接接手在途 AgentKey 任务。
 
 Redfox 独立采集订阅明确选择操作、参数、周期和每轮页数/条数上限，默认停用。开启必要详情补全时须选择该操作已接通的详情目标及上限；汽车之家文章详情另须明确页码，没有默认值。补全沿同一轮保存的列表和项位置继续，预算等待不会重买列表；仅改名称或周期保留当前轮，改变执行条件后须按新配置开轮。账号解析、转写和媒体处理仍由各自工具显式提交，不因开启详情补全自动附加。
 

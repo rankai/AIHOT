@@ -57,10 +57,8 @@ async function mcpStub(pages: StubPage[], beforeReply?: (index: number) => Promi
           const index = toolCall++;
           const page = pages[index] ?? [];
           const data = Array.isArray(page)
-            ? {items: page, pagination: index + 1 < pages.length
-              ? {offset: 10, search_id: `search-${index + 1}`, backtrace: `trace-${index + 1}`, has_more: 1, next_page: index + 2}
-              : {offset: 20, search_id: `search-${index + 1}`, backtrace: `trace-${index + 1}`, has_more: 0, next_page: index + 2}}
-            : page;
+            ? {itemList: page, hasMore: index + 1 < pages.length, cursor: (index + 1) * 12}
+            : {itemList: page.items, ...(page.pagination ?? {})};
           return {
             content: [],
             structuredContent: {
@@ -69,7 +67,7 @@ async function mcpStub(pages: StubPage[], beforeReply?: (index: number) => Promi
               credits_charged: 0.2,
               took_ms: 1,
               request_id: `request-${index + 1}`,
-              data: {data},
+              data: {code: 200, data: {code: 0, msg: "success", data}},
             },
           };
         })();
@@ -97,13 +95,15 @@ test("scheduled AgentKey collection uses its own valve, follows only upstream pa
 
   const note = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   const author = `9007199254740993${note.slice(-6)}`;
-  const items = [0, 1, 2].map((index) => ({
-    aweme_id: `${note}${index}`,
-    desc: `AgentKey synthetic ${index}`,
-    create_time: 1729400000 + index,
-    author: {uid: author, sec_uid: `sec-${author}`},
-    share_url: `https://www.douyin.com/video/${note}${index}`,
-  }));
+  const items = [0, 1, 2].map((index) => {
+    const id = `${note}${index}`;
+    return {AwemeInfo: {
+      AwemeId: id, Desc: `AgentKey synthetic ${index}`, CreateTime: String((1729400000 + index) * 1000),
+      Author: {Uid: author, SecUid: `sec-${author}`, Nickname: "AgentKey synthetic author"},
+      Video: {ItemID: id, Title: `AgentKey synthetic ${index}`, CreateTime: String(1729400000 + index),
+        Cover: {UrlList: ["https://p3.douyinpic.com/test.jpeg"]}},
+    }};
+  });
   const stub = await mcpStub([[items[0]!, items[1]!], [items[2]!]]);
   const [savedBudget] = await sql`SELECT per_minute,per_hour,per_day FROM budgets WHERE service='agentkey.collect'`;
   assert.ok(savedBudget);
@@ -164,8 +164,8 @@ test("scheduled AgentKey collection uses its own valve, follows only upstream pa
     assert.deepEqual(completed, {status: "completed", current_receipt_id: null});
     assert.equal(stub.calls.length, 2);
     assert.ok(stub.calls.every((call) => call.name === "execute_tool" && call.tool === douyinSearchRoute.tool));
-    assert.deepEqual(stub.calls[0]!.params, {keyword: "AgentKey synthetic", backtrace: "", offset: 0, page: 1, search_id: ""});
-    assert.deepEqual(stub.calls[1]!.params, {keyword: "AgentKey synthetic", backtrace: "trace-1", offset: 10, page: 2, search_id: "search-1"});
+    assert.deepEqual(stub.calls[0]!.params, {keyword: "AgentKey synthetic", cursor: 0});
+    assert.deepEqual(stub.calls[1]!.params, {keyword: "AgentKey synthetic", cursor: 12});
 
     const summaries = await sql`SELECT data,receipt_id FROM operation_results WHERE run_id=${runId} AND kind='query_summary' ORDER BY step_version`;
     assert.equal(summaries.length, 2);
@@ -305,8 +305,10 @@ async function finish(id: number) {
 }
 const work = () => {
   const id = `${Date.now()}${Math.floor(Math.random() * 1_000_000)}`;
-  return {aweme_id: id, desc: "Synthetic bounded collection", create_time: 1729400000,
-    author: {uid: `${id}1`, sec_uid: `sec-${id}`}, share_url: `https://www.douyin.com/video/${id}`};
+  return {AwemeInfo: {AwemeId: id, Desc: "Synthetic bounded collection", CreateTime: "1729400000000",
+    Author: {Uid: `${id}1`, SecUid: `sec-${id}`, Nickname: "Synthetic author"},
+    Video: {ItemID: id, Title: "Synthetic bounded collection", CreateTime: "1729400000",
+      Cover: {UrlList: ["https://p3.douyinpic.com/test.jpeg"]}}}};
 };
 const collectionConfig = (limits = {pages: 3, items: 10, details: 0}, keyword = tag()) => ({
   name: tag(), provider: "agentkey", operationId: "OWIBYU1V", parameters: {keyword},
@@ -384,10 +386,10 @@ test("an empty successful AgentKey subscription page commits receipt-linked zero
 
 for (const reason of ["missing-next-token-needs-review", "repeated-next-token-needs-review"] as const) {
   test(`AgentKey subscription retains evidence for review on ${reason}`, async () => {
-    const pagination = {has_more: 1, next_page: 2, offset: 10, search_id: "search-next", backtrace: "trace-next"};
+    const pagination = {hasMore: true, cursor: 12};
     const first = work(), second = work();
     const pages: StubPage[] = reason === "missing-next-token-needs-review"
-      ? [{items: [first], pagination: {has_more: 1, next_page: 2, search_id: "missing-offset", backtrace: "trace"}}]
+      ? [{items: [first], pagination: {hasMore: true}}]
       : [{items: [first], pagination}, {items: [second], pagination}];
     await agentKeyFixture(pages, async ({create, stub}) => {
       const {subscription, run} = await create();
@@ -452,7 +454,7 @@ test("editing active AgentKey execution rejects a late old-generation page and p
       assert.equal(receipt.status, "received");
       assert.ok(receipt.response);
       assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`).length, 0);
-      assert.equal((await sql`SELECT id FROM articles WHERE identity_key=${`douyin:aweme_id:${staleWork.aweme_id}`}`).length, 0);
+      assert.equal((await sql`SELECT id FROM articles WHERE identity_key=${`douyin:aweme_id:${staleWork.AwemeInfo.AwemeId}`}`).length, 0);
       const [edited] = await sql`SELECT active_run_id,execution_version,edit_version,progress,config FROM collection_subscriptions WHERE id=${subscription.id}`;
       assert.equal(edited.active_run_id, null);
       assert.equal(edited.execution_version, run.input.members[0]!.executionVersion + 1);
@@ -477,14 +479,15 @@ test("editing active AgentKey execution rejects a late old-generation page and p
 
 test("current AgentKey execution surfaces a deterministic identity conflict for review instead of treating it as a stale delivery", async () => {
   const item = work();
+  const aweme = item.AwemeInfo;
   const left = `agentkey-conflict-left-${tag()}`, right = `agentkey-conflict-right-${tag()}`;
   await sql`INSERT INTO sources(id,name,kind,config,participation_mode,enabled) VALUES
     (${left},'AgentKey conflict left','external',${sql.json({platform:"douyin"})},'isolated',true),
     (${right},'AgentKey conflict right','external',${sql.json({platform:"douyin"})},'isolated',true)`;
   try {
     await sql`INSERT INTO source_account_bindings(source_id,platform,id_kind,id_value,evidence) VALUES
-      (${left},'douyin','uid',${item.author.uid},${sql.json({kind:"test",reference:left})}),
-      (${right},'douyin','secUserId',${item.author.sec_uid},${sql.json({kind:"test",reference:right})})`;
+      (${left},'douyin','uid',${aweme.Author.Uid},${sql.json({kind:"test",reference:left})}),
+      (${right},'douyin','secUserId',${aweme.Author.SecUid},${sql.json({kind:"test",reference:right})})`;
     await agentKeyFixture([[item]], async ({create, stub}) => {
       const {run} = await create();
       const outcome = await step(run.id);
@@ -585,9 +588,10 @@ test("source-backed scheduling only enqueues implemented providers and retains t
 
 test("confirmed Redfox and AgentKey Douyin imports share one stable work identity and preserve source permissions", async () => {
   const item = work();
+  const aweme = item.AwemeInfo;
   await agentKeyFixture([[item]], async ({stub}) => {
-    const redfox = await httpStub(() => ({code: 2000, data: {list: [{videoId: item.aweme_id,
-      content: item.desc, opusUrl: item.share_url, authorUid: item.author.uid, authorSecUid: item.author.sec_uid}]}}));
+    const redfox = await httpStub(() => ({code: 2000, data: {list: [{videoId: aweme.AwemeId,
+      content: aweme.Desc, opusUrl: `https://www.douyin.com/video/${aweme.AwemeId}`, authorUid: aweme.Author.Uid, authorSecUid: aweme.Author.SecUid}]}}));
     const services = ["redfox.query", "agentkey.query"];
     const budgets = await sql`SELECT service,per_minute,per_hour,per_day FROM budgets WHERE service IN ${sql(services)}`;
     assert.equal(budgets.length, 2);
@@ -612,12 +616,12 @@ test("confirmed Redfox and AgentKey Douyin imports share one stable work identit
       assert.ok(second);
       assert.equal(second.sourceId, first.sourceId);
       assert.equal(second.articleId, first.articleId);
-      const articles = await sql`SELECT id,identity_key,source_id FROM articles WHERE identity_key=${`douyin:aweme_id:${item.aweme_id}`} OR source_id=${first.sourceId}`;
-      assert.deepEqual([...articles], [{id: first.articleId, identity_key: `douyin:aweme_id:${item.aweme_id}`, source_id: first.sourceId}]);
+      const articles = await sql`SELECT id,identity_key,source_id FROM articles WHERE identity_key=${`douyin:aweme_id:${aweme.AwemeId}`} OR source_id=${first.sourceId}`;
+      assert.deepEqual([...articles], [{id: first.articleId, identity_key: `douyin:aweme_id:${aweme.AwemeId}`, source_id: first.sourceId}]);
       const bindings = await sql`SELECT source_id,id_kind,id_value FROM source_account_bindings WHERE platform='douyin' AND source_id=${first.sourceId} ORDER BY id_kind`;
       assert.deepEqual([...bindings], [
-        {source_id: first.sourceId, id_kind: "secUserId", id_value: item.author.sec_uid},
-        {source_id: first.sourceId, id_kind: "uid", id_value: item.author.uid},
+        {source_id: first.sourceId, id_kind: "secUserId", id_value: aweme.Author.SecUid},
+        {source_id: first.sourceId, id_kind: "uid", id_value: aweme.Author.Uid},
       ]);
       const [after] = await sql`SELECT kind,participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id=${first.sourceId}`;
       assert.deepEqual(after, permissions);
@@ -788,7 +792,7 @@ test("provider switch API rejects stale versions and arbitrary config, rechecks 
 });
 
 
-for (const pagination of [undefined, {}, {has_more: "false"}, {has_more: 2}, {has_more: null}]) {
+for (const pagination of [undefined, {}, {hasMore: "false"}, {hasMore: 2}, {hasMore: null}]) {
   test(`AgentKey requires review for untrustworthy pagination ${JSON.stringify(pagination)}`, async () => {
     await agentKeyFixture([{items: [work()], ...(pagination ? {pagination} : {})}], async ({create, stub}) => {
       const {subscription, run} = await create();

@@ -1,6 +1,6 @@
 # AgentKey 输出证据逐项核验（2026-10-21）
 
-> 对应[完整接入方案](../agentkey-integration-plan.md)。本轮只读官方文档、OpenAPI、免费工具描述和官方文档已经发布的响应样例。没有执行 AgentKey execute_tool、上游数据接口或文档的 Try it；没有使用凭据、开发业务代码、提交或部署。
+> 对应[完整接入方案](../agentkey-integration-plan.md)。最初依据来自官方文档、OpenAPI、免费工具描述和公开响应样例；2026-10-21 后续经用户授权，又用 Codex 现有 AgentKey MCP 凭据完成了最小只读联调。联调没有读取、输出或提交真实密钥，也没有执行生成、上传、生产写入、提交或部署。
 
 ## 1. 证据口径
 
@@ -38,11 +38,12 @@ AgentKey 目前另有公开的 [Scenario REST](https://docs.agentkey.app/api-ref
 
 ### T1. 抖音搜索
 
-- 已查 [douyin/search/fetch_video_search_v5](https://docs.tikhub.io/501036597e0) 与 [douyin/search/fetch_video_search_v1](https://docs.tikhub.io/370212779e0)，均与 AgentKey 规范工具名对应。
-- V5：`P.data.items[]` 的 `aweme_id/desc/create_time/author.uid/author.sec_uid/share_url` 已有字段说明；分页为 `P.data.pagination.offset/search_id/backtrace/has_more/next_page`，每页固定 10 条、page≤200。没有日期/排序入参。
+- AgentKey 当前 `describe_tool` 确认 V4 固定工具为 `TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post`，输入只有 `keyword/cursor`，健康状态为 healthy，单次报价 0.2 credits；[TikHub V4 工具页面](https://api.tikhub.io/#/Douyin-Search-API/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post)与其执行结果一致。
+- 经授权真实调用先用 V5 文档默认参数请求两次，均返回 HTTP 400 且没有结果；改用 V4 `keyword=猫咪,cursor=0` 后成功，AgentKey 返回 `credits_charged=0.2`、12 条 `itemList`、`hasMore=true`、`cursor=12`。这确定了本地固定路线采用 V4，V5 不自动兜底。
+- V4 实测 `P.data.data.itemList[].AwemeInfo` 包含 `AwemeId/Desc/CreateTime`、`Author.Uid?/SecUid/Nickname` 与 `Video.ItemID/Title/CreateTime/Cover.UrlList`；`CreateTime` 是毫秒字符串。分页位于 `P.data.data.hasMore/cursor`。标准作品 URL `https://www.douyin.com/video/<AwemeId>` 由稳定 ID 生成，不冒充供应商原始字段。
 - V1：`P.data.data[].aweme_info` 有 `aweme_id/desc/create_time/author.uid/share_url`；`P.data.status_code=0` 表示业务成功，`cursor/has_more` 控制分页，支持排序和最近 1/7/180 天。视频 duration 是毫秒。`desc` 是作品说明，不是语音转写。
-- **仍缺**：V1 搜索会话 search_id/backtrace 的准确输出路径、所有 ID 的传输类型；V1/V5 都没有“任意起止日、精准匹配”兼容保证。不能将 V5 的分页路径用到 V1，也不能用本地截断冒充上游完整时间筛选。
-- 方案维持每项一条路线；这次补齐两版对照证据，不增加版本选择器。普通搜索可按 V5 契约设计；必需排序/时间的既有任务不能切到 V5。采用 V1 承接时须先补其会话字段说明，而非到开发时猜路径。
+- **仍缺**：V1 搜索会话的准确输出路径、所有 ID 的传输类型；V1/V4 都没有“任意起止日、精准匹配”兼容保证。不能用本地截断冒充上游完整时间筛选。
+- 方案维持每项一条路线；真实可用性优先于版本号，因此固定 V4 而不增加运行时版本选择器。真实第二页由官方 cursor 契约与本地桩覆盖；未为再证明一次翻页消耗额外额度。
 
 ### T2. 抖音账号作品、详情
 
@@ -229,4 +230,4 @@ JustOneAPI 官方错误说明已明确 code=0 成功，100 认证、301 采集�
 - 供应商切换后迟到响应仍归原 attempt；旧轮不得写新 cursor/material，即使回执已被既有规则释放。
 - SocialData `x.page`、大加辣 `mp.list/mp.body` 和现有 Redfox 精确分类保持不变。
 
-本轮没有运行代码测试或真实调用；上述结论是现有源码事实与方案契约的静态对照，不表示 AgentKey 实现或验收已完成。
+本轮后半段已运行代码测试，并且只对抖音 V4 首页执行了一次成功真实只读调用；它不替代真实第二页、定时多轮、异常恢复或其他平台的上线验收。
