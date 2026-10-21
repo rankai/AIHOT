@@ -6,7 +6,7 @@ import {before,after,test} from 'node:test';
 import {sql,closeDb} from '@aihot/backend/db';
 import {config} from '@aihot/backend/config';
 import {stopBoss} from '@aihot/backend/jobs/queue';
-import {createPlatformSubscription,startPlatformSubscription,updatePlatformSubscription} from '@aihot/backend/sources/platform-subscriptions';
+import {createPlatformSubscription,schedulePlatformSubscriptions,startPlatformSubscription,updatePlatformSubscription} from '@aihot/backend/sources/platform-subscriptions';
 import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
 import {resumeRun} from '@aihot/backend/providers/operations/store';
 import {douyinOperations} from '@aihot/backend/providers/redfox/douyin-contract';
@@ -65,15 +65,36 @@ test('collection API shares creation commands, isolates old endpoint and fences 
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Platform collection fixture'};
  try{const payload={name:tag(),operationId:'OWIBYU1V',parameters:{keyword:'synthetic'}},headers={'x-csrf-token':'dev','idempotency-key':tag()},initial=hits;
   const [a,b]=await Promise.all([app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload}),app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload})]);assert.equal(a.statusCode,201,a.body);assert.equal(a.json().id,b.json().id);
-  const id=a.json().id,list=(await app.inject({url:'/api/admin/redfox/collections'})).json();assert.equal(list.find((s:{id:number})=>s.id===id).enabled,false);assert.equal(list.find((s:{id:number})=>s.id===id).platform,'douyin');
+  const id=a.json().id,list=(await app.inject({url:'/api/admin/redfox/collections'})).json(),savedRow=list.find((s:{id:number})=>s.id===id);assert.equal(savedRow.enabled,false);assert.equal(savedRow.platform,'douyin');assert.equal(savedRow.provider,'redfox');
+  const catalog=(await app.inject({url:'/api/admin/redfox/operations'})).json().find((operation:{id:string})=>operation.id==='OWIBYU1V');assert.deepEqual(catalog.collectionProviders.map((provider:{id:string})=>provider.id),['redfox','agentkey']);
+  const agentKey=await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers:{...headers,'idempotency-key':tag()},payload:{...payload,provider:'agentkey'}});assert.equal(agentKey.statusCode,201,agentKey.body);
+  const agentKeyId=agentKey.json().id,agentKeyRow=(await app.inject({url:'/api/admin/redfox/collections'})).json().find((s:{id:number})=>s.id===agentKeyId);assert.equal(agentKeyRow.provider,'agentkey');assert.equal(agentKeyRow.enabled,false);
   assert.ok(!(await app.inject({url:'/api/admin/redfox/subscriptions'})).json().some((s:{id:number})=>s.id===id));
   assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/subscriptions',headers,payload})).statusCode,409);
   assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers:{...headers,'idempotency-key':tag()},payload:{...payload,enrichDetails:true}})).statusCode,409);
+  assert.equal((await app.inject({method:'PATCH',url:`/api/admin/redfox/collections/${id}`,headers,payload:{editVersion:1,config:{...payload,provider:'agentkey',name:'Implicit switch must fail'}}})).statusCode,409);
   assert.equal((await app.inject({method:'PATCH',url:`/api/admin/redfox/collections/${id}`,headers,payload:{editVersion:1,config:{...payload,name:'Edited',intervalMinutes:30}}})).statusCode,200);
   assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload})).json().id,id);
   assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload:{...payload,parameters:{keyword:'changed'}}})).statusCode,409);
   assert.equal(hits,initial);
  }finally{config.devAdmin=null;await app.close();}
+});
+test('scheduled platform collection retains the saved provider through task execution',async()=>{
+ const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Platform provider scheduler fixture'};let subscriptionId:number|null=null;
+ try{
+  const response=await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers:{'x-csrf-token':'dev','idempotency-key':tag()},payload:{name:tag(),provider:'redfox',operationId:'OWIBYU1V',parameters:{keyword:'scheduled-provider'},enabled:true,limits:{pages:1,items:10,details:0}}});
+  assert.equal(response.statusCode,201,response.body);subscriptionId=response.json().id;
+  const [saved]=await sql`SELECT provider,operation_key,config FROM collection_subscriptions WHERE id=${subscriptionId}`;
+  assert.equal(saved!.provider,'redfox');assert.equal(saved!.operation_key,'redfox.platform.collection');assert.equal(saved!.config.operationId,'OWIBYU1V');
+  await sql`UPDATE collection_subscriptions SET next_run_at='2020-01-01' WHERE id=${subscriptionId}`;
+  assert.ok(await schedulePlatformSubscriptions());
+  const [scheduled]=await sql`SELECT provider,active_run_id FROM collection_subscriptions WHERE id=${subscriptionId}`;
+  assert.equal(scheduled!.provider,'redfox');assert.ok(scheduled!.active_run_id);
+  const run=await row(scheduled!.active_run_id);assert.equal(run.actor,'schedule');assert.equal(run.provider,'redfox');assert.equal(run.operation_key,'redfox.platform.collection');
+  const initial=hits;assert.equal((await finish(run.id)).status,'completed');assert.equal(hits,initial+1);
+  const [receipt]=await sql`SELECT service,model,status FROM receipts WHERE id=(SELECT receipt_id FROM operation_results WHERE run_id=${run.id} AND kind='query_summary')`;
+  assert.deepEqual(receipt,{service:'redfox.collect',model:'OWIBYU1V',status:'completed'});
+ }finally{if(subscriptionId!==null)await sql`UPDATE collection_subscriptions SET enabled=false,next_run_at=NULL WHERE id=${subscriptionId}`;config.devAdmin=null;await app.close();}
 });
 test('explicit no-more, empty page and item truncation record exact bounded consumption',async()=>{
  current=cases.find(c=>c[0]==='384C6W6B')!;

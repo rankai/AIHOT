@@ -17,6 +17,7 @@ export async function operationDetail(id: number) {
   // Inputs were authored by the server; expose only the execution parameters needed by the operator.
   const { mode, window, parameters, fileKeys, recoveryUnavailable, operationId, platform, family } = run.input;
   const draft = mode === "preview" && run.input.commandIntent?.kind !== "saved-preview";
+  const {tool,upstream}=run.input;
   const sources = run.input.sources ?? (run.input.source ? [run.input.source] : undefined);
   const { polls: pollLimit, pollDeadlineSeconds } = run.limits;
   delete run.input;
@@ -31,14 +32,14 @@ export async function operationDetail(id: number) {
   const attempts = run.receiptId ? await sql`SELECT a.id, a.attempt, a.status, a.started_at, a.finished_at, a.error,
     (a.response IS NOT NULL OR (a.attempt=p.attempts AND p.response IS NOT NULL)) AS has_retained_response
     FROM receipt_attempts a JOIN receipts p ON p.id=a.receipt_id WHERE a.receipt_id = ${run.receiptId} ORDER BY a.attempt` : [];
-  const [receipt] = run.receiptId ? await sql`SELECT status, attempts FROM receipts WHERE id = ${run.receiptId}` : [];
+  const [receipt] = run.receiptId ? await sql`SELECT status, attempts, model FROM receipts WHERE id = ${run.receiptId}` : [];
   const [job] = await sql`SELECT j.state FROM operation_runs r JOIN pgboss.job j ON j.id = r.job_id WHERE r.id = ${id}`;
   const nextAction = run.status === "completed" || run.status === "failed" ? "view-results"
     : receipt?.status === "unknown" ? "review-unknown"
     : run.status === "stopped" || run.status === "needs_review" ? "review-or-resume"
     : ["received","completed"].includes(receipt?.status) ? "local-recovery"
     : job && ["created","retry","active"].includes(job.state) ? "wait-for-job" : "wait-for-recovery";
-  return { ...run, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
+  return { ...run, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { tool, upstream, mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
 }
 export async function operationResults(id: number, cursor = 0, limit = 100) {
   z.number().int().nonnegative().parse(cursor);

@@ -28,6 +28,14 @@ test("real work and six account result cards show local options lookup without p
     }
     for (const [platform, kind] of [["xiaohongshu", "xiaohongshu_research"], ["xiaohongshu", "xiaohongshu_account_rank"], ["wechat", "wechat_account_rank"], ["weibo", "weibo_trend"], ["tiktok", "tiktok_topic"], ["youtube", "youtube_work"], ["instagram", "instagram_work"], ["toutiao", "toutiao_work"], ["shipinhao", "shipinhao_work"], ["kuaishou", "kuaishou_work"], ["zhihu", "zhihu_work"]]) assert(!render(platform!, kind!).includes("查看可用详情接口"), kind);
     for (const kind of ["baijiahao_work", "baijiahao_account"]) assert.equal((render("baijiahao", kind).match(/查看可用详情接口/g) ?? []).length, 1, kind);
+    for (const data of [{identity: {}, workId: "123", url: "https://www.douyin.com/video/123"}, {identity: {uid: "456"}, workId: null, url: "https://www.douyin.com/video/123"}]) {
+      const html = render("douyin", "douyin_work", {...data, provider: "agentkey"});
+      assert.match(html, /AgentKey.*稳定/);
+      assert.match(html, /<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/);
+      assert(!html.includes("本原生链接含作品 ID，可由服务端据此核实"));
+      const redfox = render("douyin", "douyin_work", {...data, provider: "redfox"});
+      assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(redfox));
+    }
     const xRecord = { tweetId: "9007199254740993123", author: { userId: "123", username: null }, text: "<script>plain</script>🦊", createdAt: "2026-10-20T00:00:00Z", url: "https://x.com/received/status/9007199254740993123" };
     const xData = { operationId: "QCP75W33", workId: xRecord.tweetId, identity: { userId: "123" }, context: { username: "context_handle" }, originResultId: 8, record: xRecord };
     const xHtml = render("x", "x_detail_work", xData);

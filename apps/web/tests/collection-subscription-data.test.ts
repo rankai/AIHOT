@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectionConfig, collectionDetailsAvailable, collectionDraft, collectionOperations, collectionPagingNote, collectionPreviewBody, collectionPriceNote, collectionSaveCommand, collectionSeedFromState, collectionSeedNavigation, collectionSubscriptionsHref, collectionSummaryRows, isCollectionOperationKey, isWeiboSnapshot } from "../app/features/admin/collection-subscription-data.ts";
+import { collectionConfig, collectionDetailsAvailable, collectionDraft, collectionOperations, collectionPagingNote, collectionPreviewBody, collectionPriceNote, collectionProviders, collectionSaveCommand, collectionProviderCommand, collectionProviderPreflightMatches, collectionSeedFromState, collectionSeedNavigation, collectionSubscriptionsHref, collectionSummaryRows, isCollectionOperationKey, isWeiboSnapshot } from "../app/features/admin/collection-subscription-data.ts";
+import type { PlatformCollectionProviderPreflight } from "@aihot/contracts/redfox";
 import { subscriptionExecutionChanges, type CollectionSubscription } from "../app/features/admin/collection-subscription-types.ts";
 import { platformQueryParameters } from "../app/features/admin/platform-query-data.ts";
 import type { PlatformOperation } from "../app/features/admin/platform-types.ts";
@@ -9,7 +10,7 @@ const snapshot: PlatformOperation = { id: "UAQ90A1F", platform: "weibo", label: 
 const douyin: PlatformOperation = { id: "OWIBYU1V", platform: "douyin", label: "抖音作品搜索", purpose: "query", schedulableType: "search", collectionCapabilities: { detailEnrichment: false }, fields: [{ name: "keyword", label: "关键词", type: "string", required: true }, { name: "exactMatch", label: "精准", type: "boolean", required: false, default: false }, { name: "pageNum", label: "页码", type: "integer", required: false, default: 1, constraints: { min: 1 } }] };
 const trend: PlatformOperation = { id: "P3W2W18P", platform: "xiaohongshu", label: "小红书榜单", purpose: "作品榜", schedulableType: "trend", collectionCapabilities: { detailEnrichment: false }, fields: [{ name: "category", label: "类别", type: "select", required: true, options: [{ value: "科学探索", label: "科学探索" }] }] };
 const insight: PlatformOperation = { id: "3X8FGEEM", platform: "xiaohongshu", label: "洞察", purpose: "作品与研究", schedulableType: "search", fields: [{ name: "keyword", label: "关键词", type: "string", required: false }, { name: "pageNum", label: "页码", type: "integer", required: false, default: 1 }, { name: "pageSize", label: "每页", type: "integer", required: false, default: 10 }] };
-const current: CollectionSubscription = { id: 12, platform: "weibo", name: "微博研究", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: true, intervalMinutes: 30, enrichDetails: true, limits: { pages: 3, items: 100, details: 20 }, editVersion: 7, executionVersion: 3, nextRunAt: null, activeRun: null };
+const current: CollectionSubscription = { id: 12, provider: "redfox", platform: "weibo", name: "微博研究", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: true, intervalMinutes: 30, enrichDetails: true, limits: { pages: 3, items: 100, details: 20 }, editVersion: 7, executionVersion: 3, nextRunAt: null, activeRun: null };
 
 test("only explicit schedulable metadata exposes operations, without assuming platform or array size", () => {
   const list = { ...douyin, id: "new-list", schedulableType: "list" as const };
@@ -20,7 +21,7 @@ test("only explicit schedulable metadata exposes operations, without assuming pl
 });
 test("legacy Weibo bodies retain string page, flags and original defaults; UA alone is the no-param snapshot", () => {
   const initial = collectionDraft(weibo); initial.name = " 微博研究 "; initial.values.keyword = "AI";
-  assert.deepEqual(collectionConfig(weibo, initial), { name: "微博研究", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: false, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } });
+  assert.deepEqual(collectionConfig(weibo, initial), { name: "微博研究", provider: "redfox", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: false, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } });
   assert.equal(isWeiboSnapshot(snapshot), true); assert.equal(isWeiboSnapshot(trend), false);
   const snapDraft = { ...collectionDraft(snapshot), name: "热搜" };
   assert.deepEqual(collectionConfig(snapshot, snapDraft).parameters, {}); assert.deepEqual(collectionConfig(snapshot, snapDraft).limits, { pages: 3, items: 100, details: 20 });
@@ -31,6 +32,14 @@ test("new platforms default disabled/details0 and preserve false/integer wire ty
   const body = collectionConfig(douyin, initial);
   assert.deepEqual(body.parameters, { keyword: "AI", exactMatch: false, pageNum: 2 }); assert.equal(body.enabled, false); assert.equal(body.enrichDetails, false); assert.equal(body.limits.details, 0); assert(!Object.hasOwn(body, "platform"));
   assert.equal(collectionDetailsAvailable(weibo), true); assert.equal(collectionDetailsAvailable({ ...douyin, collectionCapabilities: undefined }), false);
+});
+test("provider options come from the operation capability and future providers require no frontend branch", () => {
+  const future = { ...douyin, collectionProviders: [{ id: "redfox", label: "Redfox" }, { id: "agentkey", label: "AgentKey" }] };
+  assert.deepEqual(collectionProviders(future).map(provider => provider.id), ["redfox", "agentkey"]);
+  const draft = { ...collectionDraft(future), name: "未来供应商", values: { keyword: "AI" }, provider: "agentkey" };
+  assert.equal(collectionConfig(future, draft).provider, "agentkey");
+  assert.throws(() => collectionConfig(future, { ...draft, provider: "unsupported" }), /不支持所选供应商/);
+  assert.throws(() => collectionConfig({ ...future, collectionProviders: [] }, { ...draft, provider: "" }), /不支持所选供应商/);
 });
 test("non-UA trend keeps descriptor parameters and real item/page limits rather than snapshot behavior", () => {
   const initial = { ...collectionDraft(trend), name: "榜单", values: { category: "科学探索" }, pages: 4, items: 230 };
@@ -51,7 +60,7 @@ test("platform lock and configuration/parameter/limit changes preserve CAS execu
   const old = collectionConfig(weibo, collectionDraft(weibo, current), "weibo");
   assert.equal(subscriptionExecutionChanges(current, { ...old, name: "改名", intervalMinutes: 60 }), false);
   assert.equal(subscriptionExecutionChanges(current, { ...old, parameters: { page: "1", keyword: "AI", searchType: "61" } }), false);
-  for (const changed of [{ ...old, operationId: snapshot.id }, { ...old, enabled: false }, { ...old, limits: { ...old.limits, items: 101 } }, { ...old, parameters: { ...old.parameters, keyword: "robot" } }]) assert.equal(subscriptionExecutionChanges(current, changed), true);
+  for (const changed of [{ ...old, provider: "agentkey" }, { ...old, operationId: snapshot.id }, { ...old, enabled: false }, { ...old, limits: { ...old.limits, items: 101 } }, { ...old, parameters: { ...old.parameters, keyword: "robot" } }]) assert.equal(subscriptionExecutionChanges(current, changed), true);
   const arrays = { ...old, parameters: { ids: ["1", "2"], flag: false } }; assert.equal(subscriptionExecutionChanges(arrays, { ...arrays, parameters: { flag: false, ids: ["1", "2"] } }), false); assert.equal(subscriptionExecutionChanges(arrays, { ...arrays, parameters: { flag: false, ids: ["2", "1"] } }), true);
 });
 test("save commands carry exact existing CAS version or create config without manufacturing IDs", () => {
@@ -59,6 +68,19 @@ test("save commands carry exact existing CAS version or create config without ma
   assert.deepEqual(collectionSaveCommand(null, null, config), { method: "POST", path: "/api/admin/redfox/collections", body: config });
   assert.deepEqual(collectionSaveCommand(12, 7, config), { method: "PATCH", path: "/api/admin/redfox/collections/12", body: { editVersion: 7, config } });
   for (const version of [null, 0, -1, 1.5]) assert.throws(() => collectionSaveCommand(12, version, config));
+});
+test("provider commands carry only saved CAS and target, and stale or mismatched preflights cannot authorize switching", () => {
+  assert.deepEqual(collectionProviderCommand(12, 7, "agentkey"), {path: "/api/admin/redfox/collections/12/provider/preflight", body: {editVersion: 7, targetProvider: "agentkey"}});
+  assert.deepEqual(collectionProviderCommand(12, 7, "agentkey", "明确选择"), {path: "/api/admin/redfox/collections/12/provider/switch", body: {editVersion: 7, targetProvider: "agentkey", reason: "明确选择"}});
+  const preflight: PlatformCollectionProviderPreflight = {subscriptionId: current.id, editVersion: 7, currentProvider: "redfox", targetProvider: "agentkey", supported: true, checks: [], impact: {activeRunId: null, enabled: true, intervalMinutes: 30, limits: current.limits, note: "影响"}};
+  assert.equal(collectionProviderPreflightMatches(preflight, current, 7, "agentkey"), true);
+  for (const candidate of [{...preflight, supported: false}, {...preflight, editVersion: 6}, {...preflight, subscriptionId: 13}, {...preflight, currentProvider: "agentkey"}, {...preflight, targetProvider: "redfox" as const}]) assert.equal(collectionProviderPreflightMatches(candidate, current, 7, "agentkey"), false);
+  assert.equal(collectionProviderPreflightMatches(preflight, {...current, editVersion: 8}, 7, "agentkey"), false);
+  assert.equal(collectionProviderPreflightMatches(preflight, current, 8, "agentkey"), false);
+  const updated: CollectionSubscription = {...current, provider: "agentkey", platform: "douyin", operationId: "OWIBYU1V", parameters: {keyword: "目标词"}, editVersion: 8, enrichDetails: false};
+  const synced = collectionDraft(douyin, updated);
+  assert.equal(synced.provider, "agentkey");
+  assert.deepEqual(synced.values, {keyword: "目标词"});
 });
 test("per-operation drafts and query-seed snapshots are isolated; seed never enables or creates a subscription", () => {
   const values = { keyword: " 原词 ", exactMatch: "false", pageNum: "3" }, seed = { operationId: douyin.id, values, sequence: 1 };
@@ -81,7 +103,7 @@ test("collection links use the source view and query handoff keeps raw parameter
   for (const state of [null, {}, { collectionSeed: null }, { collectionSeed: { operationId: douyin.id, values: "{}", sequence: 1 } }, { collectionSeed: { operationId: douyin.id, values: { keyword: 3 }, sequence: 1 } }]) assert.equal(collectionSeedFromState(state),null);
 });
 test("preview is a one-off query-only body and uses the same raw/boolean conversions without name, enabled, limits or CAS", () => {
-  assert.deepEqual(collectionPreviewBody(douyin, { keyword: "AI", exactMatch: "false", pageNum: "2" }), { operationId: douyin.id, parameters: { keyword: "AI", exactMatch: false, pageNum: 2 } });
+  assert.deepEqual(collectionPreviewBody(douyin, { keyword: "AI", exactMatch: "false", pageNum: "2" }), { provider:"redfox",operationId: douyin.id, parameters: { keyword: "AI", exactMatch: false, pageNum: 2 } });
   assert.throws(() => collectionPreviewBody({ ...douyin, schedulableType: null }, { keyword: "AI" }));
   assert.throws(() => collectionPreviewBody(douyin, { keyword: "" }));
   const youtube: PlatformOperation = { id: "GC5SC5HS", platform: "youtube", label: "搜索", purpose: "query", schedulableType: "search", fields: [{ name: "searchQuery", label: "词", type: "string", required: true }, { name: "continuationToken", label: "游标", type: "string", required: false }] };
@@ -99,4 +121,6 @@ test("insight keyword controls single-page explanation and research counts never
   const rows = collectionSummaryRows({ operationId: insight.id, workCount: 2, selectedCount: 1, researchCount: 3, selectedResearchCount: 2, unprocessedResearchDueToLimit: 1 });
   assert.deepEqual(rows.map(([, value]) => value), ["2", "1", "3", "2", "1"]); assert(rows.some(([label]) => label.includes("研究"))); assert(!rows.some(([label]) => label.includes("入库文章")));
   assert.deepEqual(collectionSummaryRows({ count: 0 }), []); assert(isCollectionOperationKey("redfox.weibo.collection")); assert(isCollectionOperationKey("redfox.platform.collection")); assert(!isCollectionOperationKey("redfox.wechat.collection"));
+  assert(isCollectionOperationKey("agentkey.douyin.search", "agentkey", "collection"));
+  assert(!isCollectionOperationKey("agentkey.douyin.search", "agentkey", "query"));
 });

@@ -39,3 +39,14 @@ test("Douyin inputs retain string IDs, literal false and numeric step-based offs
   assert.deepEqual(platformParameters(operation, { videoId: id, exactMatch: "false", offset: "20" }), { videoId: id, exactMatch: false, offset: 20 });
   assert.throws(() => platformParameters(operation, { videoId: id, offset: "19" }));
 });
+
+
+test("AgentKey missing stable identities block import while Redfox still allows explicit supplements", () => {
+  for (const data of [{identity: {}, workId: id, url: address}, {identity: {uid: "123"}, workId: null, url: address}]) {
+    const fields = douyinImportFields("douyin_work", {...data, provider: "agentkey"});
+    assert.equal(fields.canImport, false);
+    assert.match(fields.blockedReason!, /AgentKey.*稳定/);
+    assert.equal(douyinImportFields("douyin_work", {...data, provider: "redfox"}).canImport, true);
+  }
+  assert.equal(douyinImportFields("douyin_work", {provider: "agentkey", identity: {uid: "123"}, workId: id, url: address}).canImport, true);
+});

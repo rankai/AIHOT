@@ -63,7 +63,7 @@ docker compose up -d --build
 
 可重复传 `--source <id>` 只迁指定源，例如 `--source x-example --source mp-example`；部分迁移的统计仅代表指定范围，不表示全站完成。默认处理全部 X/公众号源，包括停用源。脚本按源事务、可失败重跑，已接管订阅不会被旧快照覆盖；它读取有限的本地历史范围，但不限制每个源的未决回执数量，不截断证据，不调用供应商。
 
-回退优先关闭 `REDFOX_CALLS_ENABLED`，保留当前 Worker 与已收证据供本地恢复。换回 SocialData/Dajiala 须通过当前版本同一主订阅的预检和更新。旧 Worker 只认识旧 source 快照，不能直接恢复运行；程序降级须另外核对有效订阅、水位、回执与私有文件，或向前修复。
+回退优先关闭 `REDFOX_CALLS_ENABLED` 或 `AGENTKEY_CALLS_ENABLED`，保留当前 Worker 与已收证据供本地恢复。换回 SocialData/Dajiala 须通过当前版本同一主订阅的预检和更新。旧 Worker 只认识旧 source 快照，也不了解 AgentKey 工具/解析合同，不能直接恢复运行；程序降级须另外暂停在途 AgentKey 任务并核对有效订阅、水位、回执与私有文件，或向前修复。
 
 ### 备份
 
@@ -86,7 +86,7 @@ docker compose logs -f --tail 100 api worker web
 ## 花多少钱
 
 - **模型**：每条新资料至少预筛一次；可能入选的再评分两次，入选的还要写标题摘要、打标签、归组，另外还有日报和事件综述。我们用示范信源在本地试跑，第一次导入的 152 条资料一共用了大约 930 次模型调用。之后每天用多少，取决于你的信源每天更新多少条。后台“模型与评测”页能看到每一步的调用次数和输入输出 token 数。
-- **付费采集**（X、公众号、Jina、Redfox）：按请求计费，需要后端凭证及预算。Redfox 还需显式设置 `REDFOX_CALLS_ENABLED=true`，其 9 个用途预算默认均为 0；填 key 不会启用或切换供应商。采集另受 `COLLECT_ENABLED` 控制，`MODEL_CALLS_ENABLED` 只控制模型处理。
+- **付费采集**（X、公众号、Jina、Redfox、AgentKey）：按请求计费，需要后端凭证及预算。Redfox 还需显式设置 `REDFOX_CALLS_ENABLED=true`，其 9 个用途预算默认均为 0；AgentKey 还需显式设置 `AGENTKEY_CALLS_ENABLED=true`，`agentkey.collect` / `agentkey.query` 默认均为 0。填 key 不会启用或切换供应商。采集另受 `COLLECT_ENABLED` 控制，`MODEL_CALLS_ENABLED` 只控制模型处理。
 - 所有付费服务都有每分钟、每小时、每天的调用上限（后台“设置 → 预算”），超过就暂停，不会一夜之间刷爆账单。填 0 表示立即停用这个服务。
 
 ## 不用 Docker

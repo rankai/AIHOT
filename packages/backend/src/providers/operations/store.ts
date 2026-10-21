@@ -13,6 +13,7 @@ export interface OperationProgress extends Record<string, unknown> {
 export interface RunInput extends Record<string, unknown> { members: SubscriptionMember[]; forceSourceId?: string | null }
 export interface RunRow {
   id: number; provider: string; status: string; step_key: string; step_version: number; generation: number;
+  operation_key?: string; contract_version?: number;
   limits: Record<string, number>;
   input: RunInput; input_hash: string; progress: OperationProgress; current_receipt_id: number | null;
 }
