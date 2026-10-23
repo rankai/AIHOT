@@ -1,5 +1,6 @@
-import {parseDouyinSearch} from "../agentkey/douyin-parser.ts";
-import {agentKeyRouteFor,douyinSearchInput,douyinSearchRoute} from "../agentkey/douyin-contract.ts";
+import {logicalKeyFor} from "../receipts.ts";
+import {parseAgentKeyDouyin,verifyDouyinDetailAuthor,legacyDouyinV4Record} from "../agentkey/douyin-parser.ts";
+import {douyinSearchRoute,douyinTopicRoute,agentKeyRouteFor,agentKeyOperation,douyinAccountPostsRoute,douyinDetailRoute,douyinAccountSearchRoute,agentKeyRouteInput} from "../agentkey/douyin-contract.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -33,11 +34,11 @@ function publicationTime(operation:string,record:Record<string,unknown>):Date|nu
 export async function importDouyinResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
     const {parsed,origin,sourceDiscoveredAt,operationId}=snapshot.provider==="agentkey"?await agentKeyEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="douyin_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as DouyinIdentity,identity:DouyinIdentity={...received};
-    if(snapshot.provider==="agentkey"&&(!received.uid&&!received.secUserId||!parsed.data.workId))throw new UnsupportedReplacement("A received stable author and work identity is required");
+    if(snapshot.provider==="agentkey"&&(!received.uid&&!received.secUserId||!account&&!parsed.data.workId))throw new UnsupportedReplacement(account?"A received stable account identity is required":"A received stable author and work identity is required");
     if(account&&input.supplement)throw new UnsupportedReplacement("Account import requires received stable IDs");
     for(const kind of ["uid","secUserId"] as const){const extra=input.supplement?.[kind];if(extra&&received[kind]&&extra!==received[kind])throw new StaleOperationError("Received stable identity cannot be replaced");if(extra)identity[kind]=extra;}
     const original=typeof parsed.data.url==="string"?parsed.data.url:null,url=original??input.supplement?.url;
@@ -100,16 +101,39 @@ async function redfoxEvidence(tx:Tx,snapshot:any){
     return {parsed,origin,sourceDiscoveredAt,operationId:operation.data};
 }
 
-async function agentKeyEvidence(tx:Tx,snapshot:any){
-  requireLiveResult(snapshot,"douyin_work");
-  if(!agentKeyRouteFor(snapshot)||snapshot.receipt_model!==douyinSearchRoute.tool||!["received","completed"].includes(snapshot.receipt_status)||snapshot.kind!=="douyin_work")throw new UnsupportedReplacement("Not a confirmed AgentKey Douyin result");
+async function agentKeyEvidence(tx:Tx,snapshot:any):Promise<{parsed:{kind:string;data:Record<string,unknown>};origin:{discoveredAt:string}|undefined;sourceDiscoveredAt:Date;operationId:string}>{
+  requireLiveResult(snapshot);
+  if(!["douyin_work","douyin_account"].includes(snapshot.kind))throw new UnsupportedReplacement("Not an importable AgentKey Douyin result");
   const [summary]=await tx`SELECT * FROM operation_results WHERE id=${Number(snapshot.data.querySummaryId)||0} AND run_id=${snapshot.run_id} AND step_version=${snapshot.step_version} AND receipt_id=${snapshot.receipt_id} AND kind='query_summary'`;
   requireLiveResult(summary,"query_summary");
-  if(!summary||summary.data.provider!=="agentkey"||summary.data.tool!==douyinSearchRoute.tool)throw new UnsupportedReplacement("Missing AgentKey page receipt evidence");
-  const query=douyinSearchInput.parse(summary.data.query);
-  if(snapshot.receipt_purpose!==douyinSearchRoute.operationKey||snapshot.receipt_subject!==`operation:${snapshot.run_id}`||snapshot.receipt_service!==(snapshot.input.mode==="collection"?"agentkey.collect":"agentkey.query")||stableJson(snapshot.receipt_request?.params)!==stableJson(query))throw new UnsupportedReplacement("AgentKey receipt does not prove this page query");
-  const page=parseDouyinSearch(snapshot.receipt_response,query);
+  const operation=agentKeyOperation(summary?.data.operationId),route=operation?.route;
+  if(!route||snapshot.contract_version!==route.contractVersion||summary.data.provider!=="agentkey"||summary.data.tool!==route.tool||snapshot.receipt_model!==route.tool||!["received","completed"].includes(snapshot.receipt_status))throw new UnsupportedReplacement("Missing AgentKey page receipt evidence");
+  if(snapshot.kind!==(route===douyinAccountSearchRoute?"douyin_account":"douyin_work"))throw new UnsupportedReplacement("AgentKey result kind does not match its route");
+  if(![douyinSearchRoute,douyinAccountPostsRoute,douyinDetailRoute,douyinAccountSearchRoute,douyinTopicRoute].some(r=>r===route))throw new UnsupportedReplacement("Research snapshots cannot import or bind sources");
+  // Historical results belong to their original step, not the run's now-current step.
+  if(!agentKeyRouteFor({...snapshot,step_key:route.stepKey}))throw new UnsupportedReplacement("Unsupported original AgentKey step");
+  const query=agentKeyRouteInput(route,summary.data.query);
+  const service=snapshot.input.mode==="collection"?"agentkey.collect":"agentkey.query";
+  const identity={runId:snapshot.run_id,stepVersion:snapshot.step_version,endpoint:snapshot.receipt_request?.endpoint,contractVersion:route.contractVersion,tool:route.tool,params:query};
+  const logicalKey=logicalKeyFor({service,purpose:route.operationKey,model:route.tool,identity});
+  if(snapshot.receipt_logical_key!==logicalKey||snapshot.receipt_purpose!==route.operationKey||snapshot.receipt_subject!==`operation:${snapshot.run_id}`||snapshot.receipt_service!==service||snapshot.receipt_request?.tool!==route.tool||stableJson(snapshot.receipt_request?.params)!==stableJson(query))throw new UnsupportedReplacement("AgentKey receipt does not prove this page query and step");
+  const page=parseAgentKeyDouyin(snapshot.receipt_response,route,query);
   const parsed=page.candidates.find(item=>item.itemKey===snapshot.item_key);
-  if(!parsed||stableJson({...snapshot.data,pendingReason:undefined,querySummaryId:undefined})!==stableJson(parsed.data))throw new UnsupportedReplacement("AgentKey result differs from its received page");
-  return {parsed,origin:undefined,sourceDiscoveredAt:new Date(snapshot.received_at??snapshot.created_at),operationId:"OWIBYU1V"};
+  const receivedData={...snapshot.data,pendingReason:undefined,querySummaryId:undefined};
+  if(parsed&&route===douyinSearchRoute){
+    // Old V4 results retained the entire AwemeInfo. Accept only that exact receipt-derived shape;
+    // the material always uses the current safe projection, including when importing history.
+    const legacy=legacyDouyinV4Record(snapshot.receipt_response,snapshot.item_key,parsed.data.record as Record<string,unknown>);
+    if(legacy&&stableJson(receivedData.record)===stableJson(legacy))receivedData.record=parsed.data.record;
+  }
+  if(!parsed||parsed.kind!==snapshot.kind||stableJson(receivedData)!==stableJson(parsed.data))throw new UnsupportedReplacement("AgentKey result differs from its received page");
+  let origin:{discoveredAt:string}|undefined;
+  if(route===douyinDetailRoute&&snapshot.operation_key===douyinAccountPostsRoute.operationKey){
+    const [source]=await tx`SELECT z.*,r.provider,r.operation_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${Number(summary.data.originResultId)||0} AND z.run_id=${snapshot.run_id} AND z.step_version<${snapshot.step_version}`;
+    if(!source||source.data.operationId!=="QEQLCKD6")throw new UnsupportedReplacement("Missing original account page work evidence");
+    const original=await agentKeyEvidence(tx,source);
+    verifyDouyinDetailAuthor(parsed.data,original.parsed.data,source.receipt_response,snapshot.input.parameters);
+    origin={discoveredAt:original.sourceDiscoveredAt.toISOString()};
+  }
+  return {parsed,origin,sourceDiscoveredAt:new Date(snapshot.received_at??snapshot.created_at),operationId:operation!.operationId};
 }

@@ -1,4 +1,12 @@
+import {xCollectionIds,xProviderVariants,xResearchDescriptors as agentKeyXDescriptors} from '@aihot/backend/providers/agentkey/x-contract';
+import {weiboProviderVariants,weiboResearchDescriptors} from "@aihot/backend/providers/agentkey/weibo-contract";
+import {bilibiliProviderVariants,bilibiliResearchDescriptors} from "@aihot/backend/providers/agentkey/bilibili-contract";
+import {xiaohongshuResearchDescriptors,xiaohongshuProviderVariants} from "@aihot/backend/providers/agentkey/xiaohongshu-contract";
+import {toutiaoResearchDescriptors,toutiaoProviderVariants} from "@aihot/backend/providers/agentkey/toutiao-contract";
+import {wechatResearchDescriptors,wechatAgentKeyVariant} from "@aihot/backend/providers/agentkey/wechat-contract";
+import {douyinSnapshotDescriptors,douyinSuggestDescriptor} from "@aihot/backend/providers/agentkey/douyin-contract";
 import {createAgentKeyQuery} from "@aihot/backend/providers/agentkey/queries";
+import type {PlatformOperationDescriptor} from "@aihot/contracts/redfox";
 import {CollectionDetailTarget,collectionDetailTargets} from "@aihot/backend/providers/redfox/collection-detail";
 import {importXDetailResult} from "@aihot/backend/providers/redfox/import-x-detail";
 import {importXSearchResult} from "@aihot/backend/providers/redfox/import-x-search";
@@ -83,13 +91,28 @@ export function registerAdminRedfox(app: FastifyInstance) {
   app.patch("/api/admin/redfox/subscriptions/:id",adminHandler(async(req,reply,admin)=>{const result=await updateWeiboSubscription(z.coerce.number().int().positive().parse((req.params as {id:string}).id),req.body,actorOf(admin));return result??sendProblem(req,reply,{status:404,code:"not_found",detail:"Subscription not found"});}));
   app.post("/api/admin/redfox/subscriptions/:id/run",adminHandler(async(req,reply,admin)=>{const run=await startWeiboSubscription(z.coerce.number().int().positive().parse((req.params as {id:string}).id),actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.get("/api/admin/redfox/operations",adminHandler(async()=>{
-    const operations=[...mediaToolDescriptors(),...synchronousOperations(),...wechatDescriptors(),...douyinDescriptors(),...xiaohongshuDescriptors(),...tiktokDescriptors(),...bilibiliDescriptors(),...youtubeDescriptors(),...instagramDescriptors(),...shipinhaoDescriptors(),...kuaishouDescriptors(),...toutiaoDescriptors(),...qichezhijiaDescriptors(),...dongchediDescriptors(),...yicheDescriptors(),...baijiahaoDescriptors(),...xResearchDescriptors(),...hotResearchDescriptors(),...redfoxAccountDescriptors(),...zhihuDescriptors(),...socialResearchDescriptors()];
+    const operations:PlatformOperationDescriptor[]=[...agentKeyXDescriptors,...weiboResearchDescriptors,...bilibiliResearchDescriptors,...xiaohongshuResearchDescriptors,...toutiaoResearchDescriptors,douyinSuggestDescriptor,...douyinSnapshotDescriptors,...mediaToolDescriptors(),...synchronousOperations(),...wechatDescriptors(),...wechatResearchDescriptors,...douyinDescriptors(),...xiaohongshuDescriptors(),...tiktokDescriptors(),...bilibiliDescriptors(),...youtubeDescriptors(),...instagramDescriptors(),...shipinhaoDescriptors(),...kuaishouDescriptors(),...toutiaoDescriptors(),...qichezhijiaDescriptors(),...dongchediDescriptors(),...yicheDescriptors(),...baijiahaoDescriptors(),...xResearchDescriptors(),...hotResearchDescriptors(),...redfoxAccountDescriptors(),...zhihuDescriptors(),...socialResearchDescriptors()];
     const prices=await sql`SELECT model,currency,per_request FROM service_prices WHERE service='redfox.collect' AND model IN ${sql([...collectionOperationIds,...CollectionDetailTarget.options])}`;
     return operations.map(operation=>{
-      if(!(collectionOperationIds as readonly string[]).includes(operation.id))return operation;
-      const price=prices.find(p=>p.model===operation.id);
-      const detailOperations=collectionDetailTargets(operation.id).map(operationId=>{const definition=operations.find(o=>o.id===operationId),p=prices.find(x=>x.model===operationId);return {operationId,label:definition?.label??operationId,fields:operationId==="LLCI8QTE"?(definition?.fields??[]).filter(f=>f.name==="page"):[],price:p?{amount:p.per_request==null?null:Number(p.per_request),currency:p.currency,basis:"estimated" as const}:null};});
-      return {...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionProviders:collectionProviderOptions(operation.id),collectionCapabilities:{detailEnrichment:detailOperations.length>0,detailOperations}};
+      if(operation.collectionProviders?.length&&operation.collectionProviders.every(provider=>provider.id==="agentkey"))return operation;
+      if((collectionOperationIds as readonly string[]).includes(operation.id)){
+        const price=prices.find(p=>p.model===operation.id);
+        const detailOperations=collectionDetailTargets(operation.id).map(operationId=>{const definition=operations.find(o=>o.id===operationId),p=prices.find(x=>x.model===operationId);return {operationId,label:definition?.label??operationId,fields:operationId==="LLCI8QTE"?(definition?.fields??[]).filter(f=>f.name==="page"):[],price:p?{amount:p.per_request==null?null:Number(p.per_request),currency:p.currency,basis:"estimated" as const}:null};});
+        operation={...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionProviders:collectionProviderOptions(operation.id),collectionCapabilities:{detailEnrichment:detailOperations.length>0,detailOperations}};
+      }
+      const xVariant=xProviderVariants.find(v=>v.operationId===operation.id);
+      if(xVariant)return operation.id.startsWith('x.')?operation:{...operation,schedulableType:(xCollectionIds as readonly string[]).includes(operation.id)?(operation.id==='5K5EG87P'?'search' as const:'list' as const):operation.schedulableType,queryProviders:[{id:'redfox',label:'Redfox'},xVariant],collectionProviders:collectionProviderOptions(operation.id)};
+      const weiboVariant=weiboProviderVariants.find(v=>v.operationId===operation.id);
+      if(weiboVariant)return operation.id.startsWith("weibo.")?operation:{...operation,collectionProviders:[{id:"redfox",label:"Redfox"},weiboVariant]};
+      const biliVariant=bilibiliProviderVariants.find(v=>v.operationId===operation.id);
+      if(biliVariant)return operation.id.startsWith("bilibili.")?operation:{...operation,collectionProviders:[{id:"redfox",label:"Redfox"},biliVariant]};
+      const xhsVariant=xiaohongshuProviderVariants.find(v=>v.operationId===operation.id);
+      if(xhsVariant)return operation.id.startsWith("xiaohongshu.")?operation:{...operation,collectionProviders:[{id:"redfox",label:"Redfox"},xhsVariant]};
+      const toutiaoVariant=toutiaoProviderVariants.find(v=>v.operationId===operation.id);
+      if(toutiaoVariant)return operation.id==='PAB6Z75Y'?{...operation,collectionProviders:[{id:'redfox',label:'Redfox'},toutiaoVariant]}:operation;
+      const wechatVariant=wechatAgentKeyVariant(operation.id);
+      if(wechatVariant&&!operation.id.startsWith("wechat."))return {...operation,collectionProviders:[...(operation.collectionProviders??[{id:"redfox",label:"Redfox"}]),wechatVariant]};
+      return ["FK67XDVQ","P5CHB3BZ","XUT4CECZ"].includes(operation.id)?{...operation,collectionProviders:collectionProviderOptions(operation.id)}:operation;
     });
   }));
   app.post("/api/admin/redfox/queries",adminHandler(async(req,reply,admin)=>{const {provider,...body}=z.object({provider:z.enum(["redfox","agentkey"]).default("redfox")}).passthrough().parse(req.body);const run=provider==="agentkey"?await createAgentKeyQuery({...body,provider},actorOf(admin),req.headers["idempotency-key"]):await createSynchronousQuery(body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));

@@ -19,6 +19,7 @@ export interface PlatformField {
   options?: readonly { value: string; label: string }[];
 }
 export interface PlatformCollectionProvider {
+  operationLabel?: string;
   id: string;
   label: string;
   fields?: readonly PlatformField[];
@@ -34,6 +35,8 @@ export interface PlatformOperationDescriptor {
   purpose: string;
   collectionPrice?: { amount:number|null;currency:string;basis:"estimated" } | null;
   collectionProviders?: readonly PlatformCollectionProvider[];
+  /** One-off query variants when they differ from the schedulable providers. */
+  queryProviders?: readonly PlatformCollectionProvider[];
   collectionCapabilities?: { detailEnrichment:boolean; detailOperations?: readonly {operationId:string;label:string;fields:readonly PlatformField[];price:{amount:number|null;currency:string;basis:"estimated"}|null}[] };
   schedulableType: null | "search" | "trend" | "list";
 }

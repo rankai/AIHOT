@@ -39,6 +39,7 @@ export function ToutiaoResult({ result: r }: { result: OperationResult }) {
     <p className="text-[12px] text-ink-4">uid 与 secUid 是不同类型的作者身份，不互换；名称及查询输入的主页 token 仅作定位，不证明作者身份。</p>
     {fields.account && typeof record.introduction === "string" && <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink-2">{record.introduction}</p>}
     {fields.work && <>
+      {r.data.provider === "agentkey" && <p className="text-[12px] text-ink-3">标题来自上游分享标题。本次未提供正文和可信发表时间；显式导入后正文待补，时间按既有历史回填规则处理，不自动购买补全。</p>}
       <KV items={[["已确认作品 ID（响应或原文）", fields.workId ?? "未提供"], ["响应 opusId", text(record.opusId)], ["响应 workId", text(record.workId)], ...(fields.requestedWorkId ? [["请求作品 ID（仅输入）", fields.requestedWorkId]] as Array<[string, string]> : []), ["作品类型 workType", facts.workType === undefined ? "未提供" : facts.workType ? "视频（true）" : "图文（false）"], ["hasVideo", boolean(facts.hasVideo)], [`原始发布时间（${facts.publishTimeUnit}）`, text(record.publishTime)], ["原始更新时间", text(record.updateTime)], [`时长（${facts.durationUnit}）`, text(record.duration)]]} />
       {r.data.operationId === "28CFGF5I" && <KV items={[["本项上游 pageCount", text(record.pageCount)], ["本项上游 hasNext", boolean(facts.hasNext)]]} />}
       <p className="text-[12px] text-ink-4">请求 ID 与响应字段分别保留。缺少可信时区或发表时间的新增材料按历史/回填语义处理，不把发现时间当作发表时间。搜索结果的 pageCount / hasNext 属于各项，不合成为整页是否还有结果。</p>
@@ -49,6 +50,7 @@ export function ToutiaoResult({ result: r }: { result: OperationResult }) {
     {media.length > 0 && <div className="space-y-1"><p className="text-[12px] text-ink-3">实际收到的媒体链接（不是原文，不表示已下载）</p><div className="flex flex-wrap gap-3 text-[12px]">{media.map(item => <a className="break-all text-accent" key={item.key} href={item.url} target="_blank" rel="noreferrer">{item.label} ↗</a>)}</div></div>}
     {missing.length > 0 && <ul className="space-y-1 rounded-control bg-amber/10 p-3 text-[12.5px] text-amber">{missing.map(item => <li key={item}>{item}</li>)}</ul>}
     {fields.blockedReason && <p className="rounded-control bg-amber/10 p-3 text-[13px] text-amber">{fields.blockedReason}</p>}
+    {r.data.provider === "agentkey" && !fields.canImport && <p className="text-[12px] text-amber">AgentKey 作品须已收稳定作者 UID、作品 ID 和相符原生原文；缺项不能用手工输入代替响应证据。</p>}
     {typeof r.data.originResultId === "number" && Number.isSafeInteger(r.data.originResultId) && r.data.originResultId > 0 && <p className="text-[12px] text-ink-3">来源结果 #{r.data.originResultId}；原发现时间由服务端冻结保留。</p>}
     {detailEligible && <div className="space-y-2 rounded-control bg-bg-sunk p-3"><Button size="sm" disabled={!detailRequest || !!pending} busy={pending === `toutiao-detail:${r.id}`} onClick={async () => {
       if (!detailRequest) return;
@@ -79,5 +81,10 @@ export function ToutiaoResult({ result: r }: { result: OperationResult }) {
 
 export function ToutiaoQuerySummary({ result: r }: { result: OperationResult }) {
   const facts = toutiaoPageFacts(r.data);
+  if (r.data.provider === "agentkey" && r.data.operationId === "toutiao.account_profile" && typeof r.data.statusText === "string") {
+    const record = r.data.record && typeof r.data.record === "object" ? r.data.record as Record<string, unknown> : {};
+    const blank = r.data.profileIsBlank === true || record.name === "" && record.description === "" && record.avatar_url === "" && record.big_avatar_url === "";
+    return <article className="min-w-0 space-y-3 border-b border-line pb-4 last:border-0"><p className="text-[14px] font-medium">今日头条账号资料{blank ? "（本次为空白）" : ""}</p><p className="text-[13px] text-ink-3">{r.data.statusText}</p><KV items={[["响应账号 ID", text(record.user_id)], ...(typeof record.name === "string" && record.name ? [["实收名称", record.name]] as Array<[string,string]> : []), ["发布数", text(record.publish_count)], ["获赞数", text(record.digg_count)], ["粉丝数", text(record.followers_count)], ["关注数", text(record.followings_count)]]} />{typeof record.description === "string" && record.description && <p className="whitespace-pre-wrap break-words text-[13px] text-ink-3">{record.description}</p>}<p className="text-[12px] text-ink-3">{blank ? "本次未收到有效姓名、简介或头像；" : "仅显示本次实收字段；"}不提供信源绑定、文章导入或采集订阅，不推断账号状态。</p><Json value={{resultId:r.id,receiptId:r.receiptId,data:r.data}} label="摘要与溯源诊断" /></article>;
+  }
   return <article className="min-w-0 space-y-2 border-b border-line pb-4 text-[13px] last:border-0"><div className="font-medium">今日头条查询摘要</div><p className="text-ink-3">本次实际返回 {typeof r.data.count === "number" ? r.data.count : "未提供"} 项。</p>{r.data.count === 0 && <p className="text-ink-3">此页没有结果，未创建文章，不自动发起下一页。</p>}{facts.length > 0 && <div className="space-y-1 break-all text-ink-3">{facts.map(([label, value]) => <p key={label}>{label}：<span className="whitespace-pre-wrap">{value}</span></p>)}</div>}<p className="text-[12px] text-ink-4">只展示本次收到的分页事实，不自动翻页；作品搜索各项的 pageCount / hasNext 不合成为整页 hasMore。</p><Json value={{ resultId: r.id, receiptId: r.receiptId, data: r.data }} label="摘要与溯源诊断" /></article>;
 }

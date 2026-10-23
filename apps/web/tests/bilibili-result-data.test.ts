@@ -89,3 +89,15 @@ test("search page remains string while account-list page is integer; false, size
   assert.deepEqual(platformParameters(list, { mid, page: "2" }), { mid, page: 2 });
   assert.throws(() => platformParameters(list, { mid, page: mid }));
 });
+
+
+test("AgentKey requires verified detail identity and never supplements lists or recommendations", () => {
+  const full = { provider: "agentkey", platform: "bilibili", operationId: "TIN1NMTZ", workId: "BV1234567890", avId: "321", url: "https://www.bilibili.com/video/BV1234567890", identity: { mid: "123" } };
+  assert.equal(bilibiliImportFields("bilibili_work", full).canImport, true);
+  for (const data of [{ ...full, operationId: "LEN9QXR3" }, { ...full, role: "provider_recommendation" }, { ...full, identity: {} }, { ...full, url: null }]) {
+    const fields = bilibiliImportFields("bilibili_work", data, full.url);
+    assert.equal(fields.canImport, false); assert.equal(fields.needsUrl, false); assert.equal(fields.needsIdentity, false);
+    assert(bilibiliImportSupplement(fields, { mid: "123", url: full.url, evidence: "manual" }).error);
+  }
+  assert.equal(bilibiliImportFields("bilibili_account", { provider: "agentkey", operationId: "EH53TOT7", identity: { mid: "123" } }).canImport, true);
+});

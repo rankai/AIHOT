@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { prepareAdminBody } from "../app/features/admin/action-body.ts";
 import { platformParameters, type PlatformOperation } from "../app/features/admin/platform-types.ts";
-import { isServiceResearchPlatform, isServiceResearchResult, serviceHotItems, serviceLink, serviceRecordRows, serviceResearchParameters, serviceRole, serviceSummaryRows, serviceXMedia } from "../app/features/admin/service-research-data.ts";
+import { agentKeyXContextRows, agentKeyXRecordRows, agentKeyXRole, agentKeyXScopeRows, agentKeyXSummaryRows, isAgentKeyXResearch, isServiceResearchPlatform, isServiceResearchResult, serviceHotItems, serviceLink, serviceRecordRows, serviceResearchParameters, serviceRole, serviceSummaryRows, serviceXMedia } from "../app/features/admin/service-research-data.ts";
 
 const base: Omit<PlatformOperation, "id" | "platform" | "fields"> = { label: "query", purpose: "query", schedulableType: null };
 const hot: PlatformOperation = { ...base, id: "W94P1QH1", platform: "hot-research", fields: [
@@ -119,4 +119,68 @@ test("rank metrics preserve received zero, null, large strings and profile text 
   assert.deepEqual(serviceRecordRows({ xScore: 0 }, keys), [["xScore", "0"]]);
   assert.equal(serviceLink(record.pictureUrl)?.url, record.pictureUrl);
   assert.equal(serviceLink("https://user:pass@cdn.example/rank-avatar.jpg")?.url, null);
+});
+
+test("AgentKey Weibo hot cards and related suggestions dispatch only the exact successful tools and preserve zero metrics", () => {
+  const hot = { provider: "agentkey", platform: "weibo", operationId: "UAQ90A1F", tool: "TikHub/fetch_hot_search_api_v1_weibo_app_fetch_hot_search_get", record: { desc: "实收热词", desc_extr: 0 } };
+  const related = { ...hot, operationId: "weibo.related_search", tool: "TikHub/fetch_similar_search_api_v1_weibo_web_v2_fetch_similar_search_get", record: { suggestion: "相关词", count: 0, discuss: 0 } };
+  assert.equal(isServiceResearchResult("hotspot_research", hot), true);
+  assert.equal(isServiceResearchResult("search_suggestion", related), true);
+  assert.equal(isServiceResearchResult("query_summary", related), true);
+  for (const data of [hot, related]) {
+    assert.equal(isServiceResearchResult("weibo_work", data), false);
+    assert.equal(isServiceResearchResult("hotspot_research", { ...data, tool: "other" }), false);
+    assert(!serviceHotItems(data).some(item => Object.hasOwn(item, "rank")));
+  }
+  assert.deepEqual(serviceRecordRows(hot.record, ["desc", "desc_extr", "rank"]), [["desc", "实收热词"], ["desc_extr", "0"]]);
+  assert.deepEqual(serviceRecordRows(related.record, ["suggestion", "count", "discuss"]), [["suggestion", "相关词"], ["count", "0"], ["discuss", "0"]]);
+});
+
+
+test("AgentKey X has its own research dispatch, received snake-case fields and typed empty facts", () => {
+  const data = { platform: "x-research", provider: "agentkey" };
+  assert.equal(isAgentKeyXResearch(data), true);
+  for (const provider of ["redfox", "socialdata", undefined]) assert.equal(isAgentKeyXResearch({ ...data, provider }), false);
+  for (const kind of ["x_research_work", "x_detail_work", "account", "x_comment", "x_followee", "hotspot_research", "query_summary"]) assert.equal(isServiceResearchResult(kind, data), true);
+  assert.equal(isServiceResearchResult("article", data), false);
+  assert.equal(isServiceResearchResult("account", { ...data, provider: "redfox" }), false);
+  assert.deepEqual(agentKeyXRecordRows({ rest_id: huge, screen_name: null, followers_count: 0, verified: false, userId: "wrong", username: "wrong", secret: "omit" }, "author"), [["rest_id", huge], ["screen_name", "null（上游为空）"], ["followers_count", "0"], ["verified", "false（布尔值）"]]);
+  assert.deepEqual(agentKeyXRecordRows({ user_id: huge, screen_name: "member", profile: "wrong role" }, "member"), [["user_id", huge], ["screen_name", "member"]]);
+  assert.deepEqual(agentKeyXRecordRows({ profile: "received", rest_id: huge, protected: false, friends: 0 }, "profile"), [["profile", "received"], ["rest_id", huge], ["protected", "false（布尔值）"], ["friends", "0"]]);
+  assert.deepEqual(agentKeyXRecordRows({ name: "trend", description: null, context: "scope", rank: 1, heat: 2 }, "trend"), [["name", "trend"], ["description", "null（上游为空）"], ["context", "scope"]]);
+  assert.deepEqual(agentKeyXSummaryRows({ count: 0, pagination: { next_cursor: null, prev_cursor: "", cursor: "  opaque|next  ", more_users: false }, hasMore: true }), [["count", "0"], ["实收 pagination.next_cursor", "null（上游为空）"], ["实收 pagination.prev_cursor", "空字符串"], ["实收 pagination.cursor", "  opaque|next  "], ["实收 pagination.more_users", "false（布尔值）"]]);
+  assert.deepEqual(agentKeyXScopeRows({ list_id: huge, received: "unknown", author: "not scope" }), [["list_id", huge]]);
+});
+
+test("AgentKey X keeps author context conditional on received stable identity and relationships distinct", () => {
+  const author = { rest_id: huge, screen_name: null }, authorContext = { rest_id: huge, screen_name: "actual", source: "received-account-context" };
+  assert.deepEqual(agentKeyXContextRows({ author, authorContext }), [["rest_id", huge], ["screen_name", "actual"], ["source", "received-account-context"]]);
+  assert.equal(author.screen_name, null);
+  for (const patch of [{ author: null }, { author: { rest_id: "other" } }, { authorContext: { ...authorContext, source: "request" } }]) assert.deepEqual(agentKeyXContextRows({ author, authorContext, ...patch }), []);
+  for (const [identityRole, label] of [["follower", "粉丝账号"], ["followee", "关注账号"], ["list-member", "列表成员账号"], ["community-member", "社区成员账号"]]) assert.equal(agentKeyXRole("x_followee", { identityRole }), label);
+  assert.equal(agentKeyXRole("x_comment", {}), "会话中的帖子（非直接回复证明）");
+  assert.equal(agentKeyXRole("x_research_work", { role: "retweet-wrapper" }), "转发外层帖子");
+});
+
+test("AgentKey X selected search schema preserves the actual keyword while old Redfox trimming remains", () => {
+  const operation: PlatformOperation = { ...base, id: "5K5EG87P", platform: "x-research", fields: [{ name: "keyword", label: "词", type: "string", required: true }, { name: "search_type", label: "排序", type: "select", required: true, options: [{ value: "Top", label: "Top" }] }] };
+  assert.deepEqual(serviceResearchParameters(operation, { keyword: "  ordinary from:scope OR text  ", search_type: "Top", cursor: "ignored" }), { keyword: "  ordinary from:scope OR text  ", search_type: "Top" });
+});
+
+
+test("AgentKey X profile preserves received pinned ID arrays including empty and absent states", () => {
+  const pinned = ["000123456789012345678901", "9007199254740993987"];
+  assert.deepEqual(agentKeyXRecordRows({ pinned_tweet_ids_str: pinned }, "profile"), [["pinned_tweet_ids_str", JSON.stringify(pinned)]]);
+  assert.deepEqual(agentKeyXRecordRows({ pinned_tweet_ids_str: [] }, "profile"), [["pinned_tweet_ids_str", "[]（空列表，0 项）"]]);
+  assert.deepEqual(agentKeyXRecordRows({}, "profile"), []);
+  assert.deepEqual(agentKeyXRecordRows({ pinned_tweet_ids_str: null }, "profile"), [["pinned_tweet_ids_str", "null（上游为空）"]]);
+  assert.deepEqual(agentKeyXRecordRows({ pinned_tweet_ids_str: pinned }, "member"), []);
+});
+
+test("X account query and subscription fields require one actual locator and a safe numeric user ID", () => {
+  const operation: PlatformOperation = { ...base, id: "x.account_posts", platform: "x-research", fields: [{ name: "screen_name", label: "账号名", type: "string", required: false }, { name: "rest_id", label: "用户 ID", type: "integer", required: false, constraints: { min: 1, max: Number.MAX_SAFE_INTEGER } }] };
+  assert.deepEqual(serviceResearchParameters(operation, { screen_name: "actual_user" }), { screen_name: "actual_user" });
+  assert.deepEqual(serviceResearchParameters(operation, { rest_id: "123" }), { rest_id: 123 });
+  const invalid: Array<Record<string, string>> = [{}, { screen_name: "actual_user", rest_id: "123" }, { rest_id: "9007199254740992" }, { rest_id: "-1" }, { rest_id: "1.5" }, { screen_name: "@wrong" }];
+  for (const values of invalid) assert.throws(() => serviceResearchParameters(operation, values));
 });

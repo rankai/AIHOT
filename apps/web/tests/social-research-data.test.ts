@@ -116,3 +116,31 @@ test("avatar/share/image links are safe anchors or raw facts, never guessed work
   assert.equal(links.some(link => link.field.includes("requestedScope") || link.url?.includes(id)), false);
   assert.deepEqual(socialLinks({ operationId: youtube.id, requestedScope: { videoId: id }, record: {} }), []);
 });
+
+test("AgentKey Weibo exact comment/following tools preserve nested actual user, parent-comment scope, zero and opaque paging", () => {
+  const comments = { provider: "agentkey", platform: "weibo", operationId: "weibo.comments", tool: "TikHub/fetch_status_comments_api_v1_weibo_app_fetch_status_comments_get", requestedScope: { status_id: "999" }, receivedScope: null, record: { id: "111", rootid: "222", text: "实收评论", created_at: "Thu Oct 22 08:00:00 +0800 2026", like_counts: 0, user: { uid: "333", screen_name: "实收评论者", friends_count: 0 } } };
+  assert.equal(isSocialResearchResult("social_comment", comments), true);
+  assert.equal(isSocialResearchResult("query_summary", comments), true);
+  assert.equal(isSocialResearchResult("social_followee", comments), false);
+  assert.equal(isSocialResearchResult("social_comment", { ...comments, tool: "other" }), false);
+  assert.deepEqual(socialAuthor(comments)?.record, comments.record.user);
+  assert(socialRecordRows(comments.record).some(([label, value]) => label.includes("父评论") && value === "222"));
+  assert(socialRecordRows(comments.record).some(([label, value]) => label.includes("like_counts") && value === "0"));
+  assert(socialTimeRows(comments).some(([label, value]) => label.includes("created_at") && value.includes("+0800")));
+  const following = { ...comments, operationId: "weibo.following", tool: "TikHub/fetch_user_following_api_v1_weibo_app_fetch_user_following_get", role: "followee", record: { user: { uid: "444", description: "关注账号简介", followers_count: 0 } } };
+  assert.equal(isSocialResearchResult("social_followee", following), true);
+  assert.equal(socialRole(following), "关注列表中的账号");
+  assert.deepEqual(socialAuthor(following)?.record, following.record.user);
+  assert.deepEqual(socialPagingRows({ ...following, count: 0, pagination: { since_id: " opaque cursor ", total_cnt: 0 } }), [["本次实际返回 count", "0（number）"], ["响应 data.since_id", " opaque cursor （string）"], ["响应 data.total_cnt", "0（number）"]]);
+});
+
+
+test("Weibo comment IDs and raw created_at stay distinct from nested user identity and work time", () => {
+  const data = { provider: "agentkey", platform: "weibo", operationId: "weibo.comments", tool: "TikHub/fetch_status_comments_api_v1_weibo_app_fetch_status_comments_get", record: { id: "8000123", idstr: "8000123", created_at: "Thu Oct 22 08:00:00 +0800 2026", user: { id: "7004567" } } };
+  assert.deepEqual(socialRecordRows(data.record, data), [["评论 ID · id", "8000123"], ["评论 ID 字符串 · idstr", "8000123"]]);
+  assert.deepEqual(socialRecordRows(data.record.user), [["用户 ID · id", "7004567"]]);
+  assert.deepEqual(socialTimeRows(data), [["实收原始时间 · created_at", data.record.created_at]]);
+  const other = { ...data, provider: "redfox" };
+  assert.equal(socialRecordRows(other.record, other)[0]?.[0], "用户 ID · id");
+  assert.match(socialTimeRows(other)[0]![0], /单位 \/ 时区未说明/);
+});

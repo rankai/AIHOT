@@ -27,3 +27,30 @@ test("optional booleans preserve omitted, false and true as separate wire values
   assert.throws(() => platformParameters(operation, { offset: "21", exactMatch: "false" }), /20/);
   assert.throws(() => platformParameters(operation, { exactMatch: "0" }));
 });
+
+
+test("Bilibili detail navigation accepts one received alias and only available AgentKey fields", async () => {
+  const { bilibiliQuerySeed } = await import("../app/features/admin/platform-query-data.ts");
+  const { bilibiliDetailSeed } = await import("../app/features/admin/bilibili-result-data.ts");
+  const { operationLabel } = await import("../app/features/admin/operation-types.ts");
+  const operation = { id: "TIN1NMTZ", platform: "bilibili", label: "详情", purpose: "query", schedulableType: null, fields: [], collectionProviders: [{ id: "agentkey", label: "AgentKey", fields: [{ name: "av_id", label: "AV", type: "string" as const, required: false }, { name: "bv_id", label: "BV", type: "string" as const, required: false }] }] };
+  const seed = bilibiliDetailSeed({ provider: "agentkey", platform: "bilibili", operationId: "LEN9QXR3", avId: "321" });
+  assert.deepEqual(bilibiliQuerySeed({ bilibiliDetailSeed: seed }, [operation])?.values, { av_id: "321" });
+  for (const patch of [{ provider: "redfox" }, { platform: "other" }, { operationId: "EH53TOT7" }, { parameters: { av_id: "321", bv_id: "BV1234567890" } }, { parameters: { url: "https://example.com" } }, { parameters: { av_id: 321 } }]) assert.equal(bilibiliQuerySeed({ bilibiliDetailSeed: { ...seed, ...patch } }, [operation]), null);
+  assert.equal(bilibiliQuerySeed({ bilibiliDetailSeed: seed }, []), null);
+  assert.equal(bilibiliDetailSeed({ provider: "agentkey", platform: "bilibili", operationId: "bilibili.trending", workId: "BV1234567890" }), null);
+  assert.equal(Object.keys(operationLabel).filter(key => key.startsWith("agentkey.bilibili.")).length, 11);
+});
+
+test("Weibo detail navigation uses only actual numeric status identity and an available AgentKey variant", async () => {
+  const { weiboQuerySeed } = await import("../app/features/admin/platform-query-data.ts");
+  const { weiboDetailSeed } = await import("../app/features/admin/weibo-result-data.ts");
+  const operation = { id: "API_1789098514899", platform: "weibo", label: "详情", purpose: "query", schedulableType: null, fields: [], collectionProviders: [{ id: "agentkey", label: "AgentKey", fields: [{ name: "status_id", label: "微博 ID", type: "string" as const, required: true }] }] };
+  const data = { provider: "agentkey", platform: "weibo", operationId: "TXQPVGJG", tool: "TikHub/fetch_search_all_api_v1_weibo_app_fetch_search_all_get", role: "status", opusId: "900719925474099312345" };
+  const seed = weiboDetailSeed(data);
+  assert.deepEqual(weiboQuerySeed({ weiboDetailSeed: seed }, [operation]), { platform: "weibo", provider: "agentkey", operationId: operation.id, values: { status_id: data.opusId } });
+  assert(weiboDetailSeed({ ...data, operationId: "weibo.account_posts", tool: "TikHub/fetch_user_timeline_api_v1_weibo_app_fetch_user_timeline_get" }));
+  for (const patch of [{ provider: "redfox" }, { platform: "other" }, { operationId: operation.id }, { tool: "other" }, { role: "outer-status-unparsed-retweet" }, { opusId: undefined, mblogid: "abc", requestedScope: { status_id: "123" } }, { opusId: 123 }, { opusId: "abc" }]) assert.equal(weiboDetailSeed({ ...data, ...patch }), null);
+  for (const patch of [{ provider: "redfox" }, { platform: "other" }, { operationId: "TXQPVGJG" }, { parameters: { status_id: "123", uid: "456" } }, { parameters: { opusId: "123" } }, { parameters: { status_id: 123 } }, { parameters: { status_id: " 123 " } }, { parameters: { status_id: "abc" } }]) assert.equal(weiboQuerySeed({ weiboDetailSeed: { ...seed, ...patch } }, [operation]), null);
+  for (const operations of [[], [{ ...operation, collectionProviders: [] }], [{ ...operation, collectionProviders: [{ ...operation.collectionProviders[0]!, fields: [] }] }]]) assert.equal(weiboQuerySeed({ weiboDetailSeed: seed }, operations), null);
+});

@@ -1,5 +1,5 @@
 import { logicalMpConfig,validateMpSubscriptionConfig } from "../sources/mp-replacement.ts";
-import { createRedfoxMpCollection } from "../sources/mp-commands.ts";
+import { createRedfoxMpCollection,createAgentKeyMpCollection } from "../sources/mp-commands.ts";
 import { createCollection } from "../sources/collection-commands.ts";
 import { createRedfoxCollection } from "../sources/redfox-commands.ts";
 import { logicalXConfig,validateXSubscriptionConfig,UnsupportedReplacement } from "../sources/x-replacement.ts";
@@ -97,6 +97,7 @@ export async function previewSource(draft: Pick<SourceRow, "id" | "kind" | "conf
   const source = { name: draft.id, enabled: true, cursor: null, tier: "T2", participation_mode: "editorial", ...draft } as SourceRow;
   if(saved && ["x_search","mp_account"].includes(source.kind)) {
     const [sub]=await sql`SELECT provider FROM collection_subscriptions WHERE control_source_id=${source.id}`;
+    if(sub?.provider==="agentkey"&&source.kind==="mp_account"){const run=await createAgentKeyMpCollection(source.id,{actor,key:nativeCommandKey(commandKey),reason:"manual",preview:true});return {runId:run.id,status:run.status};}
     if(sub?.provider==="redfox"){const run=await (source.kind==="mp_account"?createRedfoxMpCollection:createRedfoxCollection)(source.id,{actor,key:nativeCommandKey(commandKey),reason:"manual",preview:true});return {runId:run.id,status:run.status};}
   }
   assertSupportedConfig(source.kind, source.config);
@@ -142,6 +143,7 @@ export async function updateSource(id: string, input: { patch: unknown; version:
     if(before.kind==="x_search" && subscription?.provider==="redfox" && patch.participation_mode && patch.participation_mode!=="isolated")throw new UnsupportedReplacement("This participation mode requires unsupported X Article extraction; switch collection provider first");
     if (patch.config) {
       assertSupportedConfig(before.kind as SourceRow["kind"],subscription?.provider==="redfox"?(before.kind==="mp_account"?logicalMpConfig(patch.config):logicalXConfig(patch.config)):patch.config);
+      if(subscription?.provider==="agentkey"&&before.kind==="mp_account")patch.config=await validateMpSubscriptionConfig(tx,id,subscription.config,patch.config,"agentkey");
       if(subscription?.provider==="redfox")patch.config=before.kind==="mp_account"?await validateMpSubscriptionConfig(tx,id,subscription.config,patch.config):await validateXSubscriptionConfig(tx,id,"redfox",patch.config);
     }
     const keys = Object.keys(patch) as Array<keyof typeof patch>;

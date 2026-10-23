@@ -1,3 +1,4 @@
+import {agentKeyToutiaoEvidence} from "../agentkey/toutiao-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
@@ -46,17 +47,20 @@ function publicationTime(op: ToutiaoOperation, record: Record<string, unknown>):
 export async function importToutiaoResult(resultId: number, raw: unknown, actor: string, key: unknown, db?:Tx) {
   const commandKey = z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key), input = Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot] = await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status
+    const [snapshot] = await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status
       FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if (!snapshot) return null;
+    const agentkey=snapshot.provider==="agentkey";
+    if(agentkey&&input.supplement&&(input.supplement.uid||input.supplement.secUid||input.supplement.url))throw new UnsupportedReplacement("AgentKey requires received identity and native URL; manual supplements cannot replace evidence");
+    const verified=agentkey?await agentKeyToutiaoEvidence(tx,snapshot):null;
     const operation = ToutiaoOperationId.safeParse(snapshot.input.operationId);
-    if (!operation.success || snapshot.provider !== "redfox" || !["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key) || snapshot.receipt_model !== operation.data || !["received", "completed"].includes(snapshot.receipt_status) || snapshot.data.platform !== "toutiao" || snapshot.data.operationId !== operation.data) throw new UnsupportedReplacement("Not a confirmed Toutiao result");
-    const sourceDiscoveredAt=await collectionDiscoveredAt(tx,snapshot,"toutiao",operation.data);
+    if (!verified && (!operation.success || snapshot.provider !== "redfox" || !["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key) || snapshot.receipt_model !== operation.data || !["received", "completed"].includes(snapshot.receipt_status) || snapshot.data.platform !== "toutiao" || snapshot.data.operationId !== operation.data)) throw new UnsupportedReplacement("Not a confirmed Toutiao result");
+    const sourceDiscoveredAt=verified?.sourceDiscoveredAt??await collectionDiscoveredAt(tx,snapshot,"toutiao",operation.data!);
     if (!["toutiao_account", "toutiao_work"].includes(snapshot.kind)) throw new UnsupportedReplacement("Toutiao query summaries are not importable accounts or works");
-    const op = operation.data, parameters = toutiaoOperations[op].schema.parse(snapshot.input.parameters);
+    const op = operation.data!, parameters = agentkey?{}:toutiaoOperations[op].schema.parse(snapshot.input.parameters);
     const origin = snapshot.input.origin === undefined ? undefined : ToutiaoOrigin.parse(snapshot.input.origin);
     const payload = op === "28CFGF5I" ? [snapshot.data.record] : op === "4QS1F8DE" ? { list: [snapshot.data.record] } : op === "R1IGR09H" ? { workList: [snapshot.data.record] } : snapshot.data.record;
-    const parsed = parseToutiao(op, payload, parameters, origin)[0];
+    const parsed = verified?.parsed??parseToutiao(op, payload, parameters, origin)[0];
     if (!parsed || parsed.kind !== snapshot.kind) throw new UnsupportedReplacement("Result kind does not match its received operation record");
     const account = parsed.kind === "toutiao_account", record = parsed.data.record as Record<string, unknown>;
     const received = parsed.data.identity as ToutiaoIdentity, identity: ToutiaoIdentity = { ...received };
@@ -72,7 +76,7 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
     const nativeId = url ? toutiaoWorkId(url) : null;
     if (!account && (!nativeId || !url)) throw new UnsupportedReplacement("A documented native Toutiao work permalink is required");
     if (!account && parsed.data.workId && parsed.data.workId !== nativeId) throw new StaleOperationError("Received work ID differs from its native original URL");
-    if (!account && op === "PAB6Z75Y" && nativeId !== snapshot.input.parameters.opusId) throw new StaleOperationError("Original URL differs from requested Toutiao work ID");
+    if (!account && op === "PAB6Z75Y" && nativeId !== (agentkey?snapshot.input.parameters.group_id:snapshot.input.parameters.opusId)) throw new StaleOperationError("Original URL differs from requested Toutiao work ID");
     const ids = Object.entries(identity).sort(([a], [b]) => a.localeCompare(b));
     if (!ids.length) throw new UnsupportedReplacement("A verified uid or secUid is required; display names and request tokens are not author evidence");
     for (const [kind, value] of ids) await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`toutiao:${kind}:${value}`},0))`;
@@ -114,11 +118,11 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
       const bodyHtml = op === "PAB6Z75Y" && typeof record.content === "string" ? sanitizeBody(record.content, url!) : null;
       const bodyText = bodyHtml ? stripTags(bodyHtml) : null;
       const publishedAt = publicationTime(op, record), discoveredAt = new Date(origin?.discoveredAt ?? sourceDiscoveredAt);
-      const backfill = decideTimeline(publishedAt, discoveredAt).publishedAt ? null : "redfox-import-unknown-time";
+      const backfill = decideTimeline(publishedAt, discoveredAt).publishedAt ? null : `${snapshot.provider}-import-unknown-time`;
       const material = await upsertMaterial({ sourceId, url: url!, identityKey: `toutiao:workId:${nativeId}`, title: String(parsed.data.title),
         author: typeof record.nickname === "string" ? record.nickname : typeof record.authorName === "string" ? record.authorName : null,
         bodyHtml: bodyText ? bodyHtml : null, bodyText, bodyStatus: bodyText ? "ok" : "pending", publishedAt, discoveredAt, backfill, media: media(record), via: "import",
-        raw: { provider: "redfox", resultId, publishTime: record.publishTime ?? null, updateTime: record.updateTime ?? null, originResultId: origin?.resultId ?? null, request: snapshot.input.parameters, supplement: input.supplement ?? null } }, tx);
+        raw: { provider: snapshot.provider, resultId, publishTime: record.publishTime ?? null, updateTime: record.updateTime ?? null, originResultId: origin?.resultId ?? null, request: snapshot.input.parameters, supplement: input.supplement ?? null } }, tx);
       articleId = material.articleId;
       if (material.created || material.revised) await queueProcessing(articleId, { db: tx });
     }

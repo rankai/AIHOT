@@ -231,3 +231,19 @@ test('legacy baseline stores its effective body pair without scheduling another 
  assert.equal(a!.revision,1);assert.equal(a!.processing_state,'analyzed');
  assert.equal((await sql`SELECT body_text FROM article_revisions WHERE article_id=${id}`)[0]!.body_text,a!.body_text);
 });
+
+test('X revisions preserve unknown optional facts, replace whole quotes and honor explicit clears',async()=>{
+ const tweetId=`${Date.now()}${Math.floor(Math.random()*1000000)}`,url=`https://x.com/author/status/${tweetId}`,base={sourceId:SOURCE,url,title:'Original X',via:'fetch' as const};
+ const media=[{kind:'image' as const,url:'https://example.com/photo.jpg'}];
+ const post={tweetId,authorName:'Author',handle:'author',text:'Original X',replyTo:'100',lang:'en',avatarUrl:'https://example.com/avatar.jpg',media,quoted:{authorName:'Old quote',handle:'old',text:'Old',url:'https://x.com/old/status/1',media}};
+ const first=await upsertMaterial({...base,xPost:post,media});
+ const read=async()=>(await sql`SELECT x_post,media FROM articles WHERE id=${first.articleId}`)[0]!;
+ assert.equal((await upsertMaterial({...base,title:'No post metadata'})).revised,true);assert.deepEqual((await read()).x_post,post);
+ const replacement={authorName:'New quote',handle:'new',text:'New',url:'https://x.com/new/status/2'};
+ assert.equal((await upsertMaterial({...base,title:'Replacement quote',xPost:{tweetId,authorName:'Author',handle:'author',text:'Replacement quote',quoted:replacement}})).revised,true);
+ assert.deepEqual((await read()).x_post,{...post,text:'Replacement quote',quoted:replacement});assert.deepEqual((await read()).media,media);
+ const cleared={...post,text:'Cleared facts',quoted:null,replyTo:null,lang:null,avatarUrl:null,media:[]};
+ assert.equal((await upsertMaterial({...base,title:'Cleared facts',xPost:cleared,media:[]})).revised,true);
+ assert.deepEqual(await read(),{x_post:cleared,media:[]});
+ await upsertMaterial({...base,sourceId:OTHER,title:'Foreign facts',xPost:post,media});assert.deepEqual(await read(),{x_post:cleared,media:[]});
+});

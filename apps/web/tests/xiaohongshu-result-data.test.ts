@@ -15,7 +15,21 @@ test("opaque note IDs retain case, leading zeros and signed URL bytes", () => {
   assert.notEqual(xiaohongshuNativeNote(address.replace("00AbC", "00abc"))?.id, id);
 });
 
-test("only native explore paths without credentials, explicit ports or fragments classify as originals", () => {
+test("witnessed HTTPS discovery/item keeps signed bytes and matches AgentKey received note identity", () => {
+  const discovery=address.replace("/explore/","/discovery/item/");
+  assert.deepEqual(xiaohongshuNativeNote(discovery),{id,url:discovery});
+  assert.equal(xiaohongshuNativeNote(discovery.replace("https:","http:")),null);
+  const complete={provider:"agentkey",identity:{userId:"received-author"},workId:id,url:discovery,importable:false};
+  assert.equal(xiaohongshuImportFields("xiaohongshu_work",complete).canImport,true,"historical false hint does not override complete response proof");
+  for(const change of [{identity:{}},{workId:null},{url:null},{url:discovery.replace(id,"other-note")}]) {
+    const fields=xiaohongshuImportFields("xiaohongshu_work",{...complete,...change},address);
+    assert.equal(fields.canImport,false); assert.equal(fields.needsIdentity,false); assert.equal(fields.needsUrl,false);
+  }
+  assert.equal(xiaohongshuImportFields("xiaohongshu_work",{...complete,role:"provider_recommendation"}).canImport,false);
+  assert.equal(xiaohongshuImportFields("xiaohongshu_work",{...complete,provider:"redfox",role:"provider_recommendation"}).canImport,true,"Redfox keeps its existing recommendation work flow");
+});
+
+test("only native note paths without credentials, explicit ports or fragments classify as originals", () => {
   for (const url of [
     "https://xhslink.com/short", `https://xiaohongshu.com/user/profile/${id}`,
     `https://example.com/explore/${id}`, `https://xiaohongshu.com.evil.test/explore/${id}`,

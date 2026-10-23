@@ -24,5 +24,12 @@ test('multiple legacy owners conflict atomically; exact opaque paths do not abso
 test('custom and retained fragments are independent; unsupported URL shapes remain ordinary materials',async()=>{
  const id=note(),address=url(id),custom=await legacy(address,'custom:'+tag()),fragment=await legacy(address+'#part',identityKeyForUrl(address,{keepFragment:true})+'#part');
  const normal=await upsertMaterial({sourceId:owner,url:address,title:'Native',via:'fetch'});assert.notEqual(normal.articleId,custom);assert.notEqual(normal.articleId,fragment);
- for(const address of [`https://xhslink.com/${note()}`,`https://xiaohongshu.com/discovery/item/${note()}`,`https://example.com/explore/${note()}`]){const r=await upsertMaterial({sourceId:owner,url:address,title:'Ordinary',via:'fetch'});assert.equal((await sql`SELECT identity_key FROM articles WHERE id=${r.articleId}`)[0]!.identity_key,identityKeyForUrl(address));}
+ for(const address of [`https://xhslink.com/${note()}`,`http://xiaohongshu.com/discovery/item/${note()}`,`https://example.com/explore/${note()}`]){const r=await upsertMaterial({sourceId:owner,url:address,title:'Ordinary',via:'fetch'});assert.equal((await sql`SELECT identity_key FROM articles WHERE id=${r.articleId}`)[0]!.identity_key,identityKeyForUrl(address));}
+});
+
+test('received HTTPS discovery and explore paths share original owner across token changes',async()=>{
+ const id=note(),address=`https://xiaohongshu.com/discovery/item/${id}?xsec_token=original`,old=await legacy(address);
+ const merged=await upsertMaterial({sourceId:other,url:url(id,'later'),identityKey:`xiaohongshu:noteId:${id}`,title:'Later',via:'import'});assert.equal(merged.articleId,old);
+ const [a]=await sql`SELECT url,source_id,body_text FROM articles WHERE id=${old}`;assert.equal(a!.url,address);assert.equal(a!.source_id,owner);assert.equal(a!.body_text,'Original body');
+ const fresh=note(),first=await upsertMaterial({sourceId:owner,url:url(fresh),title:'Explore',via:'fetch'}),second=await upsertMaterial({sourceId:other,url:`https://xiaohongshu.com/discovery/item/${fresh}?xsec_token=new`,title:'Discovery',via:'import'});assert.equal(first.articleId,second.articleId);
 });

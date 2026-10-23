@@ -26,6 +26,10 @@ async function expireResultBatch(now:Date){
   const unreferenced=tx`NOT EXISTS(SELECT 1 FROM source_account_bindings b WHERE b.evidence->>'kind'='result' AND b.evidence->>'reference'=z.id::text)
      AND NOT EXISTS(SELECT 1 FROM operation_results d WHERE d.kind<>'result_expired' AND (
        (d.kind='result_attachment' AND d.provenance->>'parentResultId'=z.id::text)
+       OR (z.kind='query_summary' AND d.data->>'querySummaryId'=z.id::text
+         AND d.run_id=z.run_id AND d.step_version=z.step_version AND d.receipt_id=z.receipt_id)
+       OR (d.kind='query_summary' AND d.data->>'originResultId'=z.id::text
+         AND d.run_id=z.run_id AND z.step_version<d.step_version)
        OR d.provenance->>'detailSourceResultId'=z.id::text OR d.provenance->>'sourcePageResultId'=z.id::text
        OR (d.run_id=z.run_id AND d.receipt_id=z.receipt_id AND (
          (z.kind='wechat_account_rank' AND d.kind='wechat_work' AND d.item_key IN(z.item_key||':maxWork',z.item_key||':minWork'))

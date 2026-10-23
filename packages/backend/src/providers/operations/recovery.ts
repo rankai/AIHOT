@@ -1,8 +1,15 @@
-import { agentKeyRouteFor, agentKeyOutboundAllowed, douyinSearchRoute } from "../agentkey/douyin-contract.ts";
+import {agentKeyXOperations} from '../agentkey/x-contract.ts';
+import {agentKeyWeiboOperations} from "../agentkey/weibo-contract.ts";
+import {agentKeyBilibiliOperations} from "../agentkey/bilibili-contract.ts";
+import {agentKeyXiaohongshuOperations} from "../agentkey/xiaohongshu-contract.ts";
+import {toutiaoArticleRoute,toutiaoCommentsRoute,toutiaoProfileRoute} from "../agentkey/toutiao-contract.ts";
+import {agentKeyRouteFor,agentKeyOutboundAllowed} from "../agentkey/routes.ts";
+import {wechatArticlesRoute,wechatDetailRoute,wechatProfileRoute,wechatCommentsRoute,wechatRepliesRoute,wechatStatsRoute} from "../agentkey/wechat-contract.ts";
+import { douyinTrendingRoute,douyinCommentsRoute,douyinRepliesRoute,douyinTopicRoute,douyinFollowingRoute,douyinProfileRoute,douyinSearchRoute, douyinAccountPostsRoute, douyinDetailRoute, douyinSuggestRoute, douyinAccountSearchRoute } from "../agentkey/douyin-contract.ts";
 import { hasCompleteLocalFile } from "../../operations/assets.ts";
 import { sql, type Tx } from "../../db.ts";
 import { queueOperationStep } from "./queue.ts";
-import { eligibleMembers, type SubscriptionMember } from "../../sources/subscriptions.ts";
+import { eligibleMembers, releaseSubscriptions, type SubscriptionMember } from "../../sources/subscriptions.ts";
 import { lockRun, resumeRun, setRunState, StaleOperationError, type Execution, type RunRow } from "./store.ts";
 
 /** Includes terminal unknown evidence: abandonment must not route a receipt back to generic release. */
@@ -88,7 +95,7 @@ export async function releaseOperationReceipt(receiptId: number, manual = false)
 export async function recoverOperations() {
   const [cursor]=await sql`SELECT value FROM settings WHERE key='operations.recovery-cursor'`;
   const lastId=typeof cursor?.value === "number" ? cursor.value : 0;
-  const rows = await sql<RunRow[]>`SELECT * FROM operation_runs WHERE status IN ('active','waiting') AND operation_key IN ('redfox.xhs_comments.submit','redfox.xhs_comments.query','redfox.video.generate','redfox.video.query','redfox.ai_search.submit','redfox.ai_search.query','redfox.media.upload','x.search','mp.history','redfox.x.account','redfox.x.detail','redfox.x.timeline','redfox.image.generate','redfox.image.query','redfox.transcript.submit','redfox.transcript.query','redfox.sync.query','redfox.weibo.collection','redfox.platform.collection','redfox.wechat.collection',${douyinSearchRoute.operationKey}) AND id > ${lastId} ORDER BY id LIMIT 200`;
+  const rows = await sql<RunRow[]>`SELECT * FROM operation_runs WHERE status IN ('active','waiting') AND operation_key IN (${agentKeyXOperations[0].route.operationKey},${agentKeyXOperations[1].route.operationKey},${agentKeyXOperations[2].route.operationKey},${agentKeyXOperations[3].route.operationKey},${agentKeyXOperations[4].route.operationKey},${agentKeyXOperations[5].route.operationKey},${agentKeyXOperations[6].route.operationKey},${agentKeyXOperations[7].route.operationKey},${agentKeyXOperations[8].route.operationKey},${agentKeyXOperations[9].route.operationKey},${agentKeyXOperations[10].route.operationKey},${agentKeyXOperations[11].route.operationKey},${agentKeyWeiboOperations[0].route.operationKey},${agentKeyWeiboOperations[1].route.operationKey},${agentKeyWeiboOperations[2].route.operationKey},${agentKeyWeiboOperations[3].route.operationKey},${agentKeyWeiboOperations[4].route.operationKey},${agentKeyWeiboOperations[5].route.operationKey},${agentKeyWeiboOperations[6].route.operationKey},${agentKeyWeiboOperations[7].route.operationKey},'redfox.xhs_comments.submit','redfox.xhs_comments.query','redfox.video.generate','redfox.video.query','redfox.ai_search.submit','redfox.ai_search.query','redfox.media.upload','x.search','mp.history','redfox.x.account','redfox.x.detail','redfox.x.timeline','redfox.image.generate','redfox.image.query','redfox.transcript.submit','redfox.transcript.query','redfox.sync.query','redfox.weibo.collection','redfox.platform.collection','redfox.wechat.collection',${douyinTrendingRoute.operationKey},${douyinCommentsRoute.operationKey},${douyinRepliesRoute.operationKey},${douyinTopicRoute.operationKey},${douyinFollowingRoute.operationKey},${douyinProfileRoute.operationKey},${douyinSearchRoute.operationKey},${douyinAccountPostsRoute.operationKey},${douyinDetailRoute.operationKey},${douyinSuggestRoute.operationKey},${douyinAccountSearchRoute.operationKey},${wechatArticlesRoute.operationKey},${wechatDetailRoute.operationKey},${wechatProfileRoute.operationKey},${wechatCommentsRoute.operationKey},${wechatRepliesRoute.operationKey},${wechatStatsRoute.operationKey},${toutiaoArticleRoute.operationKey},${toutiaoCommentsRoute.operationKey},${toutiaoProfileRoute.operationKey},${agentKeyXiaohongshuOperations[0].route.operationKey},${agentKeyXiaohongshuOperations[1].route.operationKey},${agentKeyXiaohongshuOperations[2].route.operationKey},${agentKeyXiaohongshuOperations[3].route.operationKey},${agentKeyXiaohongshuOperations[4].route.operationKey},${agentKeyXiaohongshuOperations[5].route.operationKey},${agentKeyXiaohongshuOperations[6].route.operationKey},${agentKeyXiaohongshuOperations[7].route.operationKey},${agentKeyXiaohongshuOperations[8].route.operationKey},${agentKeyBilibiliOperations[0]!.route.operationKey},${agentKeyBilibiliOperations[1]!.route.operationKey},${agentKeyBilibiliOperations[2]!.route.operationKey},${agentKeyBilibiliOperations[3]!.route.operationKey},${agentKeyBilibiliOperations[4]!.route.operationKey},${agentKeyBilibiliOperations[5]!.route.operationKey},${agentKeyBilibiliOperations[6]!.route.operationKey},${agentKeyBilibiliOperations[7]!.route.operationKey},${agentKeyBilibiliOperations[8]!.route.operationKey},${agentKeyBilibiliOperations[9]!.route.operationKey},${agentKeyBilibiliOperations[10]!.route.operationKey}) AND id > ${lastId} ORDER BY id LIMIT 200`;
   let requeued = 0, released = 0;
   for (const snapshot of rows) {
     try {
@@ -99,6 +106,7 @@ export async function recoverOperations() {
         if (run.input.members.length && !eligible.length) {
           await tx`UPDATE operation_runs SET status = 'stopped', wait_reason = 'Execution configuration no longer eligible',
             next_attempt_at = NULL, updated_at = now() WHERE id = ${run.id}`;
+          await releaseSubscriptions(tx, run.id);
           return 0;
         }
         if (await settleExpiredCommentTask(tx, run)) return 0;

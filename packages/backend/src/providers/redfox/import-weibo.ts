@@ -1,3 +1,4 @@
+import {agentKeyWeiboEvidence} from "../agentkey/weibo-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -17,19 +18,23 @@ const Input=z.object({sourceId:z.string().min(1).optional(),reason:z.string().tr
 export async function importWeiboResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async (tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,r.limits,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
-    if(snapshot.provider!=="redfox" || !["redfox.sync.query","redfox.weibo.collection"].includes(snapshot.operation_key) || !WeiboOperationId.safeParse(executionInput.operationId).success || !snapshot.receipt_id)throw new UnsupportedReplacement("Not a confirmed Weibo result");
+    const agentkey=snapshot.provider==="agentkey";
+    if(agentkey&&input.supplement)throw new UnsupportedReplacement("AgentKey requires original received identity; manual supplements are not supported");
+    const verified=agentkey?await agentKeyWeiboEvidence(tx,snapshot):null;
+    const collected=agentkey?null:await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    if(!verified&&(snapshot.provider!=="redfox" || !["redfox.sync.query","redfox.weibo.collection"].includes(snapshot.operation_key) || !WeiboOperationId.safeParse(executionInput.operationId).success || !snapshot.receipt_id))throw new UnsupportedReplacement("Not a confirmed Weibo result");
     const account=snapshot.kind==="weibo_account";
     if(!account && snapshot.kind!=="weibo_work")throw new UnsupportedReplacement("Trend snapshots cannot be imported as articles");
-    const data=account?WeiboAccount.parse(snapshot.data):WeiboWork.parse(snapshot.data);
-    const operation=WeiboOperationId.parse(executionInput.operationId),parameters=weiboOperations[operation].schema.parse(executionInput.parameters);
+    const received=verified?.parsed.data??snapshot.data;
+    const data=account?WeiboAccount.parse(received):WeiboWork.parse(received);
+    const operation=agentkey?undefined:WeiboOperationId.parse(executionInput.operationId),parameters=operation?weiboOperations[operation].schema.parse(executionInput.parameters):{};
     if(executionInput.origin!==undefined&&(snapshot.receipt_model!==operation||!["received","completed"].includes(snapshot.receipt_status)))throw new UnsupportedReplacement("Invalid detail receipt evidence");
-    const detail=executionInput.origin===undefined?{kind:snapshot.kind,data:{...data,platform:"weibo"}}:parseWeibo(operation,data,parameters)[0]!;
-    const accountOrigin=executionInput.origin?.kind==="account";
-    if(accountOrigin)applyAccountDetailOrigin(operation,parameters,detail,executionInput.origin);
-    const origin=accountOrigin?undefined:applyWeiboCarDetailOrigin(operation,parameters,detail,executionInput.origin);
+    const detail=executionInput.origin===undefined?{kind:snapshot.kind,data:{...data,platform:"weibo"}}:parseWeibo(operation!,data,parameters)[0]!;
+    const accountOrigin=!agentkey&&executionInput.origin?.kind==="account";
+    if(accountOrigin)applyAccountDetailOrigin(operation!,parameters,detail,executionInput.origin);
+    const origin=agentkey||accountOrigin?undefined:applyWeiboCarDetailOrigin(operation!,parameters,detail,executionInput.origin);
     if(origin?.identity.uid&&!data.uid)data.uid=origin.identity.uid;
     if(data.uid && input.supplement?.uid && data.uid!==input.supplement.uid)throw new StaleOperationError("Confirmed author UID cannot be replaced");
     const uid=data.uid??input.supplement?.uid;
@@ -64,13 +69,13 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
     let articleId:string|null=null;
     if(!account){
       const work=WeiboWork.parse(data),originalUrl=work.opusUrl||work.url;
-      const confirmedShortId=snapshot.receipt_model==="API_1789098514899"?work.mblogid:null;
+      const confirmedShortId=verified||snapshot.receipt_model==="API_1789098514899"?work.mblogid:null;
       if(originalUrl && input.supplement?.url && originalUrl!==input.supplement.url)throw new StaleOperationError("Received work URL cannot be replaced");
       const url=originalUrl??input.supplement?.url;
       if(!work.opusId || !url)throw new UnsupportedReplacement("Work ID and verified original URL are required");
       const parsed=new URL(url);const parts=parsed.pathname.split("/").filter(Boolean);
       if(!["http:","https:"].includes(parsed.protocol) || !["weibo.com","www.weibo.com"].includes(parsed.hostname) || parsed.username || parsed.password || parts.length!==2 || parts[0]!==uid || ![work.opusId,confirmedShortId].includes(parts[1]))throw new UnsupportedReplacement("Original URL does not verify the work and author identities");
-      let discoveredAt=new Date(origin?.discoveredAt??snapshot.created_at);
+      let discoveredAt=new Date(verified?.sourceDiscoveredAt??origin?.discoveredAt??snapshot.created_at);
       const pageResultId=result!.provenance?.sourcePageResultId;
       if(!collected&&snapshot.operation_key==="redfox.weibo.collection" && pageResultId!==undefined){
         if(!Number.isSafeInteger(pageResultId)||pageResultId<=0)throw new UnsupportedReplacement("Invalid source-page discovery reference");
@@ -82,8 +87,9 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
         discoveredAt=new Date(page.created_at);
       }
       const publishedAt=weiboPublishedAt(work.publishTime);
-      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
-      const material=await upsertMaterial({sourceId,url,identityKey:`weibo:opusId:${work.opusId}`,title:(work.text??"微博作品").slice(0,200),author:work.nickname,bodyUpdate:origin?"fill-missing":undefined,bodyText:work.text,bodyStatus:work.text?"ok":"pending",publishedAt,discoveredAt,backfill,media:weiboMedia(work),via:"import",raw:{provider:"redfox",resultId,publishTime:work.publishTime??null},
+      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:agentkey?"agentkey-import-unknown-time":"redfox-import-unknown-time";
+      const bodyText=agentkey&&received.isLongText!==false?null:work.text;
+      const material=await upsertMaterial({sourceId,url,identityKey:`weibo:opusId:${work.opusId}`,title:(work.text??"微博作品").slice(0,200),author:work.nickname,bodyUpdate:origin||verified?.detail?"fill-missing":undefined,bodyText,bodyStatus:bodyText?"ok":"pending",publishedAt,discoveredAt,backfill,media:weiboMedia(work),via:"import",raw:{provider:agentkey?"agentkey":"redfox",resultId,publishTime:work.publishTime??null,...(agentkey?{upstream:"TikHub",operationId:executionInput.operationId,tool:executionInput.tool,urlSource:received.urlSource,isLongText:received.isLongText??null,textScope:received.textScope,receivedText:work.text??null}: {})},
         confirmedIdentity:confirmedShortId?{platform:"weibo",opusId:work.opusId,mblogid:confirmedShortId,uid,evidence:{kind:"result",reference:String(resultId)}}:undefined},tx);
       articleId=material.articleId;
       if(material.created || material.revised)await queueProcessing(articleId,{db:tx});

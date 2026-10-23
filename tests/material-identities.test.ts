@@ -5,11 +5,12 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { upsertMaterial, type MaterialInput } from "@aihot/backend/content/materials";
 import { MaterialIdentityConflict, type ConfirmedWorkIdentity } from "@aihot/backend/content/material-identities";
 import { identityKeyForUrl } from "@aihot/backend/lib/url";
+type WeiboIdentity=Extract<ConfirmedWorkIdentity,{platform:"weibo"}>;
 const source=`aliases-${tag()}`,other=`aliases-other-${tag()}`;
 let sequence=0;
-const next=():ConfirmedWorkIdentity=>({platform:"weibo",opusId:`99${Date.now()}${Math.floor(Math.random()*1000000)}${++sequence}`,mblogid:`AbC${tag().replace(/[^a-zA-Z0-9]/g,"")}${sequence}`,uid:"1200000123",evidence:{kind:"result",reference:`synthetic-${tag()}`}});
-const short=(c:ConfirmedWorkIdentity)=>`https://weibo.com/${c.uid}/${c.mblogid}`;
-const material=(c:ConfirmedWorkIdentity):MaterialInput=>({sourceId:source,url:`https://weibo.com/${c.uid}/${c.opusId}`,identityKey:`weibo:opusId:${c.opusId}`,title:"Confirmed work",bodyText:"Original body",via:"import",confirmedIdentity:c});
+const next=():WeiboIdentity=>({platform:"weibo",opusId:`99${Date.now()}${Math.floor(Math.random()*1000000)}${++sequence}`,mblogid:`AbC${tag().replace(/[^a-zA-Z0-9]/g,"")}${sequence}`,uid:"1200000123",evidence:{kind:"result",reference:`synthetic-${tag()}`}});
+const short=(c:WeiboIdentity)=>`https://weibo.com/${c.uid}/${c.mblogid}`;
+const material=(c:WeiboIdentity):MaterialInput=>({sourceId:source,url:`https://weibo.com/${c.uid}/${c.opusId}`,identityKey:`weibo:opusId:${c.opusId}`,title:"Confirmed work",bodyText:"Original body",via:"import",confirmedIdentity:c});
 before(async()=>{await sql`INSERT INTO sources(id,name,kind) VALUES (${source},'Identity fixture','rss'),(${other},'Other identity fixture','rss')`;});
 after(()=>closeDb());
 test("old short URL is reused without rewriting primary identity or source; foreign content is discovery only",async()=>{

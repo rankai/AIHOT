@@ -55,3 +55,15 @@ test('saveResult assigns expiry once and repeated writes keep the first lifetime
  const saved=await sql.begin(tx=>saveResult(tx,execution,{itemKey:'one',kind:'research',data:{value:1}}));const initial=await get(saved);assert.equal(initial.expires_at.getTime()-initial.created_at.getTime(),30*86400_000);
  assert.equal(await sql.begin(tx=>saveResult(tx,execution,{itemKey:'one',kind:'research',data:{value:2}})),saved);assert.equal((await get(saved)).expires_at.getTime(),initial.expires_at.getTime());
 });
+test('AgentKey data references retain exact query/origin chains, then expire after their leaf is released',async()=>{
+ const id=await run(),otherRun=await run();
+ const [receipt]=await sql`INSERT INTO receipts(logical_key,service,purpose,status) VALUES(${tag()},'agentkey.query','query','completed') RETURNING id`;receipts.push(receipt!.id);
+ const page=await result(id,'query_summary',{}, {receiptId:receipt!.id}),work=await result(id,'wechat_work',{}, {receiptId:receipt!.id}),summary=await result(id,'query_summary',{}, {receiptId:receipt!.id}),detail=await result(id,'wechat_work',{}, {receiptId:receipt!.id,sourceId:source});
+ await sql`UPDATE operation_results SET data=${sql.json({querySummaryId:page})} WHERE id=${work}`;
+ await sql`UPDATE operation_results SET step_version=2,data=${sql.json({originResultId:work})} WHERE id=${summary}`;
+ await sql`UPDATE operation_results SET step_version=2,data=${sql.json({querySummaryId:summary})} WHERE id=${detail}`;
+ const wrong=await result(otherRun,'query_summary',{}, {receiptId:receipt!.id});
+ const unrelated=await result(id,'wechat_work',{}, {receiptId:receipt!.id,sourceId:source});await sql`UPDATE operation_results SET data=${sql.json({querySummaryId:wrong})} WHERE id=${unrelated}`;
+ await expireOperationResults(now);for(const n of [page,work,summary,detail])assert.notEqual((await get(n)).kind,'result_expired');assert.equal((await get(wrong)).kind,'result_expired','unrelated run cannot retain a query summary');
+ await sql`UPDATE operation_results SET source_id=NULL WHERE id=${detail}`;await expireOperationResults(now);for(const n of [page,work,summary,detail])assert.equal((await get(n)).kind,'result_expired');
+});

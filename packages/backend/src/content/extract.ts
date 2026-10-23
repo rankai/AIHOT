@@ -108,7 +108,7 @@ export async function extractArticleBody(articleId: string, allowJina = process.
   const [a] = await sql<{ id: string; url: string; body_status: string; revision: number; provider: string | null; material_provider: string | null; x_post: { tweetId?: string } | null }[]>`
     SELECT a.id,a.url,a.body_status,a.revision,a.x_post,c.provider,a.raw->>'provider' AS material_provider FROM articles a LEFT JOIN collection_subscriptions c ON c.control_source_id=a.source_id WHERE a.id = ${articleId}`;
   if (!a || a.body_status === "ok") return "skipped";
-  if (a.provider === "redfox" || a.material_provider === "redfox") {
+  if (["redfox", "agentkey"].includes(a.provider ?? "") || ["redfox", "agentkey"].includes(a.material_provider ?? "")) {
     // Current imported material and formal collection ownership both forbid implicit fallback calls.
     await sql`UPDATE articles SET body_status = 'unconfirmed', updated_at = now()
       WHERE id = ${articleId} AND revision = ${a.revision} AND body_status = 'pending'`;

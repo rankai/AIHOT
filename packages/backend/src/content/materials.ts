@@ -215,13 +215,14 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   // Nor is the stored version with other characters lost in transit, or with them restored.
   if (sameBarringLoss(existing!.title, title) && sameBarringLoss(existing!.body_text, bodyText) && sameBarringLoss(existing!.excerpt, excerpt)) return unchanged;
 
+  // Omitted optional X facts are unknown; explicit null/[] clears them. Merge only at the top level.
   const [row] = await db<{ revision: number }[]>`
     UPDATE articles SET
       title = ${title}, author = coalesce(${m.author ?? null}, author), language = coalesce(${m.language ?? null}, language),
       source_updated_at = ${m.sourceUpdatedAt ?? null}, excerpt = coalesce(${m.excerpt ?? null}, excerpt),
       body_text = ${bodyText}, body_html = ${bodyHtml}, body_status = ${bodyStatus},
       media = CASE WHEN ${m.media ? db.json(m.media as never) : null}::jsonb IS NULL THEN media ELSE ${m.media ? db.json(m.media as never) : null}::jsonb END,
-      x_post = coalesce(${m.xPost ? db.json(m.xPost as never) : null}, x_post),
+      x_post = CASE WHEN ${m.xPost ? db.json(m.xPost as never) : null}::jsonb IS NULL THEN x_post ELSE coalesce(x_post, '{}'::jsonb) || ${m.xPost ? db.json(m.xPost as never) : null}::jsonb END,
       revision = revision + 1, content_hash = ${next}, processing_state = 'new', updated_at = now()
     WHERE id = ${existing!.id}
     RETURNING revision`;

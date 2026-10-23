@@ -14,12 +14,12 @@ export function parseLosslessJson(text: string): unknown {
   }) as Parameters<typeof JSON.parse>[1]);
 }
 
-const secretField = /authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential/i;
+const secretField = /^(?:comment_token|yt_raw_token)$|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|authentication[_-]?token|cookie|password|secret|credential/i;
 /** Input has already passed the transport byte limit. Never log the unsanitized input. */
 export function redactEvidence(value: unknown, key: string): unknown {
   const cleanString = (text: string) => text.split(key).join("[redacted]")
     .replace(/Bearer\s+[^\s"'\\]+/gi, "Bearer [redacted]")
-    .replace(/("(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[redacted]"');
+    .replace(/("(?:comment_token|yt_raw_token|api[_-]?key|access[_-]?token|refresh[_-]?token|authentication[_-]?token|password|secret|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '$1"[redacted]"');
   if (typeof value === "string") return cleanString(value);
   if (Array.isArray(value)) return value.map((entry) => redactEvidence(entry, key));
   const row = object(value);

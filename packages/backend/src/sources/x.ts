@@ -53,21 +53,25 @@ export function xArticleText(article: SdArticle): { title: string; text: string 
 }
 
 export function tweetToCandidate(t: SdTweet): Candidate {
-  const post = toXPost(t);
+  return xPostToCandidate(toXPost(t), new Date(t.tweet_created_at), { favorite: t.favorite_count ?? null, retweet: t.retweet_count ?? null, views: t.views_count ?? null });
+}
+
+/** Canonical X material projection; provider adapters supply already verified post facts. */
+export function xPostToCandidate(post: XPostData, publishedAt: Date | null, metrics: Record<string, unknown> = {}): Candidate {
   const firstLine = post.text.split("\n").find((l) => l.trim()) ?? post.text;
   return {
-    url: `https://x.com/${t.user.screen_name}/status/${t.id_str}`,
-    identityKey: `x:${t.id_str}`,
+    url: `https://x.com/${post.handle}/status/${post.tweetId}`,
+    identityKey: `x:${post.tweetId}`,
     title: firstLine.length > 140 ? `${firstLine.slice(0, 137)}...` : firstLine,
-    author: t.user.screen_name,
-    language: t.lang ?? null,
-    publishedAt: new Date(t.tweet_created_at),
+    author: post.handle,
+    language: post.lang ?? null,
+    publishedAt,
     bodyText: [post.text, post.quoted ? `\n\n【引用 @${post.quoted.handle}】${post.quoted.text}` : ""].join("").trim(),
     // A linked X Article is the post's real body: extraction fetches it (jobs/content.ts route).
     bodyStatus: linksXArticle(post.text) ? "pending" : "ok",
     xPost: post,
     media: post.media ?? [],
-    raw: { favorite: t.favorite_count ?? null, retweet: t.retweet_count ?? null, views: t.views_count ?? null },
+    raw: metrics,
   };
 }
 

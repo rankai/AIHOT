@@ -5,10 +5,14 @@ import { researchFactText } from "./research-platform-data.ts";
 import { beijingDate, addDays } from "@aihot/contracts/time";
 import type { PlatformCollectionProviderPreflight } from "@aihot/contracts/redfox";
 const hotSnapshotIds = ["9Y4EX7RW", "W94P1QH1", "S28Q6HUD"];
+const agentKeySinglePageIds = ["LEN9QXR3", "VPA67I98", "bilibili.typed_search", "bilibili.comments", "bilibili.comment_replies", "bilibili.relation_stats", "bilibili.dynamics", "bilibili.trending", "bilibili.hot_search", "douyin.trending", "douyin.comments", "douyin.comment_replies", "douyin.topic_posts", "douyin.following", "toutiao.comments", "384C6W6B", "XN3ULENA", "xiaohongshu.topic_posts", "xiaohongshu.comments", "xiaohongshu.recommendations"];
+const xSinglePageIds = ["5K5EG87P", "x.account_posts", "ABJQXHUE", "x.followers", "5QY3G5TY", "x.list_posts", "x.community_posts", "x.trending", "x.list_members", "x.community_members"];
+const weiboSinglePageIds = ["TXQPVGJG", "weibo.account_posts", "weibo.comments", "weibo.following", "UAQ90A1F", "weibo.related_search"];
+export function isAgentKeySinglePageSnapshot(operation: PlatformOperation, provider: string) { return provider === "agentkey" && operation.platform === "x-research" && xSinglePageIds.includes(operation.id) || provider === "agentkey" && operation.platform === "weibo" && weiboSinglePageIds.includes(operation.id) || provider === "agentkey" && agentKeySinglePageIds.includes(operation.id) && (operation.id.startsWith(`${operation.platform}.`) || operation.platform === "bilibili" && ["LEN9QXR3", "VPA67I98"].includes(operation.id) || operation.platform === "xiaohongshu" && ["384C6W6B", "XN3ULENA"].includes(operation.id)); }
 export function isHotSnapshot(operation: PlatformOperation) { return operation.platform === "hot-research" && hotSnapshotIds.includes(operation.id); }
 export function providerOperation(operation: PlatformOperation,provider:string):PlatformOperation {
-  const variant=operation.collectionProviders?.find(option=>option.id===provider);
-  return variant?.fields?{...operation,fields:variant.fields,purpose:variant.purpose??operation.purpose,collectionPrice:variant.collectionPrice,collectionCapabilities:variant.collectionCapabilities}:operation;
+  const variant=(operation.queryProviders ?? operation.collectionProviders)?.find(option=>option.id===provider);
+  return variant?.fields?{...operation,label:variant.operationLabel??operation.label,fields:variant.fields,purpose:variant.purpose??operation.purpose,collectionPrice:variant.collectionPrice,collectionCapabilities:variant.collectionCapabilities}:operation;
 }
 export function collectionFormOperation(operation: PlatformOperation) {
   return isHotSnapshot(operation) ? { ...operation, fields: operation.fields.filter(field => field.name !== "startDate" && field.name !== "endDate") } : operation;
@@ -33,11 +37,21 @@ export function isCollectionOperation(operation: PlatformOperation) { return ["s
 export function collectionProviders(operation: PlatformOperation) {
   return operation.collectionProviders ?? [{ id: "redfox", label: "Redfox" }];
 }
+export function queryProviders(operation: PlatformOperation) {
+  return operation.queryProviders ?? collectionProviders(operation);
+}
 export function collectionProviderLabel(operation: PlatformOperation, provider: string) {
   return collectionProviders(operation).find(option => option.id === provider)?.label ?? provider;
 }
-export function collectionInputIssue(operation: PlatformOperation, values: Record<string, string>): string | null {
-  return operation.platform === "x-research" && operation.id === "5K5EG87P" && !["", "Top", "Latest"].includes((values.searchType ?? "").trim()) ? "X 搜索采集订阅仅支持 Top / Latest；Media、People、Lists 可继续单次查询。" : null;
+export function collectionInputIssue(operation: PlatformOperation, values: Record<string, string>, provider = "redfox"): string | null {
+  if (operation.platform !== "x-research") return null;
+  if (!collectionProviders(operation).some(option => option.id === provider)) return "当前供应商仅支持单次查询；请显式选择已接通采集的供应商后填写其参数。";
+  if (operation.id === "5K5EG87P") {
+    if (!["", "Top", "Latest"].includes((values.search_type ?? values.searchType ?? "").trim())) return "X 搜索采集订阅仅支持 Top / Latest；Media、People、Lists 可继续单次查询。";
+    if (provider === "agentkey" && (!/^[\p{L}\p{N}\s]+$/u.test(values.keyword ?? "") || !(values.keyword ?? "").trim() || (values.keyword ?? "").split(/\s+/u).some(word => /^(?:OR|AND|NOT)$/.test(word)))) return "AgentKey X 订阅仅支持基础关键词（字母、数字与空白）；高级运算符、标点和游标可继续单次查询，不会自动删改。";
+  }
+  if (provider === "agentkey" && Object.entries(values).some(([key, value]) => value !== "" && !operation.fields.some(field => field.name === key))) return "AgentKey X 首页订阅不接受当前额外参数；请显式移除后重试，不会自动丢弃。";
+  return null;
 }
 export function collectionOperations(operations: readonly PlatformOperation[]) { return operations.filter(isCollectionOperation); }
 export function isWeiboSnapshot(operation: PlatformOperation) { return operation.platform === "weibo" && operation.id === "UAQ90A1F"; }
@@ -53,27 +67,32 @@ export function collectionDetailOperations(operation: PlatformOperation, values?
 }
 export function collectionLegacyDetail(operation: PlatformOperation, initial: CollectionSubscription | null) {
   const choices = collectionDetailOperations(operation);
-  return initial?.operationId === "TXQPVGJG" && operation.id === "TXQPVGJG" && initial.enrichDetails && !initial.detailOperationId && choices.length === 1 && choices[0]?.operationId === "API_1789098514899" ? choices[0] : null;
+  return initial?.provider !== "agentkey" && initial?.operationId === "TXQPVGJG" && operation.id === "TXQPVGJG" && initial.enrichDetails && !initial.detailOperationId && choices.length === 1 && choices[0]?.operationId === "API_1789098514899" ? choices[0] : null;
 }
 export function collectionDetailPriceNote(choice: CollectionDetailOperation | null | undefined) {
   return choice?.price && typeof choice.price.amount === "number" ? `详情文档估算 ${choice.price.amount} ${choice.price.currency}/请求，非实扣、非整轮总价。` : "详情请求估价未知，以 collect 次数预算与回执为准。";
 }
 export function collectionDraft(operation: PlatformOperation, initial: CollectionSubscription | null = null, seed?: CollectionSeed | null): CollectionDraft {
   const sameOperation = initial?.operationId === operation.id;
-  const hot = isHotSnapshot(operation), defaults = defaultPlatformValues(collectionFormOperation(operation)), providers = collectionProviders(operation);
-  return { name: initial?.name ?? "", provider: sameOperation ? initial.provider : seed?.provider??providers[0]?.id ?? "", values: sameOperation ? Object.fromEntries(Object.entries(initial.parameters).map(([key, value]) => [key, Array.isArray(value) ? value.join("\n") : String(value)])) : seed?.operationId === operation.id ? { ...defaults, ...seed.values } : defaults, enabled: initial?.enabled ?? false, intervalMinutes: initial?.intervalMinutes ?? (hot ? 60 : 15), enrichDetails: sameOperation ? initial.enrichDetails : false, detailOperationId: sameOperation ? initial.detailOperationId ?? collectionLegacyDetail(operation, initial)?.operationId ?? "" : "", detailPage: sameOperation && initial.detailPage != null ? String(initial.detailPage) : "", pages: sameOperation ? initial.limits.pages : hot ? 1 : 3, items: sameOperation ? initial.limits.items : 100, details: sameOperation ? initial.limits.details : operation.platform === "weibo" || collectionDetailsAvailable(operation) ? 20 : 0 };
+  const providers = collectionProviders(operation), provider = sameOperation ? initial.provider : (seed?.operationId === operation.id ? seed.provider : undefined) ?? providers[0]?.id ?? "";
+  operation = providerOperation(operation, provider);
+  const hot = isHotSnapshot(operation), single = isAgentKeySinglePageSnapshot(operation, provider), noDetails = single && !collectionDetailsAvailable(operation), defaults = defaultPlatformValues(collectionFormOperation(operation));
+  return { name: initial?.name ?? "", provider, values: sameOperation ? Object.fromEntries(Object.entries(initial.parameters).map(([key, value]) => [key, Array.isArray(value) ? value.join("\n") : String(value)])) : seed?.operationId === operation.id ? { ...defaults, ...seed.values } : defaults, enabled: initial?.enabled ?? false, intervalMinutes: initial?.intervalMinutes ?? (hot ? 60 : 15), enrichDetails: !noDetails && sameOperation ? initial.enrichDetails : false, detailOperationId: !noDetails && sameOperation ? initial.detailOperationId ?? collectionLegacyDetail(operation, initial)?.operationId ?? "" : "", detailPage: sameOperation && initial.detailPage != null ? String(initial.detailPage) : "", pages: single ? 1 : sameOperation ? initial.limits.pages : hot ? 1 : 3, items: sameOperation ? initial.limits.items : 100, details: noDetails ? 0 : sameOperation ? initial.limits.details : single ? 0 : operation.platform === "weibo" || collectionDetailsAvailable(operation) ? 20 : 0 };
 }
 export function collectionConfig(operation: PlatformOperation, draft: CollectionDraft, lockedPlatform?: string): CollectionSubscriptionConfig {
   operation=providerOperation(operation,draft.provider);
   if (!isCollectionOperation(operation)) throw new Error("请选择已接通定时采集的操作。");
   if (lockedPlatform && lockedPlatform !== operation.platform) throw new Error("已有订阅不能切换平台，请另建订阅。");
   if (!collectionProviders(operation).some(provider => provider.id === draft.provider)) throw new Error("当前采集任务不支持所选供应商。");
-  const issue = collectionInputIssue(operation, draft.values);
+  const issue = collectionInputIssue(operation, draft.values, draft.provider);
   if (issue) throw new Error(issue);
   const parameters = platformQueryParameters(collectionFormOperation(operation), draft.values);
+  if (operation.platform === "x-research" && operation.id === "5K5EG87P" && parameters.keyword !== undefined) parameters.keyword = draft.values.keyword!;
   if (operation.platform === "weibo" && parameters.searchType === "3") throw new Error("账号搜索类别不能用于定时材料采集。");
   if (!draft.name.trim()) throw new Error("请填写订阅名称。");
   for (const [label, value, min, max] of [["周期", draft.intervalMinutes, 1, 10080], ["页数", draft.pages, 1, 10], ["条目数", draft.items, 1, 500], ["详情数", draft.details, 0, 100]] as const) if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`${label}超出允许范围。`);
+  const single = isAgentKeySinglePageSnapshot(operation, draft.provider);
+  if (single && operation.platform === "x-research" && (draft.pages !== 1 || draft.details !== 0 || draft.enrichDetails || draft.detailOperationId || draft.detailPage)) throw new Error("AgentKey X 订阅仅支持首页一次、零详情；请显式纠正配置，不会自动丢弃。");
   const enrichDetails = collectionDetailsAvailable(operation) && draft.enrichDetails;
   const target = enrichDetails ? collectionDetailOperations(operation, draft.values).find(choice => choice.operationId === draft.detailOperationId) : undefined;
   if (enrichDetails && !target) throw new Error("请选择当前采集条件已接通的详情目标；不会自动选库或回退。");
@@ -83,9 +102,10 @@ export function collectionConfig(operation: PlatformOperation, draft: Collection
     if (!/^-?\d+$/.test(rawPage) || !Number.isSafeInteger(Number(rawPage))) throw new Error("请显式填写车家号详情页码（安全整数），没有默认页码。");
     detailPage = Number(rawPage);
   }
-  return { name: draft.name.trim(), provider: draft.provider, operationId: operation.id, parameters, enabled: draft.enabled, intervalMinutes: draft.intervalMinutes, enrichDetails, ...(target ? { detailOperationId: target.operationId } : {}), ...(detailPage !== undefined ? { detailPage } : {}), limits: { pages: draft.pages, items: draft.items, details: draft.details } };
+  return { name: draft.name.trim(), provider: draft.provider, operationId: operation.id, parameters, enabled: draft.enabled, intervalMinutes: draft.intervalMinutes, enrichDetails, ...(target ? { detailOperationId: target.operationId } : {}), ...(detailPage !== undefined ? { detailPage } : {}), limits: { pages: single ? 1 : draft.pages, items: draft.items, details: single && !enrichDetails ? 0 : draft.details } };
 }
-export function collectionPagingNote(operation: PlatformOperation, values: Record<string, string>) {
+export function collectionPagingNote(operation: PlatformOperation, values: Record<string, string>, provider = "redfox") {
+  if (operation.platform === "x-research" && isAgentKeySinglePageSnapshot(operation, provider)) return "每轮仅首页一次，零详情，不自动续页；条目上限包括置顶、转发与研究记录，不等于文章数。仅普通作品按实收证据入库，缺账号范围或身份保留待核实；这不代表原生 X 连续主采集，也不提供其供应商切换。";
   if (isHotSnapshot(operation)) return "每轮查询一次研究快照，不翻页、不补全详情，也不自动成为文章；条目上限可能截断本次返回记录，TOP10 以聚合组计条目。";
   if (isWeiboSnapshot(operation)) return "微博热搜每轮只保存一次研究快照，不作为文章，不使用分页或详情补全限额。";
   if (operation.id === "3X8FGEEM") return values.keyword?.trim() ? "带关键词时本轮只查询一页，页码与每页条数不用于续页。作品候选与相关话题、推荐研究分别保存。" : "无关键词时可按已确认的 pageNum 规则继续查询；最多页数仍是上限，不保证有后页。作品候选与研究分别保存。";
@@ -97,13 +117,15 @@ export function collectionPriceNote(operation: PlatformOperation) {
 }
 export function collectionSummaryRows(data: Record<string, unknown>): Array<[string, string]> {
   if (!Object.hasOwn(data, "selectedResearchCount") && !Object.hasOwn(data, "returnedPage")) return [];
-  const snapshot = data.operationId === "UAQ90A1F" || data.platform === "hot-research";
-  const fields = [["page", "本地页号"], ["count", "本页实际返回条目"], ["workCount", "本页作品候选"], ["selectedCount", snapshot ? "本页选取快照" : "本页选入作品候选"], ["processedCount", snapshot ? "本页已处理快照" : "本页已处理作品候选"], ["researchCount", "本页研究记录"], ["selectedResearchCount", "本页选入研究记录"], ["unprocessedDueToLimit", snapshot ? "因限额未选快照" : "因限额未选作品候选"], ["unprocessedResearchDueToLimit", "因限额未选研究记录"], ["truncated", "本页限额截断"]];
+  const snapshot = data.operationId === "UAQ90A1F" || data.platform === "hot-research" || data.snapshot === true && data.operationId !== "douyin.topic_posts";
+  const x = data.platform === "x-research" && data.provider === "agentkey";
+  const fields = [["page", "本地页号"], ["count", "本页实际返回条目"], ["workCount", "本页作品候选"], ["selectedCount", x ? "本页选取条目（含置顶、转发与研究）" : snapshot ? "本页选取快照" : "本页选入作品候选"], ["processedCount", snapshot ? "本页已处理快照" : "本页已处理作品候选"], ["researchCount", "本页研究记录"], ["selectedResearchCount", "本页选入研究记录"], ["unprocessedDueToLimit", x ? "因限额未选条目" : snapshot ? "因限额未选快照" : "因限额未选作品候选"], ["unprocessedResearchDueToLimit", "因限额未选研究记录"], ["truncated", "本页限额截断"]];
   return fields.flatMap(([key, label]) => Object.hasOwn(data, key!) ? [[label!, researchFactText(data[key!])]] as Array<[string, string]> : []);
 }
 
 /** Collection-page facts must be selected before any platform's one-off query summary. */
 export function collectionPageSummary(kind: string, data: Record<string, unknown>) {
+  if (data.provider === "agentkey" && data.stopReason === "single-request" && data.snapshot !== true) return null;
   if (kind !== "query_summary" || (!Object.hasOwn(data, "selectedResearchCount") && !Object.hasOwn(data, "returnedPage"))) return null;
   const fields = (key: string): Array<[string, string]> => {
     if (!Object.hasOwn(data, key)) return [];
@@ -126,7 +148,7 @@ export function collectionPreviewBody(operation: PlatformOperation, values: Reco
 }
 export function isCollectionOperationKey(key: string, provider?: string, mode?: string) {
   return key === "redfox.weibo.collection" || key === "redfox.platform.collection"
-    || (provider === "agentkey" && key === "agentkey.douyin.search" && mode === "collection");
+    || (provider === "agentkey" && (["agentkey.weibo.search", "agentkey.weibo.account_posts", "agentkey.weibo.comments", "agentkey.weibo.following", "agentkey.weibo.trending", "agentkey.weibo.related_search", "agentkey.bilibili.search", "agentkey.bilibili.account_posts", "agentkey.douyin.search", "agentkey.douyin.account_posts", "agentkey.xiaohongshu.search", "agentkey.xiaohongshu.account_posts", ...["search", "account_posts", "comments", "followers", "following", "list_posts", "community_posts", "trending", "list_members", "community_members"].map(id => `agentkey.x.${id}`)].includes(key) || agentKeySinglePageIds.filter(id => id.includes(".")).some(id => `agentkey.${id}` === key)) && mode === "collection");
 }
 export function collectionSaveCommand(id: number | null, editVersion: number | null, config: CollectionSubscriptionConfig) {
   if (id === null) return { method: "POST" as const, path: "/api/admin/redfox/collections", body: config };

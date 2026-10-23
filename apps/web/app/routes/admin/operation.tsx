@@ -1,3 +1,4 @@
+import { agentKeyXAccountUsername } from "../../features/admin/x-search-import-data";
 import { WorkResultSelection } from "../../features/admin/work-result-selection";
 import { collectionSubscriptionsHref, isCollectionOperationKey } from "../../features/admin/collection-subscription-data";
 import { isXhsCommentOperation, xhsCommentEmptyMessage } from "../../features/admin/xhs-comment-data";
@@ -34,10 +35,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       : Promise.resolve(null),
   ]);
   const run = page ? { ...detail, results: page.results, nextResultCursor: page.nextCursor } : detail;
-  const accounts = run.provider === "redfox" && run.operationKey === "redfox.x.account" ? run.results.filter(r => r.kind === "account" && !r.sourceId) : [];
+  const redfoxAccount = run.provider === "redfox" && run.operationKey === "redfox.x.account";
+  const agentkeyAccount = run.provider === "agentkey" && run.operationKey === "agentkey.x.account_profile";
+  const accounts = run.results.filter(r => r.kind === "account" && !r.sourceId && (redfoxAccount || agentkeyAccount && agentKeyXAccountUsername(r.kind, r.data)));
   const bindingSources: Record<string, BindingSource[]> = {};
   await Promise.all(accounts.map(async result => {
-    const username = typeof result.data.username === "string" ? result.data.username : "";
+    const username = agentkeyAccount ? agentKeyXAccountUsername(result.kind, result.data) ?? "" : typeof result.data.username === "string" ? result.data.username : "";
     if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) return;
     const list = await adminGet<{ rows: BindingSource[] }>(request, `/api/admin/sources?${new URLSearchParams({ kind: "x_search", q: username })}`);
     const details = await Promise.all(list.rows.map(s => adminGet<{ source: BindingSource & { config: Record<string, unknown> } }>(request, `/api/admin/sources/${encodeURIComponent(s.id)}`)));

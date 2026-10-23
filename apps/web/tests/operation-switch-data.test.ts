@@ -9,7 +9,7 @@ const preflight: CollectionPreflight = {
 };
 
 test("source kind determines the native target without requesting SocialData for MP", () => {
-  assert.deepEqual(collectionTargets("mp_account"), ["redfox", "dajiala"]);
+  assert.deepEqual(collectionTargets("mp_account"), ["redfox", "dajiala", "agentkey"]);
   assert.deepEqual(collectionTargets("x_search"), ["redfox", "socialdata"]);
   assert.deepEqual(collectionTargets("external"), []);
 });
@@ -23,12 +23,17 @@ test("same Redfox provider permits an explicit library change but not the alread
   assert.equal(sameCollectionTarget("x_search", "redfox", "redfox", null, "premium"), true);
 });
 
-test("library selection invalidates prior preflight for both MP targets", () => {
+test("only Redfox uses a library; AgentKey and native preflights still check source versions", () => {
   assert.equal(collectionPreflightMatches(preflight, source, "wide"), true);
   assert.equal(collectionPreflightMatches(preflight, source, "premium"), false);
   const native = { ...preflight, target: "dajiala" as const };
-  assert.equal(collectionPreflightMatches(native, source, "premium"), false);
+  assert.equal(collectionPreflightMatches(native, source, "premium"), true);
   assert.equal(collectionPreflightMatches({ ...native, library: "premium" }, source, "premium"), true);
+  const agentkey = { ...preflight, target: "agentkey" as const, library: null };
+  assert.equal(collectionPreflightMatches(agentkey, source, "wide"), true);
+  assert.equal(collectionPreflightMatches(agentkey, source, "premium"), true);
+  assert.equal(collectionPreflightMatches(agentkey, { ...source, subscriptionVersion: 8 }, "wide"), false);
+  assert.equal(sameCollectionTarget("mp_account", "agentkey", "agentkey", null, "wide"), true);
 });
 
 test("preflight cannot be reused for a different source, kind or changed source/subscription version", () => {

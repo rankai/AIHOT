@@ -1,8 +1,14 @@
+import {executeAgentKeyX} from './x-execution.ts';
+import {executeAgentKeyWeibo} from "./weibo-execution.ts";
+import {executeAgentKeyBilibili} from "./bilibili-execution.ts";
+import {executeAgentKeyXiaohongshu} from "./xiaohongshu-execution.ts";
+import {executeAgentKeyToutiao} from "./toutiao-execution.ts";
+import {executeAgentKeyWechat} from "./wechat-execution.ts";
 import { sql } from "../../db.ts";
 import { BudgetExceededError, ProviderRejectedError, ReceiptBusyError } from "../receipts.ts";
 import { claimRun, requireExecution, setRunState, StaleOperationError, type Execution, type RunRow } from "../operations/store.ts";
 import { settleUnknownReceipt } from "../operations/recovery.ts";
-import { agentKeyRouteFor } from "./douyin-contract.ts";
+import { agentKeyRouteFor } from "./routes.ts";
 import { AgentKeyConfigurationError } from "./config.ts";
 import { executeDouyinSearch } from "./douyin-search.ts";
 
@@ -14,7 +20,14 @@ export async function executeAgentKeyStep(runId: number, stepVersion: number, jo
   catch (error) { if (error instanceof StaleOperationError) return { skipped: true }; throw error; }
   try {
     if (!agentKeyRouteFor(run)) throw new Error("Unsupported AgentKey operation/step/profile");
-    await executeDouyinSearch(execution);
+    if(run.operation_key?.startsWith("agentkey.x."))await executeAgentKeyX(execution);
+    else if(run.operation_key?.startsWith("agentkey.weibo."))await executeAgentKeyWeibo(execution);
+    else if(run.operation_key?.startsWith("agentkey.bilibili."))await executeAgentKeyBilibili(execution);
+    else if(run.operation_key?.startsWith("agentkey.wechat_mp."))await executeAgentKeyWechat(execution);
+    else if(run.operation_key?.startsWith("agentkey.toutiao."))await executeAgentKeyToutiao(execution);
+    else if(run.operation_key?.startsWith("agentkey.xiaohongshu."))await executeAgentKeyXiaohongshu(execution);
+    else if(run.operation_key?.startsWith("agentkey.douyin."))await executeDouyinSearch(execution);
+    else throw new Error("Unsupported AgentKey platform");
     return { runId };
   } catch (error) {
     // Complete retryable rejections have already persisted their retry window and receipt evidence.

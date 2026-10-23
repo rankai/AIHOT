@@ -1,3 +1,4 @@
+import {agentKeyWechatEvidence} from "../providers/agentkey/wechat-evidence.ts";
 import { z } from "zod";
 import { sql,type Db,type Tx } from "../db.ts";
 import { credential } from "../config.ts";
@@ -23,7 +24,14 @@ async function accountMapping(db:Db,sourceId:string,config:Record<string,unknown
     if(binding.evidence?.kind!=="result")continue;
     const reference=String(binding.evidence.reference);
     if(!/^[1-9][0-9]{0,18}$/.test(reference)||BigInt(reference)>9223372036854775807n)continue;
-    const [r]=await db`SELECT z.*,r.provider,r.operation_key,r.input,p.model,p.status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${reference} AND z.source_id=${sourceId}`;
+    const [r]=await db`SELECT z.*,r.provider,r.operation_key,r.contract_version,r.input,p.model,p.status,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${reference} AND z.source_id=${sourceId}`;
+    if(r?.provider==='agentkey'){
+      try{const {parsed}=await agentKeyWechatEvidence(db,r),identity=parsed.data.identity as {wxId?:string;bizInfo?:string};
+        if(identity[binding.id_kind as 'wxId'|'bizInfo']!==binding.id_value||(identity.wxId&&identity.wxId!==wxId)||(identity.bizInfo&&identity.bizInfo!==bizInfo))continue;
+        verified.add(binding.id_kind);const display=(parsed.data.record as {account?:string}).account;
+        if(display){if(account&&account!==display)throw new UnsupportedReplacement('Imported account evidence has conflicting display accounts');account=display;}
+      }catch(error){if(error instanceof UnsupportedReplacement&&/conflicting/.test(error.message))throw error;}continue;
+    }
     const op=WechatOperationId.safeParse(r?.input.operationId);
     if(!r||!op.success||!["wechat_account","wechat_work"].includes(r.kind)||r.provider!=="redfox"||r.operation_key!=="redfox.sync.query"||r.model!==op.data||r.data.platform!=="wechat"||r.data.operationId!==op.data||!["received","completed"].includes(r.status))continue;
     try{
@@ -42,7 +50,7 @@ async function accountMapping(db:Db,sourceId:string,config:Record<string,unknown
   const matches=config.ghid?config.ghid===confirmedWx:!!config.wxid&&config.wxid===account;
   return {wxId:confirmedWx,bizInfo:confirmedBiz,account,matches};
 }
-export async function preflightMpReplacement(sourceId:string,target:"redfox"|"dajiala",library:unknown="wide",db:Db=sql,proposed?:Record<string,unknown>){
+export async function preflightMpReplacement(sourceId:string,target:"redfox"|"dajiala"|"agentkey",library:unknown="wide",db:Db=sql,proposed?:Record<string,unknown>){
   const selected=MpLibrary.parse(library);
   const [s]=await db`SELECT s.*,c.id AS subscription_id,c.provider,c.edit_version,c.config AS effective_config,c.progress AS effective_progress,c.interval_minutes AS effective_interval,c.active_run_id FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id=s.id WHERE s.id=${sourceId}`;
   if(!s)return null;
@@ -53,24 +61,26 @@ export async function preflightMpReplacement(sourceId:string,target:"redfox"|"da
   check("subscription",s.kind==="mp_account"&&!!s.subscription_id,"仅支持现有公众号主订阅，保留信源与订阅 ID");
   const bad=unsupportedConfig("mp_account",config);
   check("configuration",validConfig&&!bad.length&&[config.ghid,config.wxid].some(v=>typeof v==="string"&&v.length>0),!validConfig?"配置不是有效对象，请先修正":bad.length?`不支持的配置：${bad.join("、")}`:"保留 ghid/wxid/nickname，不改变原周期");
-  check("credentials",!!credential("collectors",target==="redfox"?"REDFOX_API_KEY":"DAJIALA_KEY"),"需服务端凭证；预检不向供应商发请求","server configuration","unavailable");
-  const identity=target==="redfox"?await accountMapping(db,sourceId,config):{wxId:undefined,bizInfo:undefined,account:undefined,matches:false};
-  if(target==="redfox"){
+  check("credentials",!!credential("collectors",target==="redfox"?"REDFOX_API_KEY":target==="agentkey"?"AGENTKEY_API_KEY":"DAJIALA_KEY"),"需服务端凭证；预检不向供应商发请求","server configuration","unavailable");
+  const identity=target!=="dajiala"?await accountMapping(db,sourceId,config):{wxId:undefined,bizInfo:undefined,account:undefined,matches:false};
+  if(target!=="dajiala"){
     check("identity",identity.matches&&!!(identity.wxId||identity.bizInfo),"需已有同源稳定账号绑定；有 ghid 时必须匹配 wxId，无 ghid 时须由已收账号记录核实 wxid","source_account_bindings");
-    if(selected==="premium")check("account",!!identity.account,"优质库仅接受已收并绑定同源的展示 account；不能用 ghid 或昵称替代","operation_results");
-    for(const op of Object.values(mpOperations[selected]).slice(0,2)){
+    if(target==="agentkey")check("username",!!(identity.wxId||identity.account),"AgentKey 文章列表需要已收且匹配同源的 username；不能由 bizInfo 推造","operation_results");
+    if(target==="redfox"&&selected==="wide")check("redfox_identifier",!!(identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)||identity.bizInfo),"Redfox 仅接受其已确认的 gh ID 格式或 bizInfo；不剥离 @app","operation_results");
+    if(target==="redfox"&&selected==="premium")check("account",!!identity.account,"优质库仅接受已收并绑定同源的展示 account；不能用 ghid 或昵称替代","operation_results");
+    for(const op of target==="redfox"?Object.values(mpOperations[selected]).slice(0,2):[]){
       const [r]=await db`SELECT response FROM receipts WHERE service LIKE 'redfox.%' AND model=${op} AND request->>'base'=${redfoxBaseUrl()} AND response IS NOT NULL ORDER BY received_at DESC NULLS LAST,id DESC LIMIT 1`;
       let code:unknown;try{code=(parseRedfoxJson(r?.response?.body??"null") as {code?:unknown}|null)?.code;}catch{code=undefined;}
       const denied=[401,403].includes(r?.response?.status),success=r?.response?.status===200&&code===2000;
       checks.push({key:`permission:${op}`,source:"current endpoint latest receipt",conclusion:denied?"unavailable":success?"supported":"unverified",evidence:denied?"此接口最近已收响应拒绝访问":success?"此接口最近已收响应成功":"尚未核实此接口权限；不会额外付费探测"});
     }
   }
-  const parameters=selected==="premium"?{account:identity.account??null}:identity.wxId?{wxId:identity.wxId}:{bizInfo:identity.bizInfo??null};
-  return {sourceId,target,library:selected,mappingVersion:MP_MAPPING_VERSION,sourceVersion:new Date(s.updated_at).toISOString(),subscriptionVersion:s.edit_version??null,supported:checks.every(c=>["supported","unverified"].includes(c.conclusion)),checks,
-    mapping:target==="redfox"?{operation:"redfox.wechat.collection",...mpOperations[selected],parameters,identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:{operation:"mp.history",parameters:{ghid:config.ghid??config.wxid}},
-    impact:{...(target==="redfox"?{firstImport:!s.effective_progress?.lastCheckedAt,firstImportNote:!s.effective_progress?.lastCheckedAt?"最多8条，全部标记历史回填；不按无时区日期筛选7天范围":null}:{}),delay:target==="redfox"?"T+1":null,intervalMinutes:s.effective_interval??s.interval_minutes,activeRunId:s.active_run_id??null,sourceId,subscriptionId:s.subscription_id??null,note:"保留原材料与权限；切换使旧轮失去提交资格，供应商/库的分页与 UUID 不跨库复用"}};
+  const parameters=selected==="premium"?{account:identity.account??null}:identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)?{wxId:identity.wxId}:{bizInfo:identity.bizInfo??null};
+  return {sourceId,target,library:target==="redfox"?selected:null,mappingVersion:MP_MAPPING_VERSION,sourceVersion:new Date(s.updated_at).toISOString(),subscriptionVersion:s.edit_version??null,supported:checks.every(c=>["supported","unverified"].includes(c.conclusion)),checks,
+    mapping:target==="agentkey"?{operation:"agentkey.wechat_mp.account_articles",parameters:{username:identity.wxId??identity.account??null,offset:"",page_size:20,item_show_type:0,raw:false},identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:target==="redfox"?{operation:"redfox.wechat.collection",...mpOperations[selected],parameters,identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:{operation:"mp.history",parameters:{ghid:config.ghid??config.wxid}},
+    impact:{...(target!=="dajiala"?{firstImport:!s.effective_progress?.lastCheckedAt,firstImportNote:!s.effective_progress?.lastCheckedAt?"最多8条，全部标记历史回填；不按无时区日期筛选7天范围":null}:{}),delay:target==="redfox"?"T+1":target==="agentkey"?"TikHub 刷新时效未知":null,intervalMinutes:s.effective_interval??s.interval_minutes,activeRunId:s.active_run_id??null,sourceId,subscriptionId:s.subscription_id??null,note:"保留原材料与权限；切换使旧轮失去提交资格，供应商/库的分页与 UUID 不跨库复用"}};
 }
-const Switch=z.object({target:z.enum(["redfox","dajiala"]),library:MpLibrary.default("wide"),sourceVersion:z.string().datetime(),subscriptionVersion:z.number().int(),mappingVersion:z.number().int(),reason:z.string().min(1).max(500)}).strict();
+const Switch=z.object({target:z.enum(["redfox","dajiala","agentkey"]),library:MpLibrary.default("wide"),sourceVersion:z.string().datetime(),subscriptionVersion:z.number().int(),mappingVersion:z.number().int(),reason:z.string().min(1).max(500)}).strict();
 export async function switchMpCollection(sourceId:string,raw:unknown,actor:string){
   const input=Switch.parse(raw);
   return sql.begin(async tx=>{
@@ -86,13 +96,14 @@ export async function switchMpCollection(sourceId:string,raw:unknown,actor:strin
     const {providerProgress={},...previous}=sub.progress;
     const from=sub.provider==="redfox"?`redfox:${sub.config.redfoxLibrary}`:sub.provider;
     const progress={lastCheckedAt:previous.lastCheckedAt??null,providerProgress:{...providerProgress,[from]:previous}};
-    await tx`UPDATE collection_subscriptions SET provider=${input.target},operation_key=${input.target==="redfox"?"redfox.wechat.collection":"mp.history"},config=${tx.json(config as never)},progress=${tx.json(progress as never)},execution_version=execution_version+1,edit_version=edit_version+1,active_run_id=NULL,next_run_at=now(),updated_at=now() WHERE id=${sub.id}`;
+    await tx`UPDATE collection_subscriptions SET provider=${input.target},operation_key=${input.target==="redfox"?"redfox.wechat.collection":input.target==="agentkey"?"agentkey.wechat_mp.account_articles":"mp.history"},config=${tx.json(config as never)},progress=${tx.json(progress as never)},execution_version=execution_version+1,edit_version=edit_version+1,active_run_id=NULL,next_run_at=now(),updated_at=now() WHERE id=${sub.id}`;
     await tx`UPDATE sources SET execution_version=execution_version+1,updated_at=now() WHERE id=${sourceId}`;
     await audit(actor,"source.switch_collection",`source:${sourceId}`,input.reason,{provider:sub.provider,library:sub.config.redfoxLibrary??null},{provider:input.target,library:input.target==="redfox"?input.library:null,mappingVersion:MP_MAPPING_VERSION},undefined,tx);
     return {sourceId,subscriptionId:sub.id,provider:input.target};
   });
 }
-export async function validateMpSubscriptionConfig(tx:Tx,sourceId:string,current:Record<string,unknown>,config:Record<string,unknown>){
+export async function validateMpSubscriptionConfig(tx:Tx,sourceId:string,current:Record<string,unknown>,config:Record<string,unknown>,provider:"redfox"|"agentkey"="redfox"){
+  if(provider==="agentkey"){if(config.redfoxLibrary!==undefined)throw new UnsupportedReplacement("AgentKey does not use Redfox libraries");const check=await preflightMpReplacement(sourceId,"agentkey","wide",tx,config);const bad=check?.checks.filter(c=>c.key!=="credentials"&&c.conclusion==="unsupported");if(!check||bad?.length)throw new UnsupportedReplacement(bad?.map(c=>c.evidence).join("; ")??"Source unavailable");return config;}
   if(config.redfoxLibrary!==undefined&&config.redfoxLibrary!==current.redfoxLibrary)throw new UnsupportedReplacement("换库须先预检并使用采集切换命令");
   const library=MpLibrary.parse(current.redfoxLibrary),next={...config,redfoxLibrary:library};
   const check=await preflightMpReplacement(sourceId,"redfox",library,tx,next);

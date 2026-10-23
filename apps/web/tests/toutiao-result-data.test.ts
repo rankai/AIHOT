@@ -17,6 +17,15 @@ test("four native permalink forms preserve decimal IDs and the received query st
   for (const address of ["https://toutiao.com/c/user/123/", "https://toutiao.com/tok/short", "https://v.toutiao.com/short/", `https://toutiao.com.evil.test/a${id}`, `https://user:pass@toutiao.com/a${id}`, `https://@toutiao.com/a${id}`, `https://toutiao.com:443/a${id}`, `https://toutiao.com:8443/a${id}`, `${url}#`, `${url}#part`, `https://toutiao.com/article/${id}/extra`, "https://toutiao.com/article/has-letters/", "javascript:alert(1)"]) assert.equal(toutiaoNativeWork(address), null, address);
 });
 
+test("received mobile article permalink is preserved while other mobile paths and unproved author evidence stay blocked", () => {
+  const mobile = `https://m.toutiao.com/article/${id}/?share=a%2Fb`;
+  assert.deepEqual(toutiaoNativeWork(mobile), { id, url: mobile });
+  for (const address of [`http://m.toutiao.com/article/${id}/`, `https://m.toutiao.com/video/${id}/`, `https://m.toutiao.com.evil.test/article/${id}/`, `https://@m.toutiao.com/article/${id}/`, `${mobile}#part`]) assert.equal(toutiaoNativeWork(address), null, address);
+  assert.equal(toutiaoImportFields("toutiao_work", work({provider:"agentkey",operationId:"PAB6Z75Y",url:mobile})).canImport,true);
+  for (const extra of [{identity:{}},{workId:null},{url:null}]) assert.equal(toutiaoImportFields("toutiao_work",work({provider:"agentkey",...extra})).canImport,false);
+  assert.equal(toutiaoImportFields("toutiao_account",{provider:"agentkey",identity:{uid}}).canImport,false);
+});
+
 test("unsupported received raw original cannot be replaced even when the derived url is null", () => {
   const fields = toutiaoImportFields("toutiao_work", work({ url: null, record: { opusUrl: "https://v.toutiao.com/short/" } }));
   assert.equal(fields.receivedUrl, "https://v.toutiao.com/short/");
