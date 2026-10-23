@@ -16,7 +16,7 @@ import { TranscriptionForm } from "../../features/admin/transcription-form";
 import type { TranscriptionOptions } from "../../features/admin/transcription-types";
 import { SITE } from "@aihot/industry/site";
 import { useCallback, useState } from "react";
-import { redirect, useNavigate } from "react-router";
+import { redirect, useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/redfox";
 import { adminGet } from "../../lib/admin.server";
 import { PlatformQuery } from "../../features/admin/platform-query";
@@ -49,7 +49,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 export const meta: Route.MetaFunction = () => [{ title: `数据工具 · ${SITE.name} 后台` }];
 export default function Redfox({ loaderData }: Route.ComponentProps) {
-  const [view, setView] = useState(loaderData.initialView);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedView = searchParams.get("view");
+  const view = selectedView && ["x", "platforms", "ai-search", "images", "videos", "tools", "assets", "costs"].includes(selectedView) ? selectedView : loaderData.initialView;
+  const setView = (next: string) => setSearchParams(previous => { const params = new URLSearchParams(previous); params.set("view", next); return params; }, { preventScrollReset: true });
   const [assetUpdates, setAssetUpdates] = useState<PrivateAsset[]>([]);
   const onAssetChange = useCallback((asset: PrivateAsset) => setAssetUpdates(previous => mergeAssetRows(previous, [asset])), []);
   const navigate = useNavigate();
@@ -57,9 +60,9 @@ export default function Redfox({ loaderData }: Route.ComponentProps) {
   const [accountType, setAccountType] = useState<"screenName" | "restId">("screenName");
   const [account, setAccount] = useState("");
   const [tweetId, setTweetId] = useState("");
-  return <AdminPage title="数据工具" subtitle="每次查询都会保存一条执行记录，费用由现有供应商预算控制；未配置预算、凭证或总开关时可能等待。定时采集在信源页的采集订阅中配置；已有信源的主订阅、参与方式与公开权限仍在信源详情中管理。" actions={<><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink><ButtonLink to="/admin/operations">执行记录</ButtonLink><ButtonLink to="/admin/settings">预算设置</ButtonLink><ButtonLink to="/admin/runs">运行与回执</ButtonLink></>}>
-    <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区"><Button tone={view === "x" ? "primary" : "secondary"} aria-pressed={view === "x"} onClick={() => setView("x")}>X 查询</Button><Button tone={view === "images" ? "primary" : "secondary"} aria-pressed={view === "images"} onClick={() => setView("images")}>图片创作</Button><Button tone={view === "platforms" ? "primary" : "secondary"} aria-pressed={view === "platforms"} onClick={() => setView("platforms")}>平台查询</Button><Button tone={view === "tools" ? "primary" : "secondary"} aria-pressed={view === "tools"} onClick={() => setView("tools")}>工具</Button><Button tone={view === "assets" ? "primary" : "secondary"} aria-pressed={view === "assets"} onClick={() => setView("assets")}>私有素材</Button><Button tone={view === "ai-search" ? "primary" : "secondary"} aria-pressed={view === "ai-search"} onClick={() => setView("ai-search")}>AI 搜索</Button><Button tone={view === "videos" ? "primary" : "secondary"} aria-pressed={view === "videos"} onClick={() => setView("videos")}>视频创作</Button><Button tone={view === "costs" ? "primary" : "secondary"} aria-pressed={view === "costs"} onClick={() => setView("costs")}>费用与账单</Button></div>
-    <div hidden={view !== "costs"}><RedfoxCosts initialInterval={loaderData.costInterval} /></div>
+  return <AdminPage title="数据工具" subtitle="查询与创作提交后会自动进入对应执行记录，查看进度与结果；本地素材上传后在私有素材库查看。费用受现有预算控制。定时采集在采集订阅中配置，已有信源的主订阅与公开权限仍在信源详情管理。" actions={<><ButtonLink tone="primary" to="/admin/operations">进度与结果</ButtonLink><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink></>}>
+    <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区">{[["x", "X 查询"], ["platforms", "平台查询"], ["ai-search", "AI 搜索"], ["images", "图片创作"], ["videos", "视频创作"], ["tools", "辅助工具"], ["assets", "私有素材"], ["costs", "费用与账单"]].map(([key, label]) => <Button key={key} tone={view === key ? "primary" : "secondary"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
+    <div hidden={view !== "costs"}><div className="mb-4 flex flex-wrap gap-2"><ButtonLink to="/admin/settings">预算设置</ButtonLink><ButtonLink to="/admin/runs">运行与回执</ButtonLink></div><RedfoxCosts initialInterval={loaderData.costInterval} /></div>
     <div hidden={view !== "ai-search"}><AiSearchForm options={loaderData.aiSearchOptions} initialFamily={loaderData.aiSearchFamily} initialTaskId={loaderData.aiSearchTaskId} /></div>
     <div hidden={view !== "assets"}><AssetLibrary supplierUploadOptions={loaderData.supplierUploadOptions} initialPage={loaderData.assets} uploadOptions={loaderData.assetUploadOptions} imageOptions={loaderData.options} updates={assetUpdates} onAssetChange={onAssetChange} /></div>
     <div hidden={view !== "tools"}><div className="grid gap-5 xl:grid-cols-2"><div className="min-w-0"><TranscriptionForm options={loaderData.transcriptionOptions} initialTaskId={loaderData.transcriptionTaskId} initialPlatform={loaderData.transcriptionPlatform} /></div><div className="min-w-0"><MediaToolForm operations={loaderData.operations} /></div><div className="min-w-0 xl:col-span-2"><XhsCommentForm options={loaderData.xhsCommentOptions} initialTaskId={loaderData.xhsCommentTaskId} /></div></div></div>

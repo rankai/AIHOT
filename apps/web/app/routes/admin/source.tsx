@@ -293,7 +293,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
               ["等待 / 处理说明", <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{activeOperation.waitReason ?? "—"}</span>],
               ["下次尝试", <Time at={activeOperation.nextAttemptAt} />],
             ]} /><p className="text-[12px] text-ink-4">执行等待原因与信源健康分别展示；预算等待、未知回执或本地核实请到执行记录详情查看。</p></div>}
-            <div className="mt-3 text-[13px]"><Link className="text-accent" to="/admin/operations">查看执行记录</Link></div>
+            {s.subscription_id && <div className="mt-3 text-[13px]"><Link className="text-accent" to={`/admin/operations?subscriptionId=${s.subscription_id}`}>执行历史与结果</Link></div>}
             <div className="mt-3"><Json value={{ operation: s.collection_operation, version: s.collection_version, progress: s.cursor }} label="操作与进度诊断" /></div>
           </Card>
           <Card title="状态">
@@ -314,7 +314,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
               rowKey={(r) => r.history_key}
               empty="还没有采集记录"
               columns={[
-                { key: "at", label: "时间 / 执行记录", render: (r) => { const facts = sourceHistoryFacts(r); return <div className="space-y-1"><span className="block text-[11px] text-ink-4">{facts.timeLabel}</span><Time at={facts.time} />{facts.href && <Link className="block text-accent" to={facts.href}>查看执行记录 #{r.id}</Link>}<span className="block text-[11px] text-ink-4">供应商：{facts.provider}</span></div>; } },
+                { key: "at", label: "时间 / 执行记录", render: (r) => { const facts = sourceHistoryFacts(r); return <div className="space-y-1"><span className="block text-[11px] text-ink-4">{facts.timeLabel}</span><Time at={facts.time} />{facts.href && <Link className="block text-accent" to={`${facts.href}${r.status === "completed" ? "#results" : "#progress"}`}>{r.status === "completed" ? "查看结果" : "查看执行记录"} #{r.id}</Link>}<span className="block text-[11px] text-ink-4">供应商：{facts.provider}</span></div>; } },
                 {
                   key: "st",
                   label: "结果",

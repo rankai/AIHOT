@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, useRevalidator } from "react-router";
 import { Badge, DataTable } from "./ui";
-import { operationLabel, operationStatus, type OperationAccepted, type OperationRow } from "./operation-types";
+import { operationEnded, operationLabel, operationStatus, type OperationAccepted, type OperationRow } from "./operation-types";
 import { Time } from "./ui";
 
 export function OperationLink({ operation, newTab = false }: { operation: OperationAccepted; newTab?: boolean }) {
@@ -10,14 +10,15 @@ export function OperationLink({ operation, newTab = false }: { operation: Operat
 export function OperationBadge({ status }: { status: string }) {
   return <Badge tone={status === "completed" ? "ok" : status === "needs_review" || status === "failed" ? "bad" : status === "waiting" || status === "stopped" ? "warn" : "muted"}>{operationStatus[status] ?? status}</Badge>;
 }
-export function OperationTable({ rows }: { rows: OperationRow[] }) {
-  return <DataTable rows={rows} rowKey={r => r.id} empty="还没有执行记录" columns={[
+export function OperationTable({ rows, empty = "还没有执行记录" }: { rows: OperationRow[]; empty?: string }) {
+  return <DataTable rows={rows} rowKey={r => r.id} empty={empty} columns={[
     { key: "id", label: "记录编号", render: r => <Link className="text-accent" to={`/admin/operations/${r.id}`}>#{r.id}</Link> },
     { key: "provider", label: "供应商 / 操作", render: r => <span>{r.provider}<span className="mt-1 block text-[12px] text-ink-3">{operationLabel[r.operationKey] ?? r.operationKey}</span></span> },
     { key: "status", label: "状态", render: r => <OperationBadge status={r.status} /> },
     { key: "reason", label: "等待原因", render: r => r.waitReason || "—" },
     { key: "next", label: "下次尝试", render: r => <Time at={r.nextAttemptAt} /> },
     { key: "at", label: "创建", render: r => <Time at={r.createdAt} /> },
+    { key: "view", label: "进度 / 结果", render: r => <Link className="whitespace-nowrap font-medium text-accent" to={`/admin/operations/${r.id}#${operationEnded(r.status) ? "results" : "progress"}`}>{operationEnded(r.status) ? "查看结果" : "查看进度"}</Link> },
   ]} />;
 }
 export function useOperationPolling(enabled: boolean) {
