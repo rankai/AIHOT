@@ -28,7 +28,7 @@ export function PrivateAssetView({ asset, options, compact = false, onChange, up
     {available && previewFailure === current.key && <p className="text-[12px] text-ink-3">当前浏览器未能预览此{label}，仍可尝试下载。</p>}
     <p className="break-all text-[12px] text-ink-3">{filename} · {label} · {current.content_type} · {assetSize(current.bytes)}（{current.bytes} 字节）{dimensions ? ` · ${dimensions}` : ""}{frames ? ` · ${frames}` : ""} · 状态 {status === "available" ? "可用" : status === "deleted" ? "已删除" : status === "deleting" ? "删除中" : status}</p>
     <div className="flex flex-wrap items-center gap-3 text-[13px]">
-      {available && <>{kind === "image" && <a className="text-accent" href={url} target="_blank" rel="noreferrer">查看私有原图 ↗</a>}<a className="text-accent" href={url} download={filename}>下载{label}</a>{options && !issue && <Link className="text-accent" target="_blank" rel="noreferrer" to={`/admin/redfox?view=images&reference=${encodeURIComponent(current.key)}`}>用作参考 ↗</Link>}</>}
+      {available && <>{kind === "image" && <a className="text-accent" href={url} target="_blank" rel="noreferrer">查看私有原图 ↗</a>}<a className="text-accent" href={url} download={filename}>下载{label}</a>{options && !issue && <Link className="text-accent" target="_blank" rel="noreferrer" to={`/admin/data-tools?view=images&reference=${encodeURIComponent(current.key)}`}>用作参考 ↗</Link>}</>}
       {(available || status === "deleting") && <Button size="sm" tone="danger" disabled={!!pending} onClick={() => { setFailure(false); setOpen(true); }}>{status === "deleting" ? "重试删除" : `删除${label}`}</Button>}
     </div>
     {available && uploadOptions && kind !== "text" && <MediaUploadAction asset={current} options={uploadOptions} />}

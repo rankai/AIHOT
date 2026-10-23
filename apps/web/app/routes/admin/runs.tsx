@@ -58,7 +58,7 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
   const failing = r.jobs.filter((j) => j.status === "failed");
 
   return (
-    <AdminPage title="运行" actions={<Link className="text-accent text-[13px]" to="/admin/operations">采集与查询任务、结果及恢复 →</Link>} subtitle={<>任务、队列、信源延迟与需要人工核对的回执和投递。每 20 秒自动刷新 · 最近检查 {bj(r.checkedAt)}</>}>
+    <AdminPage title="运行" actions={<Link className="text-accent text-[13px]" to="/admin/operations">执行记录、结果及恢复 →</Link>} subtitle={<>任务、队列、信源延迟与需要人工核对的回执和投递。每 20 秒自动刷新 · 最近检查 {bj(r.checkedAt)}</>}>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat
           label="worker"
@@ -134,7 +134,7 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
               { key: "s", label: "状态", render: (x) => <span><Badge tone={x.status === "unknown" ? "bad" : "warn"}>{x.status}</Badge>{x.automatically_released && <span className="mt-1 block text-[11px] text-amber">曾自动放行</span>}</span> },
               { key: "w", label: "服务", render: (x) => <span className="whitespace-nowrap">{x.service}{x.model ? ` · ${x.model}` : ""}</span> },
               { key: "p", label: "用途", render: (x) => (x.subject && /^[\w-]{10,}$/.test(x.subject) && x.purpose.includes("analy") ? <Link className="text-accent" to={`/admin/content/${x.subject}`}>{x.purpose}</Link> : x.purpose) },
-              { key: "o", label: "关联任务", render: (x) => <span className="flex flex-wrap gap-2">{(x.operation_ids ?? []).map((id: number) => <Link key={id} className="text-accent" to={`/admin/operations/${id}`}>#{id}</Link>)}</span> },
+              { key: "o", label: "关联执行记录", render: (x) => <span className="flex flex-wrap gap-2">{(x.operation_ids ?? []).map((id: number) => <Link key={id} className="text-accent" to={`/admin/operations/${id}`}>#{id}</Link>)}</span> },
               { key: "e", label: "错误", render: (x) => <span className="line-clamp-2 text-[12px] text-ink-3" title={x.error ?? ""}>{x.error}</span> },
               { key: "a", label: "", render: (x) => (x.status === "unknown" ? <Button size="sm" onClick={() => setReceipt(x)}>核对</Button> : null) },
             ]}
@@ -276,7 +276,7 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
       <ReasonDialog
         open={!!receipt}
         title={`核对回执 #${receipt?.id ?? ""}`}
-        description={<>先到供应商控制台确认这次请求是否计费。放行可能重新发起请求并再次计费。{receipt?.automatically_released ? "此回执曾按实际策略自动放行，当前仍需核对。" : "此回执没有自动放行记录。"}关联任务会沿共用恢复流程继续。</>}
+        description={<>先到供应商控制台确认这次请求是否计费。放行可能重新发起请求并再次计费。{receipt?.automatically_released ? "此回执曾按实际策略自动放行，当前仍需核对。" : "此回执没有自动放行记录。"}关联执行会沿共用恢复流程继续。</>}
         confirmLabel="记录并放行"
         busy={pending === "release"}
         onClose={() => setReceipt(null)}

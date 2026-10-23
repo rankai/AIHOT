@@ -285,15 +285,15 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
         </div>
 
         <div className="min-w-0 space-y-5">
-          <Card title="采集任务">
-            <KV items={[["供应商", s.collection_provider ?? (s.kind === "external" ? "外部上报" : ["x_search", "mp_account"].includes(s.kind) ? "尚未迁移" : "原生采集")], ["主订阅", s.subscription_id ?? "—"], ["当前任务", s.active_run_id ? <Link className="text-accent" to={`/admin/operations/${s.active_run_id}`}>#{s.active_run_id}</Link> : "无在途正式任务"]]} />
+          <Card title="采集订阅">
+            <KV items={[["供应商", s.collection_provider ?? (s.kind === "external" ? "外部上报" : ["x_search", "mp_account"].includes(s.kind) ? "尚未迁移" : "原生采集")], ["主订阅", s.subscription_id ?? "—"], ["当前执行记录", s.active_run_id ? <Link className="text-accent" to={`/admin/operations/${s.active_run_id}`}>#{s.active_run_id}</Link> : "无在途正式执行"]]} />
             {activeOperation && <div className="mt-3 min-w-0 space-y-2 border-t border-line pt-3"><KV items={[
-              ["任务状态", <OperationBadge status={activeOperation.status} />],
+              ["执行状态", <OperationBadge status={activeOperation.status} />],
               ["当前步骤", <span className="break-all">{activeOperation.step}</span>],
               ["等待 / 处理说明", <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{activeOperation.waitReason ?? "—"}</span>],
               ["下次尝试", <Time at={activeOperation.nextAttemptAt} />],
-            ]} /><p className="text-[12px] text-ink-4">任务等待原因与信源健康分别展示；预算等待、未知回执或本地核实请到任务页查看。</p></div>}
-            <div className="mt-3 text-[13px]"><Link className="text-accent" to="/admin/operations">查看采集与查询任务</Link></div>
+            ]} /><p className="text-[12px] text-ink-4">执行等待原因与信源健康分别展示；预算等待、未知回执或本地核实请到执行记录详情查看。</p></div>}
+            <div className="mt-3 text-[13px]"><Link className="text-accent" to="/admin/operations">查看执行记录</Link></div>
             <div className="mt-3"><Json value={{ operation: s.collection_operation, version: s.collection_version, progress: s.cursor }} label="操作与进度诊断" /></div>
           </Card>
           <Card title="状态">
@@ -314,7 +314,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
               rowKey={(r) => r.history_key}
               empty="还没有采集记录"
               columns={[
-                { key: "at", label: "时间 / 任务", render: (r) => { const facts = sourceHistoryFacts(r); return <div className="space-y-1"><span className="block text-[11px] text-ink-4">{facts.timeLabel}</span><Time at={facts.time} />{facts.href && <Link className="block text-accent" to={facts.href}>查看任务 #{r.id}</Link>}<span className="block text-[11px] text-ink-4">供应商：{facts.provider}</span></div>; } },
+                { key: "at", label: "时间 / 执行记录", render: (r) => { const facts = sourceHistoryFacts(r); return <div className="space-y-1"><span className="block text-[11px] text-ink-4">{facts.timeLabel}</span><Time at={facts.time} />{facts.href && <Link className="block text-accent" to={facts.href}>查看执行记录 #{r.id}</Link>}<span className="block text-[11px] text-ink-4">供应商：{facts.provider}</span></div>; } },
                 {
                   key: "st",
                   label: "结果",
@@ -327,7 +327,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
                   ),
                 },
                 { key: "n", label: "材料数", align: "right", render: (r) => { const facts = sourceHistoryFacts(r); return <div><span className="block text-[11px] text-ink-4">{facts.quantityLabel}</span>{facts.quantity}</div>; } },
-                { key: "ms", label: "抓取耗时", align: "right", render: (r) => sourceHistoryFacts(r).elapsed ?? <span className="text-[11px] text-ink-4">任务记录不计抓取耗时</span> },
+                { key: "ms", label: "抓取耗时", align: "right", render: (r) => sourceHistoryFacts(r).elapsed ?? <span className="text-[11px] text-ink-4">执行记录不计抓取耗时</span> },
               ]}
             />
           </Card>

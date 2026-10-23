@@ -1,6 +1,6 @@
 # AgentKey 第二阶段分批 UI 验收（2026-10-22）
 
-本索引覆盖截至2026-10-23的235处UI证据（470PNG；每处均有原图与批注图，最终批注图经Lead逐张回看，154/155最终全幅替换及Lead视觉验收已完成），其中01–07为首批 **V4保持兼容+账号作品+作品详情V2**；各批按当时范围记录，不代表七平台65路线全部完成。所有截图来自实际运行的本地应用；蓝色边框/编号及左侧说明是验收时临时叠加的批注，不是产品 UI。每张同名 `-raw.png` 为未批注原图。最终批注图经Lead逐张回看，原图用于配对留证，原有样式与页面结构沿用。
+本索引覆盖截至2026-10-23的255处UI证据（510PNG；每处均有原图与批注图，最终批注图经Lead逐张回看，154/155最终全幅替换及Lead视觉验收已完成），其中01–07为首批 **V4保持兼容+账号作品+作品详情V2**；各批按当时范围记录，不代表七平台65路线全部完成。所有截图来自实际运行的本地应用；蓝色边框/编号及左侧或下方说明是验收时临时叠加的批注，不是产品 UI。每张同名 `-raw.png` 为未批注原图。最终批注图经Lead逐张回看，原图用于配对留证，原有样式与页面结构沿用。
 
 环境：Web `127.0.0.1:3310`、API `127.0.0.1:3311`、假 MCP `127.0.0.1:3312`，专用库 `aihot_agentkey_phase2_ui_test`（PostgreSQL 65433）。从空库应用现有 75 份迁移；没有新增迁移、表或状态。凭据为临时假值，没有读取本机真实密钥或生产数据；模型、Redfox 和消息推送关闭。AgentKey 指定本地桩，不会转到公网。
 
@@ -335,4 +335,45 @@ UI229–233五个RF合成订阅33–37均经真实Web保存并reload：只将周
 
 最终UI state脚本exit0：37订阅全disabled、active/next为空；runs84/receipts89/articles9/sources7与本轮前一致，没有新增call/run/material/source。新增5个停用合成订阅是验收fixture。临时本地3310/3311/3312保留便于查看，无常驻Worker，真实阀门均false。本地假MCP和独立UI库，不称Worker E2E；恢复的新旧轮占位测试为顺序检查，未宣称并发交错已测；修复前stopped历史脏占位及既有冲突重复owner没有批量修生产。完整typecheck后，Root更正旧RF目录测试断言再跑tests tsc亦exit0。
 
-当前235处均有原图和批注图共470PNG，最终批注图经Lead逐张回看；229–235七处最终版本均无裁切。路线60/65、未开放5条的补证路径及59/57/29.4credits/两个400费用未知均保持，无新增真实调用、提交、推送或部署。
+## 追加文案验收：数据工具入口（236–237）
+
+本次按最小方案把后台侧边栏入口、浏览器页面标题、页面主标题和工作区无障碍名称改为“数据工具”，正式路径为 `/admin/data-tools`；旧 `/admin/redfox` 返回 308 并保留查询参数跳转到新地址，既有书签和通知链接继续可用。“平台查询”中的供应商字段、查询表单、持久任务和订阅入口未改；Redfox 专属能力仍保留 Redfox 名称。桌面与760px窄屏均来自实际运行的本地 Web，没有创建任务、启用订阅或请求外部供应商。
+
+| 截图 | 核对点 |
+| --- | --- |
+| [236 数据工具桌面入口](236-data-tools-desktop.png) / [原图](236-data-tools-desktop-raw.png) | 侧边栏和页面标题均为“数据工具”，入口指向 `/admin/data-tools`；供应商字段仍显示实际路线 AgentKey · TikHub |
+| [237 数据工具窄屏布局](237-data-tools-narrow.png) / [原图](237-data-tools-narrow-raw.png) | 顶部导航和页面主标题均显示“数据工具”；平台查询和实际供应商保持可用；旧路径兼容跳转 |
+
+页面 DOM 另确认浏览器标题为“数据工具 · MyHOT 后台”、工作区名称为“数据工具工作区”；实际浏览器访问旧地址后落到 `/admin/data-tools?view=platforms`。定向测试另覆盖 308 状态、查询参数保留以及跳转前不读取 API；Web typecheck、构建、全量 Web 354/354 和 `collection-source-entry` 8/8 均通过。
+
+236–237检查点共237处原图和批注图、474PNG，最终批注图经Lead逐张回看；229–237九处最终版本均无裁切。路线60/65、未开放5条的补证路径及59/57/29.4credits/两个400费用未知均保持，无新增真实调用、提交、推送或部署。
+
+
+## 追加命名验收：采集订阅与执行记录（238–255）
+
+信源中的长期配置统一称为“采集订阅”；每轮采集、单次查询或工具执行统一在“执行记录”列表与详情中查看。关联入口、表单按钮、结果说明、返回链接及切换说明同步调整；供应商返回的任务 ID 与系统定时任务仍保留原有含义。API、数据模型、预算、恢复与调度逻辑未改变。
+
+复用上述本地桩环境，只打开页面、切换视图、做本地只读预检和打开后取消确认框；没有发起查询、采集、切换或真实供应商调用。已核对数据工具 → 采集订阅、执行记录列表 → 详情 → 对应订阅的导航；桌面和760px窄屏没有新增文案裁切，浏览器未记录相关 error/warn。这里的截图证明文案与导航，不代替新一次业务执行或恢复验收。
+
+| 截图 | 核对点 |
+| --- | --- |
+| [238 data-tools](238-data-tools.png) / [原图](238-data-tools-raw.png) | 入口区分采集订阅与执行记录；查询按钮指向执行记录，带入订阅只生成草稿。 |
+| [239 subscriptions-list](239-subscriptions-list.png) / [原图](239-subscriptions-list-raw.png) | 采集订阅负责长期配置；当前执行记录单独展示每轮状态。 |
+| [240 subscription-editor](240-subscription-editor.png) / [原图](240-subscription-editor-raw.png) | 编辑已有订阅；历史执行记录保留供应商，配置变更对旧轮执行的影响明确。未保存、未预览、未启用。 |
+| [241 execution-list](241-execution-list.png) / [原图](241-execution-list-raw.png) | 列表统一为执行记录；每行表示一次执行，供应商与状态仍取原数据。 |
+| [242 execution-detail](242-execution-detail.png) / [原图](242-execution-detail-raw.png) | 详情标题、返回列表及返回采集订阅统一命名；进度、结果、回执仍在原执行记录中。 |
+| [243 source-subscription](243-source-subscription.png) / [原图](243-source-subscription-raw.png) | 信源详情明确区分主采集订阅与当前执行记录；右侧入口查看每轮执行。 |
+| [244 source-history](244-source-history.png) / [原图](244-source-history-raw.png) | 历史采集记录链接统一为查看执行记录；时间标注执行记录创建。 |
+| [245 runs](245-runs.png) / [原图](245-runs-raw.png) | 运行概览入口改为执行记录、结果及恢复；系统定时任务保持原称呼。 |
+| [246 x-query](246-x-query.png) / [原图](246-x-query-raw.png) | X 查询说明统一将结果保存到执行记录；本次没有输入或提交查询。 |
+| [247 ai-search-entry](247-ai-search-entry.png) / [原图](247-ai-search-entry-raw.png) | 提交或查询 AI 搜索后进入执行记录；供应商任务 ID 与本地执行记录含义区分。 |
+| [248 tool-query](248-tool-query.png) / [原图](248-tool-query-raw.png) | 工具查询按钮统一进入执行记录；本次只查看空表单。 |
+| [249 transcription-query](249-transcription-query.png) / [原图](249-transcription-query-raw.png) | 查询已有供应商转写任务，按钮明确进入本次执行记录；未提交查询。 |
+| [250 comment-query](250-comment-query.png) / [原图](250-comment-query-raw.png) | 异步评论保留供应商任务名称；本地等待时限明确从执行记录创建时起算。 |
+| [251 source-preview](251-source-preview.png) / [原图](251-source-preview-raw.png) | 新建信源的预览区提示改为执行记录链接；未预览、未创建信源。 |
+| [252 execution-detail-narrow](252-execution-detail-narrow.png) / [原图](252-execution-detail-narrow-raw.png) | 760px 窄屏：执行记录标题、返回列表和返回采集订阅可见，无文字截断。 |
+| [253 data-tools-narrow](253-data-tools-narrow.png) / [原图](253-data-tools-narrow-raw.png) | 760px 窄屏：采集订阅与执行记录入口保持可见，长说明正常换行。 |
+| [254 source-switch-dialog](254-source-switch-dialog.png) / [原图](254-source-switch-dialog-raw.png) | 切换说明使用旧轮执行，与保留的主订阅区分。只打开说明，未确认切换。 |
+| [255 subscription-switch-dialog](255-subscription-switch-dialog.png) / [原图](255-subscription-switch-dialog-raw.png) | 切换说明区分保留的订阅与停止的旧轮执行。只读预检后查看说明，未确认切换。 |
+
+命名调整后的定向验证：`collection-source-entry`、`detail-query-render`、`source-history-data` 共14项通过，Web typecheck与差异格式检查通过。沿用236–237阶段的旧路径308、查询参数保留和构建证据；本批没有重新执行付费或生产流程。18处原图与批注图在发布前已回看，累计255处/510PNG。

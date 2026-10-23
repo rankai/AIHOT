@@ -6,7 +6,7 @@ const fetch: SourceHistoryRun = { id: 7, kind: "fetch", history_key: "fetch:7", 
 const operation: SourceHistoryRun = { id: 7, kind: "operation", history_key: "operation:7", occurred_at: "2026-10-19T00:00:00Z", time_basis: "operation_created_at", started_at: null, finished_at: null, created_at: "2026-10-19T00:00:00Z", updated_at: "2026-10-20T09:00:00Z", status: "waiting", found_count: null, new_count: null, related_material_count: 3, error: "collect budget waiting", detail: null, provider: "redfox", step: "redfox.collection.page", next_attempt_at: "2026-10-21T00:00:00Z" };
 
 test("operation history labels creation and actual source-related materials, never execution duration or new items", () => {
-  assert.deepEqual(sourceHistoryFacts(operation), { timeLabel: "任务创建", time: operation.occurred_at, href: "/admin/operations/7", provider: "redfox", quantityLabel: "该源关联材料", quantity: "3", elapsed: null });
+  assert.deepEqual(sourceHistoryFacts(operation), { timeLabel: "执行记录创建", time: operation.occurred_at, href: "/admin/operations/7", provider: "redfox", quantityLabel: "该源关联材料", quantity: "3", elapsed: null });
   const later = { ...operation, updated_at: "2026-11-01T00:00:00Z", related_material_count: 0 };
   assert.equal(sourceHistoryFacts(later).elapsed, null);
   assert.equal(sourceHistoryFacts(later).time, operation.created_at);

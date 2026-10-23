@@ -7,7 +7,7 @@ export function AiSearchResult({ result: r }: { result: OperationResult }) {
   const citation = r.kind === "ai_search_citation", answer = aiSearchAnswer(r.data), url = citation ? aiSearchCitationUrl(r.data) : null;
   return <article className="min-w-0 space-y-3 border-b border-line pb-4 last:border-0">
     <div className="break-words text-[14px] font-medium">{aiSearchFamilies[String(r.data.family)] ?? "AI 搜索"} · {citation ? "引用记录" : r.kind === "ai_search_task" ? "提交 / 轮询历史" : "研究答案"}</div>
-    {!citation && <p className="text-[13px] text-ink-3">供应商事实：{aiSearchStatus(r.data)}{Object.hasOwn(r.data, "completed") ? ` · completed：${researchFactText(r.data.completed)}` : ""}。{r.kind === "ai_search_task" ? "这是历史记录，当前本地任务状态以上方进度为准。" : ""}</p>}
+    {!citation && <p className="text-[13px] text-ink-3">供应商事实：{aiSearchStatus(r.data)}{Object.hasOwn(r.data, "completed") ? ` · completed：${researchFactText(r.data.completed)}` : ""}。{r.kind === "ai_search_task" ? "这是历史记录，当前执行状态以上方进度为准。" : ""}</p>}
     <ResearchFacts items={["taskId", "requestedTaskId"].filter(key => Object.hasOwn(r.data, key)).map(key => [key === "taskId" ? "响应任务 ID（实收）" : "查询任务 ID（请求）", researchFactText(r.data[key])])} />
     {!citation && <ResearchFacts items={aiSearchFailureRows(r.data)} />}
     {!citation && (answer.content !== null ? <p className="whitespace-pre-wrap break-all text-[13px] leading-relaxed text-ink-2">{answer.content === "" ? "回答正文为空字符串。" : answer.content}</p> : <p className="text-[12px] text-ink-4">{answer.fact}。{r.kind === "ai_search_answer" ? "请核对已保存结果。" : ""}</p>)}

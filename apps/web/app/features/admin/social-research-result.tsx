@@ -31,7 +31,7 @@ export function SocialResearchResult({ result: r }: { result: OperationResult })
     </>}
     {isAgentKeyWeiboSocial(r.data) && !following && r.data.receivedScope === null && <p className="text-[12px] text-amber">响应未返回作品范围；请求中的 status_id 不是已验证的评论归属，rootid 仅表示父评论。</p>}
     <details className="rounded-control bg-bg-sunk p-3"><summary className="cursor-pointer text-[12px] text-ink-3">请求范围与响应范围（不补作实际作者）</summary><div className="mt-3 space-y-3"><div><p className="mb-1 text-[12px] text-ink-4">冻结请求范围</p><ResearchFacts items={researchScalarRows(r.data.requestedScope)} /></div>{Object.keys(researchObject(r.data.receivedScope)).length > 0 && <div><p className="mb-1 text-[12px] text-ink-4">实际响应范围</p><ResearchFacts items={researchScalarRows(r.data.receivedScope)} /></div>}</div></details>
-    <p className="text-[12px] text-ink-3">{isAgentKeyWeiboSocial(r.data) || isAgentKeyBilibiliSocial(r.data) || isAgentKeyDouyinSocial(r.data) || isAgentKeyToutiaoSocial(r.data) || isAgentKeyXiaohongshuSocial(r.data) ? "评论或关注关系只供研究，不导入文章或绑定账号；本次不自动翻页。定时单页快照在信源页的采集任务中管理。" : "本次只查询评论或关注关系供研究；不自动翻页，不提供材料导入、账号绑定、同作品补全或定时采集动作。"}</p>
+    <p className="text-[12px] text-ink-3">{isAgentKeyWeiboSocial(r.data) || isAgentKeyBilibiliSocial(r.data) || isAgentKeyDouyinSocial(r.data) || isAgentKeyToutiaoSocial(r.data) || isAgentKeyXiaohongshuSocial(r.data) ? "评论或关注关系只供研究，不导入文章或绑定账号；本次不自动翻页。定时单页快照在信源页的采集订阅中管理。" : "本次只查询评论或关注关系供研究；不自动翻页，不提供材料导入、账号绑定、同作品补全或定时采集动作。"}</p>
     <Json value={{ resultId: r.id, receiptId: r.receiptId, kind: r.kind, data: r.data }} label="原始字段与研究溯源诊断" />
   </article>;
 }

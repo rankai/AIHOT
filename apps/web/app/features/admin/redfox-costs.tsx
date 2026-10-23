@@ -13,7 +13,7 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
   const current = snapshot?.key === redfoxCostInputKey(input);
   return <div className="min-w-0 space-y-5">
     <Card title="费用与账单（已存数据）">
-      <p className="mb-4 text-[13px] text-ink-3">读取本地已存数据不触发 Redfox 或 AgentKey。要更新 Redfox 上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/redfox?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询账单；本页不发起供应商请求。</p>
+      <p className="mb-4 text-[13px] text-ink-3">读取本地已存数据不触发 Redfox 或 AgentKey。要更新 Redfox 上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/data-tools?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询账单；本页不发起供应商请求。</p>
       <form aria-label="已存费用查询条件" className="space-y-4" onSubmit={async event => {
         event.preventDefault(); if (loading) return;
         let url: string;

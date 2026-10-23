@@ -51,7 +51,7 @@ export function ServiceResearchResult({ result: r, bindingSources }: { result: O
     </>}
     {missing.length > 0 && <ul className="space-y-1 rounded-control bg-amber/10 p-3 text-[12.5px] text-amber">{missing.map(item => <li key={item}>{item}</li>)}</ul>}
     {isXSearchWork(r.kind, r.data) && <><XSearchImport result={r} /><XDetailActions result={r} /></>}
-    <p className="text-[12px] text-ink-3">{xSearch ? "搜索作品可显式本地导入；采集订阅仅开放 Top / Latest，按已接通能力有界查询。可显式查询同作品详情，不提供人工补 ID 或独立账号绑定；最终归属与入库条件由后台重新校验。" : hot ? "热点定时研究快照在信源页的采集任务中管理，不自动导入文章或绑定来源。" : "本页仅研究与只读快照，不提供导入、绑定、定时采集或同作品补全动作。"}</p>
+    <p className="text-[12px] text-ink-3">{xSearch ? "搜索作品可显式本地导入；采集订阅仅开放 Top / Latest，按已接通能力有界查询。可显式查询同作品详情，不提供人工补 ID 或独立账号绑定；最终归属与入库条件由后台重新校验。" : hot ? "热点定时研究快照在信源页的采集订阅中管理，不自动导入文章或绑定来源。" : "本页仅研究与只读快照，不提供导入、绑定、定时采集或同作品补全动作。"}</p>
     <Json value={{ resultId: r.id, receiptId: r.receiptId, kind: r.kind, data: r.data }} label="原始字段与研究溯源诊断" />
   </article>;
 }

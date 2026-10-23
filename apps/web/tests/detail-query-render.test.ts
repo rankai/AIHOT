@@ -23,7 +23,7 @@ test("real work and six account result cards show local options lookup without p
     for (const platform of ["douyin", "xiaohongshu", "wechat", "tiktok", "bilibili", "weibo", "qichezhijia", "dongchedi", "yiche"]) {
       const html = render(platform, `${platform}_work`);
       assert.equal((html.match(/查看可用详情接口/g) ?? []).length, 1, platform);
-      assert(!html.includes("查询补充详情并查看任务"), platform);
+      assert(!html.includes("查询补充详情并查看执行记录"), platform);
       assert.equal(render(platform, `${platform}_account`).includes("查看可用详情接口"), ["douyin", "xiaohongshu", "wechat", "bilibili", "weibo"].includes(platform), `${platform} account`);
     }
     for (const [platform, kind] of [["xiaohongshu", "xiaohongshu_research"], ["xiaohongshu", "xiaohongshu_account_rank"], ["wechat", "wechat_account_rank"], ["weibo", "weibo_trend"], ["tiktok", "tiktok_topic"], ["youtube", "youtube_work"], ["instagram", "instagram_work"], ["toutiao", "toutiao_work"], ["shipinhao", "shipinhao_work"], ["kuaishou", "kuaishou_work"], ["zhihu", "zhihu_work"]]) assert(!render(platform!, kind!).includes("查看可用详情接口"), kind);
@@ -93,8 +93,8 @@ test("real work and six account result cards show local options lookup without p
     const xhsComment=render("xiaohongshu","social_comment",{provider:"agentkey",operationId:"xiaohongshu.comments",tool:"TikHub/get_note_comments_api_v1_xiaohongshu_app_v2_get_note_comments_get",record:{id:"comment-local",content:"<b>评论文字</b>",time:123,note_id:"local-note",like_count:0,user:{userid:"comment-author",nickname:"评论者"}},timeUnits:{time:"unspecified"}});
     assert(xhsComment.includes("&lt;b&gt;评论文字&lt;/b&gt;")); assert(xhsComment.includes("comment-author")); assert(xhsComment.includes("评论 ID · id")); assert(xhsComment.includes("原始 time")); assert(xhsComment.includes("定时单页快照")); assert(!xhsComment.includes("本地导入作品"));
     const { PlatformQuery } = await import(pathToFileURL(join(directory, "query.mjs")).href);
-    const seedRouter=createMemoryRouter([{path:"/admin/redfox",element:createElement(PlatformQuery,{operations:[{id:"TIN1NMTZ",platform:"bilibili",label:"旧详情",purpose:"query",fields:[],collectionProviders:[{id:"redfox",label:"Redfox"},{id:"agentkey",label:"AgentKey",operationLabel:"实时详情",fields:[{name:"av_id",label:"AV",type:"string",required:false},{name:"bv_id",label:"BV",type:"string",required:false}]}]}]})}],{initialEntries:[{pathname:"/admin/redfox",state:{bilibiliDetailSeed:{platform:"bilibili",provider:"agentkey",operationId:"TIN1NMTZ",parameters:{av_id:"321"}}}}]});
-    try { const html=renderToStaticMarkup(createElement(RouterProvider,{router:seedRouter})); assert(html.includes('value="321"')); assert(html.includes('<option value="agentkey" selected="">')); assert(html.includes("查询并查看任务")); } finally {seedRouter.dispose();}
+    const seedRouter=createMemoryRouter([{path:"/admin/data-tools",element:createElement(PlatformQuery,{operations:[{id:"TIN1NMTZ",platform:"bilibili",label:"旧详情",purpose:"query",fields:[],collectionProviders:[{id:"redfox",label:"Redfox"},{id:"agentkey",label:"AgentKey",operationLabel:"实时详情",fields:[{name:"av_id",label:"AV",type:"string",required:false},{name:"bv_id",label:"BV",type:"string",required:false}]}]}]})}],{initialEntries:[{pathname:"/admin/data-tools",state:{bilibiliDetailSeed:{platform:"bilibili",provider:"agentkey",operationId:"TIN1NMTZ",parameters:{av_id:"321"}}}}]});
+    try { const html=renderToStaticMarkup(createElement(RouterProvider,{router:seedRouter})); assert(html.includes('value="321"')); assert(html.includes('<option value="agentkey" selected="">')); assert(html.includes("查询并查看执行记录")); } finally {seedRouter.dispose();}
     for (const operationId of ["LEN9QXR3", "bilibili.typed_search"]) {
       const html=render("bilibili","query_summary",{provider:"agentkey",operationId,count:2,pagination:{page:"1",pages:7,next:"opaque-next"}});
       assert(html.includes("上游页码 · pagination.page")); assert(html.includes("上游总页数 · pagination.pages")); assert(html.includes("收到的下一页值 · pagination.next")); assert(!html.includes("上游页码：未提供"));
@@ -110,7 +110,7 @@ test("real work and six account result cards show local options lookup without p
     assert(biliDetail.includes("视频说明：")); assert(biliDetail.includes("&lt;b&gt;视频说明&lt;/b&gt;")); assert(biliDetail.includes("原始 pubdate")); assert(biliDetail.includes("本地导入作品")); assert(!biliDetail.includes("查看可用详情接口"));
     for (const operationId of ["LEN9QXR3","VPA67I98","bilibili.typed_search"]) {
       const html=render("bilibili","bilibili_work",{...biliFull,operationId});
-      assert(!html.includes("本地导入作品")); assert(html.includes("需显式查询详情")); assert(html.includes("/admin/redfox?view=platforms")); assert(!html.includes("查看可用详情接口"));
+      assert(!html.includes("本地导入作品")); assert(html.includes("需显式查询详情")); assert(html.includes("/admin/data-tools?view=platforms")); assert(!html.includes("查看可用详情接口"));
     }
     const recommended=render("bilibili","bilibili_work",{...biliFull,operationId:"bilibili.trending",role:"provider_recommendation"});
     assert(recommended.includes("推荐研究（非排名）")); assert(!recommended.includes("本地导入作品"));

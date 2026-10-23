@@ -59,8 +59,8 @@ export function OperationResultView(props: ResultProps) {
     return <article className="min-w-0 space-y-3 border-b border-line pb-4 last:border-0 last:pb-0">
       <p className="text-[14px] font-medium">结果内容已过期</p>
       <ResearchFacts items={[["原结果类型", researchFactText(r.data.originalKind)], ["实际过期时间", researchFactText(r.data.expiredAt)]]} />
-      <p className="text-[13px] text-ink-3">本行仅保留本地元数据与溯源，不能导入或下载，也不会自动重新购买。原任务状态、回执与成本仍在原位置保留。</p>
-      <p className="text-[12px] text-ink-3">如需新的查询，请到<Link className="text-accent" to="/admin/redfox?view=platforms">平台查询入口</Link>显式选择条件并提交；会按当前预算与费用规则执行。</p>
+      <p className="text-[13px] text-ink-3">本行仅保留本地元数据与溯源，不能导入或下载，也不会自动重新购买。原执行状态、回执与成本仍在原位置保留。</p>
+      <p className="text-[12px] text-ink-3">如需新的查询，请到<Link className="text-accent" to="/admin/data-tools?view=platforms">平台查询入口</Link>显式选择条件并提交；会按当前预算与费用规则执行。</p>
       <Json value={{ resultId: r.id, receiptId: r.receiptId, originalKind: r.data.originalKind, expiredAt: r.data.expiredAt }} label="本地保留元数据" />
     </article>;
   }
@@ -75,7 +75,7 @@ export function OperationResultView(props: ResultProps) {
     <div className="space-y-2"><p className="text-[12px] text-ink-3">本页记录的下一页参数（nextParameters）</p>{collection.next.length ? <ResearchFacts items={collection.next} /> : <p className="text-[12px] text-ink-4">本页未记录下一页参数。</p>}</div>
     {collection.stop !== null && <ResearchFacts items={[["本页停止原因", collection.stop]]} />}
     {props.result.data.provider === "agentkey" && props.result.data.operationId === "douyin.following" && props.result.data.bootstrap === true && <p className="text-[12px] text-ink-3">本次是关注初始化空页，不能据此判断没有关注或已到末页；本轮不自动请求第二次。</p>}
-    <p className="text-[12px] text-ink-3">以上是本页采集与处理事实；后续执行以任务状态为准。作品候选与研究记录分别保留，具体文章 / 信源处理成功与归属请查看各条结果的实际关联。</p>
+    <p className="text-[12px] text-ink-3">以上是本页采集与处理事实；后续执行以本轮执行状态为准。作品候选与研究记录分别保留，具体文章 / 信源处理成功与归属请查看各条结果的实际关联。</p>
     <Json value={{ resultId: props.result.id, receiptId: props.result.receiptId, kind: props.result.kind, data: props.result.data }} label="采集页原始字段与溯源诊断" />
   </article>;
   if (isXDetailWork(props.result.kind, props.result.data)) return <XDetailResult result={props.result} />;
@@ -119,7 +119,7 @@ function StandardOperationResult({ result: r, bindingSources, imageOptions = nul
   const library = mpLibrary(r.data.library);
   return <article className="border-b border-line pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center gap-2 text-[13px]"><span className="font-medium">{title}</span><span className="text-ink-4">{resultLabels[r.kind] ?? "处理结果"}</span></div>
-    {r.kind === "search_suggestion" && <p className="mt-1 text-[13px] text-ink-3">这是关键词联想建议，仅供研究，不作为文章导入或自动创建采集任务。</p>}
+    {r.kind === "search_suggestion" && <p className="mt-1 text-[13px] text-ink-3">这是关键词联想建议，仅供研究，不作为文章导入或自动创建采集订阅。</p>}
     {r.kind === "image_task" && <ResearchFacts items={imageParameterRows(r.data)} />}
     {(r.kind === "image" || r.kind === "image_reference") && <PrivateAssetView asset={operationFileAsset(r.file)} options={imageOptions} />}
     {library && <p className="mt-1 text-[12px] text-ink-3">采集库：{mpLibraryLabel[library]}{r.data.authorEvidence === "account-list-context" ? " · 作者依据：已核实账号的同库列表上下文" : ""}</p>}

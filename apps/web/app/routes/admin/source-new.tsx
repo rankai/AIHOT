@@ -144,7 +144,7 @@ export default function NewSource() {
         </Card>
         <Card title={preview && !("runId" in preview) ? `预览：${preview.count} 条（${preview.ms}ms）` : "预览"}>
           {!preview ? (
-            <Empty>{["mp_account", "external"].includes(form.kind) ? "此类型不支持创建前预览。保存后可在信源详情查看支持的采集操作。" : "填好配置后点“预览抓取”，这里显示条目或持久任务链接（不入库）。"}</Empty>
+            <Empty>{["mp_account", "external"].includes(form.kind) ? "此类型不支持创建前预览。保存后可在信源详情查看支持的采集操作。" : "填好配置后点“预览抓取”，这里显示条目或执行记录链接（不入库）。"}</Empty>
           ) : "runId" in preview ? (
             <OperationLink operation={preview} newTab />
           ) : preview.items.length ? (

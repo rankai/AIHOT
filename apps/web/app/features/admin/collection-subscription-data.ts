@@ -83,7 +83,7 @@ export function collectionConfig(operation: PlatformOperation, draft: Collection
   operation=providerOperation(operation,draft.provider);
   if (!isCollectionOperation(operation)) throw new Error("请选择已接通定时采集的操作。");
   if (lockedPlatform && lockedPlatform !== operation.platform) throw new Error("已有订阅不能切换平台，请另建订阅。");
-  if (!collectionProviders(operation).some(provider => provider.id === draft.provider)) throw new Error("当前采集任务不支持所选供应商。");
+  if (!collectionProviders(operation).some(provider => provider.id === draft.provider)) throw new Error("当前采集订阅不支持所选供应商。");
   const issue = collectionInputIssue(operation, draft.values, draft.provider);
   if (issue) throw new Error(issue);
   const parameters = platformQueryParameters(collectionFormOperation(operation), draft.values);
@@ -109,7 +109,7 @@ export function collectionPagingNote(operation: PlatformOperation, values: Recor
   if (isHotSnapshot(operation)) return "每轮查询一次研究快照，不翻页、不补全详情，也不自动成为文章；条目上限可能截断本次返回记录，TOP10 以聚合组计条目。";
   if (isWeiboSnapshot(operation)) return "微博热搜每轮只保存一次研究快照，不作为文章，不使用分页或详情补全限额。";
   if (operation.id === "3X8FGEEM") return values.keyword?.trim() ? "带关键词时本轮只查询一页，页码与每页条数不用于续页。作品候选与相关话题、推荐研究分别保存。" : "无关键词时可按已确认的 pageNum 规则继续查询；最多页数仍是上限，不保证有后页。作品候选与研究分别保存。";
-  return "最多页数只是已接通分页的上限，不保证有后页；没有分页或尚未确认续页的接口每轮只查询一次。实际查询范围以任务结果为准。";
+  return "最多页数只是已接通分页的上限，不保证有后页；没有分页或尚未确认续页的接口每轮只查询一次。实际查询范围以执行记录中的结果为准。";
 }
 export function collectionPriceNote(operation: PlatformOperation) {
   const price = operation.collectionPrice;

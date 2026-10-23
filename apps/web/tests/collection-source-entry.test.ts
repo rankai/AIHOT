@@ -64,26 +64,31 @@ test("source collection entry, legacy redirect, query draft and task return use 
       assert.equal(target.to,"/admin/sources?view=collections");assert.equal(calls.length,2);
       assert.equal((html.match(/aria-label="采集订阅配置"/g)??[]).length,1);assert(html.includes("新建采集订阅"));assert(html.includes('value=" 原词 &amp; ? "'));
       assert(!/aria-label="启用定时采集"[^>]*checked/.test(html));assert(!html.includes("编辑订阅 #12"));
-      const query = render(createElement((await import(pathToFileURL(join(directory,"redfox.mjs")).href)).default,{loaderData:{operations:[operation],initialView:"platforms"}}),"/admin/redfox?view=platforms");
-      assert(query.includes("带入新采集订阅"));assert(query.includes("带入信源页的采集任务草稿"));assert(!query.includes('aria-label="采集订阅配置"'));assert(query.includes('href="/admin/sources?view=collections"'));
+      const query = render(createElement((await import(pathToFileURL(join(directory,"redfox.mjs")).href)).default,{loaderData:{operations:[operation],initialView:"platforms"}}),"/admin/data-tools?view=platforms");
+      assert(query.includes("带入新采集订阅"));assert(query.includes("带入信源页的采集订阅草稿"));assert(!query.includes('aria-label="采集订阅配置"'));assert(query.includes('href="/admin/sources?view=collections"'));
     });
-    await t.test("legacy subscription URL redirects before reading options or subscriptions",async()=>{
+    await t.test("legacy Redfox URL redirects to data tools without reading APIs",async()=>{
+      globalThis.fetch = async()=>{throw new Error("redirect must not read APIs");};
+      const result = await redfox.loader({request:new Request("http://local.test/admin/redfox?view=platforms&reference=synthetic")});
+      assert.equal(result.status,308);assert.equal(result.headers.get("location"),"/admin/data-tools?view=platforms&reference=synthetic");
+    });
+    await t.test("legacy subscription view redirects before reading options or subscriptions",async()=>{
       globalThis.fetch = async()=>{throw new Error("redirect must not read APIs");};
       for (const [query,location] of [["?view=subscriptions&subscription=12","/admin/sources?view=collections&subscription=12"],["?view=subscriptions","/admin/sources?view=collections"]]) {
-        const result = await redfox.loader({request:new Request(`http://local.test/admin/redfox${query}`)});
+        const result = await redfox.loader({request:new Request(`http://local.test/admin/data-tools${query}`)});
         assert.equal(result.status,302);assert.equal(result.headers.get("location"),location);
       }
     });
     await t.test("Redfox workspace loader no longer fetches subscription state",async()=>{
       const calls: string[] = [];
       globalThis.fetch = async input=>{const path=new URL(String(input)).pathname;calls.push(path);return Response.json(path.endsWith("/operations")?[operation]:{});};
-      const data = await redfox.loader({request:new Request("http://local.test/admin/redfox?view=platforms")});
+      const data = await redfox.loader({request:new Request("http://local.test/admin/data-tools?view=platforms")});
       assert(!calls.includes("/api/admin/redfox/collections"));assert(!("subscriptions" in data));
     });
     await t.test("collection task returns to selected subscription in source collection view",()=>{
       const data={id:9,provider:"redfox",operationKey:"redfox.platform.collection",subscriptionId:12,status:"completed",step:"query",inputs:{},progress:{},attempts:[],results:[],nextResultCursor:null,resultCursor:"0",nextAction:"view-results",createdAt:"2026-10-21T00:00:00Z"};
       const html=render(createElement(task.default,{loaderData:data}),"/admin/operations/9");
-      assert(html.includes('href="/admin/sources?view=collections&amp;subscription=12"'));assert(html.includes("返回采集任务"));
+      assert(html.includes('href="/admin/sources?view=collections&amp;subscription=12"'));assert(html.includes("返回采集订阅"));
     });
   } finally { globalThis.fetch=originalFetch;await bundle.close();await rm(directory,{recursive:true,force:true}); }
 });
