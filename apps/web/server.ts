@@ -137,14 +137,24 @@ async function handle(req: import("node:http").IncomingMessage, res: import("nod
     const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",").map((v) => v.trim()).filter(Boolean);
     const client = TRUST_PROXY && forwarded.length ? forwarded[forwarded.length - 1]! : (req.socket.remoteAddress ?? "");
     const headers = { ...req.headers, "x-forwarded-for": client, "x-real-ip": client };
+    let responseStream: import("node:http").IncomingMessage | undefined;
     const upstream = httpRequest({ hostname: API.hostname, port: API.port, path: raw, method: req.method, headers }, (up) => {
+      responseStream = up;
+      if (res.destroyed) { up.destroy(); return; }
+      up.on("error", () => res.destroy());
       res.writeHead(up.statusCode ?? 502, up.headers);
       up.pipe(res);
     });
+    const cancelUpstream = () => { upstream.destroy(); responseStream?.destroy(); };
+    req.once("aborted", cancelUpstream);
+    res.once("close", () => { if (!res.writableFinished) cancelUpstream(); });
     upstream.on("error", () => {
+      if (res.destroyed) return;
+      if (res.headersSent) { res.destroy(); return; }
       res.statusCode = 502;
       res.end("api unavailable");
     });
+    upstream.flushHeaders(); // Let API onRequest reject an upload before its body arrives.
     return req.pipe(upstream);
   }
 

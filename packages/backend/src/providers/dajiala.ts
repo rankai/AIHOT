@@ -3,7 +3,7 @@
 // as the actual cost. Docs: https://s.apifox.cn/410674f9-f451-4b4f-957a-5f54f243bc83
 import { credential } from "../config.ts";
 import { guardedFetch } from "../lib/http-fetch.ts";
-import { paidRequest, ProviderRejectedError, type CallOutcome } from "./receipts.ts";
+import { paidRequest, ProviderRejectedError, type CallOutcome, type PaidRequestOptions } from "./receipts.ts";
 
 export interface MpPost {
   position: number;
@@ -34,9 +34,8 @@ export interface MpArticle {
   receiptId: number;
 }
 
-function base(): { url: string; key: string } {
+function base(): { url: string; key: string | null } {
   const key = credential("collectors", "DAJIALA_KEY");
-  if (!key) throw new Error("DAJIALA_KEY is not configured");
   return { url: (credential("collectors", "DAJIALA_BASE_URL") ?? "https://www.dajiala.com").replace(/\/$/, ""), key };
 }
 
@@ -49,11 +48,12 @@ function outcomeOf(json: { code?: number; msg?: string; cost_money?: number }, l
 }
 
 /** Latest posts of one account (first page, newest first). `window` buckets the receipt identity. */
-export async function mpHistory(ghid: string, opts: { subject: string; window: string }): Promise<MpHistory> {
+export async function mpHistory(ghid: string, opts: { subject: string; window: string; paid?: PaidRequestOptions }): Promise<MpHistory> {
   const { url, key } = base();
   const receipt = await paidRequest(
     { service: "dajiala", purpose: "mp_history", subject: opts.subject, identity: { ghid, window: opts.window }, requestSummary: { ghid } },
     async () => {
+      if (!key) throw new Error("DAJIALA_KEY is not configured");
       const res = await guardedFetch(`${url}/fbmain/monitor/v3/post_history`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
@@ -62,21 +62,29 @@ export async function mpHistory(ghid: string, opts: { subject: string; window: s
         route: "direct",
       });
       if (res.status === 429 || res.status >= 500) throw new ProviderRejectedError(`dajiala HTTP ${res.status}`, res.status, true);
-      const json = JSON.parse(res.text()) as { code?: number; msg?: string; cost_money?: number };
+      const text = res.text();
+      let json: { code?: number; msg?: string; cost_money?: number };
+      try { json = JSON.parse(text); } catch { return { response: { _invalidJson: text } }; }
+      if (!json || typeof json !== "object" || Array.isArray(json)) return { response: json };
       const cost = outcomeOf(json, "post_history");
       return { response: json, cost, usage: { posts: Array.isArray((json as { data?: unknown[] }).data) ? (json as { data: unknown[] }).data.length : 0 } };
-    },
+    }, { ...opts.paid, onReceipt: async (tx, id, info) => {
+      if (info.kind === "call" && !key) throw new Error("DAJIALA_KEY is not configured");
+      await opts.paid?.onReceipt?.(tx, id, info);
+    } },
   );
   const json = receipt.response as { data?: MpPost[]; nickname?: string; remain_money?: number };
-  return { posts: json.data ?? [], nickname: json.nickname ?? null, remainMoney: json.remain_money ?? null, receiptId: receipt.receiptId, reused: receipt.reused };
+  if (!json || !Array.isArray(json.data)) throw new Error(`Invalid Dajiala history response (receipt ${receipt.receiptId})`);
+  return { posts: json.data, nickname: json.nickname ?? null, remainMoney: json.remain_money ?? null, receiptId: receipt.receiptId, reused: receipt.reused };
 }
 
 /** Plain-text body of one article (mode 1: text with image markers). */
-export async function mpArticle(articleUrl: string, opts: { subject: string; identity: string }): Promise<MpArticle> {
+export async function mpArticle(articleUrl: string, opts: { subject: string; identity: string; paid?: PaidRequestOptions }): Promise<MpArticle> {
   const { url, key } = base();
   const receipt = await paidRequest(
     { service: "dajiala", purpose: "mp_article", subject: opts.subject, identity: { article: opts.identity }, requestSummary: { url: articleUrl } },
     async () => {
+      if (!key) throw new Error("DAJIALA_KEY is not configured");
       const res = await guardedFetch(`${url}/fbmain/monitor/v3/article_detail?${new URLSearchParams({ url: articleUrl, key, mode: "1", verifycode: "" })}`, {
         headers: { accept: "application/json" },
         timeoutMs: 30_000,
@@ -84,11 +92,18 @@ export async function mpArticle(articleUrl: string, opts: { subject: string; ide
         route: "direct",
       });
       if (res.status === 429 || res.status >= 500) throw new ProviderRejectedError(`dajiala HTTP ${res.status}`, res.status, true);
-      const json = JSON.parse(res.text()) as { code?: number; msg?: string; cost_money?: number };
+      const text = res.text();
+      let json: { code?: number; msg?: string; cost_money?: number };
+      try { json = JSON.parse(text); } catch { return { response: { _invalidJson: text } }; }
+      if (!json || typeof json !== "object" || Array.isArray(json)) return { response: json };
       const cost = outcomeOf(json, "article_detail");
       return { response: json, cost, usage: { chars: String((json as { content?: string }).content ?? "").length } };
-    },
+    }, { ...opts.paid, onReceipt: async (tx, id, info) => {
+      if (info.kind === "call" && !key) throw new Error("DAJIALA_KEY is not configured");
+      await opts.paid?.onReceipt?.(tx, id, info);
+    } },
   );
   const j = receipt.response as { title?: string; content?: string; author?: string; desc?: string; pubtime?: string };
+  if (!j || typeof j.content !== "string") throw new Error(`Invalid Dajiala article response (receipt ${receipt.receiptId})`);
   return { title: j.title ?? "", content: j.content ?? "", author: j.author || null, desc: j.desc || null, pubtime: j.pubtime ?? null, receiptId: receipt.receiptId };
 }

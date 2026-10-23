@@ -4,7 +4,12 @@ import { Link } from "react-router";
 import type { Route } from "./+types/source";
 import { adminGet } from "../../lib/admin.server";
 import { useAdminAction } from "../../features/admin/action";
-import { bj, duration, num } from "../../features/admin/format";
+import { CollectionSwitch, type CollectionPreflight } from "../../features/admin/operation-switch";
+import { collectionTargets, mpLibrary } from "../../features/admin/operation-switch-data";
+import { OperationBadge, OperationLink } from "../../features/admin/operation-ui";
+import { sourceHistoryFacts, type SourceActiveOperation, type SourceHistoryRun } from "../../features/admin/source-history-data";
+import type { OperationAccepted, PreviewResponse } from "../../features/admin/operation-types";
+import { bj, num } from "../../features/admin/format";
 import { HEALTH_LABEL, KIND_LABEL, MODE_LABEL, TIER_LABEL, VISIBILITY_LABEL } from "../../features/admin/labels";
 import { AdminPage, Badge, Button, Card, DataTable, Dot, Empty, Field, healthTone, Input, Json, KV, ReasonDialog, Select, Stat, Textarea, Time } from "../../features/admin/ui";
 
@@ -32,31 +37,33 @@ interface Source {
   next_fetch_at: string | null;
   created_at: string;
   updated_at: string;
-}
-
-/** X runs: pages read, and older stretches still to read (backlog) or given up (dropped). */
-interface RunDetail {
-  pages?: number;
-  backlog?: number;
-  dropped?: number;
+  subscription_id: number | null;
+  active_run_id: number | null;
+  collection_provider: string | null;
+  collection_operation: string | null;
+  collection_version: number | null;
+  collection_issue: string | null;
 }
 
 interface Detail {
   source: Source;
-  runs: Array<{ id: number; started_at: string; finished_at: string | null; status: string; found_count: number | null; new_count: number | null; error: string | null; detail: RunDetail | null }>;
+  runs: SourceHistoryRun[];
+  activeOperation: SourceActiveOperation | null;
   items: Array<{ id: string; title: string; url: string; discovered_at: string; published_at: string | null; processing_state: string; selected: boolean | null; visibility: string | null; title_zh: string | null }>;
   stats: { total: number; last7d: number; selected: number };
   history: Array<{ created_at: string; actor: string; action: string; reason: string | null; before: unknown; after: unknown }>;
 }
 
-interface Preview {
-  ms: number;
-  count: number;
-  items: Array<{ title: string; url: string; publishedAt: string | null; excerpt: string }>;
-}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  return adminGet<Detail>(request, `/api/admin/sources/${encodeURIComponent(params.id)}`);
+  const base = `/api/admin/sources/${encodeURIComponent(params.id)}`;
+  const detail = await adminGet<Detail>(request, base);
+  const url = new URL(request.url);
+  const library = mpLibrary(url.searchParams.get("library")) ?? "wide";
+  const preflights = url.searchParams.get("preflight") === "1"
+    ? await Promise.all(collectionTargets(detail.source.kind).map(target => adminGet<CollectionPreflight>(request, `${base}/collection/preflight?${new URLSearchParams({ target, ...(detail.source.kind === "mp_account" ? { library } : {}) })}`)))
+    : null;
+  return { ...detail, preflights };
 }
 
 export const meta: Route.MetaFunction = ({ loaderData }) => [{ title: `${loaderData?.source.name ?? "信源"} · ${SITE.name} 后台` }];
@@ -80,11 +87,12 @@ function draftOf(s: Source): Draft {
 }
 
 export default function SourceDetail({ loaderData }: Route.ComponentProps) {
-  const { source: s, runs, items, stats, history } = loaderData;
+  const { source: s, runs, activeOperation, items, stats, history } = loaderData;
   const { run, pending } = useAdminAction();
   const [draft, setDraft] = useState<Draft>(() => draftOf(s));
   const [draftFor, setDraftFor] = useState(s.updated_at);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [collection, setCollection] = useState<OperationAccepted | null>(null);
   const [dialog, setDialog] = useState<null | "save" | "toggle">(null);
   const [configError, setConfigError] = useState<string | null>(null);
   if (draftFor !== s.updated_at) {
@@ -139,16 +147,20 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
       subtitle={<span className="font-mono text-[12px]">{s.id}</span>}
       actions={
         <>
-          <Button
+          {!["mp_account", "external"].includes(s.kind) && <Button
+            disabled={!!pending || !!s.collection_issue}
             busy={pending === "preview"}
             onClick={async () => {
-              const r = await run<Preview>("POST", `${base}/preview`, {}, { label: "preview", revalidate: false });
+              const r = await run<PreviewResponse>("POST", `${base}/preview`, {}, { label: "preview", revalidate: false });
               if (r) setPreview(r);
             }}
           >
             预览抓取
-          </Button>
-          <Button busy={pending === "fetch"} onClick={() => run("POST", `${base}/fetch`, {}, { label: "fetch", success: "已加入采集队列" })}>
+          </Button>}
+          <Button disabled={!!pending || !!s.collection_issue || s.kind === "external"} busy={pending === "fetch"} onClick={async () => {
+            const result = await run<OperationAccepted | { queued: boolean }>("POST", `${base}/fetch`, {}, { label: "fetch", success: "采集命令已提交" });
+            if (result && "runId" in result) setCollection(result);
+          }}>
             立即采集
           </Button>
           <Button tone={s.enabled ? "danger" : "primary"} onClick={() => setDialog("toggle")}>
@@ -174,7 +186,10 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
       </div>
       {s.last_error && s.health !== "ok" && <div className="mb-5 rounded-card bg-hot-soft px-4 py-3 text-[13px] text-hot ring-1 ring-hot/20">{s.last_error}</div>}
 
-      {preview && (
+      {s.collection_issue && <div className="mb-5 rounded-card bg-amber/10 p-4 text-[13px] text-amber">主采集订阅尚未迁移，采集命令已阻断。请由维护者执行显式迁移；只读页面不会创建订阅。</div>}
+      {collection && <div className="mb-5"><OperationLink operation={collection} /></div>}
+      {preview && "runId" in preview && <div className="mb-5"><OperationLink operation={preview} newTab /></div>}
+      {preview && !("runId" in preview) && (
         <Card className="mb-5" title={`预览：${preview.count} 条（${preview.ms}ms，未入库）`} right={<button onClick={() => setPreview(null)}>收起</button>}>
           {preview.items.length ? (
             <ul className="space-y-2.5">
@@ -193,7 +208,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
       )}
 
       <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <Card title="设置" right={<span>版本 {bj(s.updated_at, true)}</span>}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="名称">
@@ -247,6 +262,8 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
             </div>
           </Card>
 
+          {["x_search", "mp_account"].includes(s.kind) && <CollectionSwitch key={s.id} kind={s.kind} savedLibrary={mpLibrary(s.config?.redfoxLibrary)} intervalMinutes={s.interval_minutes} subscriptionId={s.subscription_id} sourceId={s.id} provider={s.collection_provider} sourceVersion={s.updated_at} subscriptionVersion={s.collection_version} activeRunId={s.active_run_id} />}
+
           <Card title="最近条目" pad={false}>
             <DataTable
               rows={items}
@@ -267,7 +284,18 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
           </Card>
         </div>
 
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
+          <Card title="采集订阅">
+            <KV items={[["供应商", s.collection_provider ?? (s.kind === "external" ? "外部上报" : ["x_search", "mp_account"].includes(s.kind) ? "尚未迁移" : "原生采集")], ["主订阅", s.subscription_id ?? "—"], ["当前执行记录", s.active_run_id ? <Link className="text-accent" to={`/admin/operations/${s.active_run_id}`}>#{s.active_run_id}</Link> : "无在途正式执行"]]} />
+            {activeOperation && <div className="mt-3 min-w-0 space-y-2 border-t border-line pt-3"><KV items={[
+              ["执行状态", <OperationBadge status={activeOperation.status} />],
+              ["当前步骤", <span className="break-all">{activeOperation.step}</span>],
+              ["等待 / 处理说明", <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{activeOperation.waitReason ?? "—"}</span>],
+              ["下次尝试", <Time at={activeOperation.nextAttemptAt} />],
+            ]} /><p className="text-[12px] text-ink-4">执行等待原因与信源健康分别展示；预算等待、未知回执或本地核实请到执行记录详情查看。</p></div>}
+            <div className="mt-3 text-[13px]"><Link className="text-accent" to="/admin/operations">查看执行记录</Link></div>
+            <div className="mt-3"><Json value={{ operation: s.collection_operation, version: s.collection_version, progress: s.cursor }} label="操作与进度诊断" /></div>
+          </Card>
           <Card title="状态">
             <KV
               items={[
@@ -279,27 +307,27 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
             />
             {s.cursor && <div className="mt-3"><Json value={s.cursor} label="游标" /></div>}
           </Card>
-          <Card title="采集记录" pad={false}>
+          <Card title="历史采集记录" pad={false}>
             <DataTable
               dense
               rows={runs}
-              rowKey={(r) => r.id}
+              rowKey={(r) => r.history_key}
               empty="还没有采集记录"
               columns={[
-                { key: "at", label: "时间", render: (r) => <span className="num whitespace-nowrap">{bj(r.started_at)}</span> },
+                { key: "at", label: "时间 / 执行记录", render: (r) => { const facts = sourceHistoryFacts(r); return <div className="space-y-1"><span className="block text-[11px] text-ink-4">{facts.timeLabel}</span><Time at={facts.time} />{facts.href && <Link className="block text-accent" to={facts.href}>查看执行记录 #{r.id}</Link>}<span className="block text-[11px] text-ink-4">供应商：{facts.provider}</span></div>; } },
                 {
                   key: "st",
                   label: "结果",
                   render: (r) => (
-                    <span className="inline-flex gap-1">
-                      <Badge tone={r.status === "ok" ? "ok" : r.status === "failed" ? "bad" : "muted"} title={r.error ?? undefined}>{r.status}</Badge>
+                    <div className="space-y-1"><span className="inline-flex flex-wrap gap-1">
+                      {r.kind === "operation" ? <OperationBadge status={r.status} /> : <Badge tone={r.status === "ok" ? "ok" : r.status === "failed" ? "bad" : "muted"} title={r.error ?? undefined}>{r.status}</Badge>}
                       {!!r.detail?.dropped && <Badge tone="bad" title="有一段更早的帖子没能读完，其中的内容可能漏采">可能漏采</Badge>}
                       {!r.detail?.dropped && !!r.detail?.backlog && <Badge tone="warn" title="帖子多于一轮能读的页数，余下的在后面几轮接着读">续读 {r.detail.backlog} 段</Badge>}
-                    </span>
+                    </span>{r.kind === "operation" && <><p className="max-w-52 whitespace-normal break-all text-[11px] text-ink-3">步骤：{r.step}</p>{r.error && <p className="max-w-52 whitespace-pre-wrap break-words text-[11px] text-ink-3 [overflow-wrap:anywhere]">等待 / 处理说明：{r.error}</p>}{r.next_attempt_at && <p className="text-[11px] text-ink-3">下次尝试：<Time at={r.next_attempt_at} /></p>}</>}</div>
                   ),
                 },
-                { key: "n", label: "发现/新增", align: "right", render: (r) => `${r.found_count ?? "—"}/${r.new_count ?? "—"}` },
-                { key: "ms", label: "耗时", align: "right", render: (r) => duration(r.started_at, r.finished_at) },
+                { key: "n", label: "材料数", align: "right", render: (r) => { const facts = sourceHistoryFacts(r); return <div><span className="block text-[11px] text-ink-4">{facts.quantityLabel}</span>{facts.quantity}</div>; } },
+                { key: "ms", label: "抓取耗时", align: "right", render: (r) => sourceHistoryFacts(r).elapsed ?? <span className="text-[11px] text-ink-4">执行记录不计抓取耗时</span> },
               ]}
             />
           </Card>

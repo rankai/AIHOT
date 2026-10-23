@@ -35,6 +35,79 @@ export function normalizeUrl(input: string): string | null {
   return s;
 }
 
+/** Documented Toutiao work permalinks only; no token/profile or short-link inference. */
+export function toutiaoWorkId(raw: unknown): string | null {
+  if (typeof raw !== "string" || !/^https?:\/\/(?:(?:www\.)?toutiao\.com|m\.toutiao\.com)\//i.test(raw.trim()) || raw.includes("#")) return null;
+  try {
+    const u = new URL(raw);
+    if (u.username || u.password || u.port || u.hash) return null;
+    if (u.hostname === 'm.toutiao.com') return u.protocol === 'https:' ? /^\/article\/([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null : null;
+    return /^\/(?:a|group\/|article\/|video\/)([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+  } catch { return null; }
+}
+
+/** Documented Instagram originals only. Shortcodes are not numeric media IDs. */
+export function instagramCode(raw:unknown):string|null{
+ if(typeof raw!=="string"||!/^https?:\/\/(?:www\.)?instagram\.com\//i.test(raw.trim())||raw.includes("#"))return null;
+ try{const u=new URL(raw);if(u.username||u.password||u.port||u.hash)return null;return /^\/(?:p|reel)\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]??null;}catch{return null;}
+}
+
+function youtubeNativeUrl(raw:unknown):URL|null{
+ if(typeof raw!=="string"||!/^https?:\/\/(?:www\.)?youtube\.com\//i.test(raw.trim())||raw.includes('#'))return null;
+ try{const u=new URL(raw);return !u.username&&!u.password&&!u.port&&!u.hash?u:null;}catch{return null;}
+}
+export function youtubeVideoId(raw:unknown):string|null{const u=youtubeNativeUrl(raw);if(!u||u.pathname!=="/watch"||u.searchParams.getAll("v").length!==1)return null;const id=u.searchParams.get("v")!;return /^[A-Za-z0-9_-]{11}$/.test(id)?id:null;}
+export function youtubeChannelId(raw:unknown):string|null{const u=youtubeNativeUrl(raw);return u?/^\/channel\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]??null:null;}
+
+/** Only the documented native BV video path; no AV conversion or short-link requests. */
+export function bilibiliVideoId(raw: string): string | null {
+  try { const u = new URL(raw.trim());
+    if (!/^https?:\/\/(?:www\.)?bilibili\.com\//i.test(raw.trim()) || raw.includes("#") || !["http:", "https:"].includes(u.protocol) || u.username || u.password || u.port || u.hash || u.hostname.replace(/^www\./, "") !== "bilibili.com") return null;
+    return /^\/video\/(BV[A-Za-z0-9]{10})\/?$/.exec(u.pathname)?.[1] ?? null;
+  } catch { return null; }
+}
+
+export function bilibiliProfileMid(raw: string): string | null {
+  try { const u = new URL(raw.trim());
+    if (!/^https?:\/\/space\.bilibili\.com\//i.test(raw.trim()) || raw.includes("#") || u.username || u.password || u.port || u.hash) return null;
+    return /^\/([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+  } catch { return null; }
+}
+/** A single documented b23 slug is sent only to the provider; never resolved locally. */
+export function isBilibiliShortUrl(raw: string): boolean {
+  try { const u = new URL(raw.trim());
+    return /^https?:\/\/b23\.tv\//i.test(raw.trim()) && !raw.includes("#") && !u.username && !u.password && !u.port && !u.hash && /^\/[A-Za-z0-9_-]+\/?$/.test(u.pathname);
+  } catch { return false; }
+}
+
+/** Documented TikTok video permalinks only. Handles are locators, never author identity. */
+export function tiktokVideoId(raw: string): string | null {
+  try {
+    const u = new URL(raw.trim());
+    if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || u.port || u.hash || u.hostname.replace(/^www\./, "") !== "tiktok.com") return null;
+    return /^\/@[A-Za-z0-9_.-]+\/video\/([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+  } catch { return null; }
+}
+
+/** Native explore links and witnessed HTTPS discovery links; never resolves short links. */
+export function xiaohongshuNoteId(raw:string):string|null{
+  try{const u=new URL(raw.trim());if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.port||u.hash||u.hostname.replace(/^www\./,"")!=="xiaohongshu.com")return null;
+    return /^\/explore\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]??(u.protocol==="https:"?/^\/discovery\/item\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]:null)??null;
+  }catch{return null;}
+}
+
+/** Documented native Douyin video permalinks only; never resolves short links or profile query IDs. */
+export function douyinVideoId(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || u.port || u.hash) return null;
+    const host = u.hostname.replace(/^www\./, "");
+    const match = host === "douyin.com" ? /^\/video\/([0-9]+)\/?$/.exec(u.pathname)
+      : host === "iesdouyin.com" ? /^\/share\/video\/([0-9]+)\/?$/.exec(u.pathname) : null;
+    return match?.[1] ?? null;
+  } catch { return null; }
+}
+
 /** Tweet id from an x.com / twitter.com status URL. */
 export function tweetIdFromUrl(url: string): string | null {
   let u: URL;

@@ -1,10 +1,13 @@
 import { SITE } from "@aihot/industry/site";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/source-new";
 import { useAdminAction } from "../../features/admin/action";
+import { OperationLink } from "../../features/admin/operation-ui";
+import type { PreviewResponse } from "../../features/admin/operation-types";
 import { bj } from "../../features/admin/format";
 import { KIND_LABEL, MODE_LABEL, TIER_LABEL } from "../../features/admin/labels";
+import { sourceNewPreset } from "../../features/admin/source-new-preset";
 import { AdminPage, Button, Card, Empty, Field, Input, Select, Textarea } from "../../features/admin/ui";
 
 export const meta: Route.MetaFunction = () => [{ title: `新建信源 · ${SITE.name} 后台` }];
@@ -14,23 +17,20 @@ const TEMPLATES: Record<string, Record<string, unknown>> = {
   web_list: { url: "https://example.com/blog", baseUrl: "https://example.com", itemSelector: "article", linkSelector: "a", titleSelector: "h2", allowUrlPrefixes: ["https://example.com/blog/"] },
   json_list: { url: "https://example.com/api/posts", mode: "json_api", method: "GET", itemsPath: "data.items", titlePaths: ["title"], urlTemplate: "{raw:url}", summaryPaths: ["summary"] },
   x_search: { query: "from:handle -filter:replies", searchType: "Latest" },
-  mp_account: { biz: "", name: "" },
+  mp_account: { ghid: "", wxid: "", nickname: "" },
   external: {},
 };
 
-interface Preview {
-  ms: number;
-  count: number;
-  items: Array<{ title: string; url: string; publishedAt: string | null; excerpt: string }>;
-}
 
 export default function NewSource() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const preset = sourceNewPreset(params.get("template"));
   const { run, pending } = useAdminAction();
-  const [form, setForm] = useState({ id: "", name: "", kind: "rss", tier: "T2", participation_mode: "editorial", interval_minutes: 30, first_party: false, site_fulltext: true, syndicate_fulltext: false, tags: "" });
-  const [config, setConfig] = useState(JSON.stringify(TEMPLATES.rss, null, 2));
+  const [form, setForm] = useState(() => ({ id: "", name: "", kind: "rss", tier: "T2", participation_mode: "editorial", interval_minutes: 30, first_party: false, site_fulltext: true, syndicate_fulltext: false, tags: "", ...preset?.form }));
+  const [config, setConfig] = useState(() => JSON.stringify(preset?.config ?? TEMPLATES.rss, null, 2));
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [duplicate, setDuplicate] = useState<{ id: string; name: string } | null>(null);
 
   const parsed = () => {
@@ -45,6 +45,7 @@ export default function NewSource() {
 
   return (
     <AdminPage title="新建信源" subtitle="先判重、先预览：优先 RSS/JSON 等稳定协议；首抓成功且有真实条目才算接入完成。一手身份要有运营主体或官方交叉链接证据。">
+      {preset && <p className="mb-5 rounded-control bg-bg-sunk p-3 text-[13px] text-ink-3">已预选隔离 external 草稿，关闭全文与一手权限。请自行填写名称和 ID 并明确创建；此步骤不导入作品，也不绑定永久账号。创建后回到原结果页搜索并逐项核实。</p>}
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <Card title="信源定义">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -107,21 +108,22 @@ export default function NewSource() {
             </div>
           )}
           <div className="mt-5 flex justify-end gap-2">
-            <Button
+            {!["mp_account", "external"].includes(form.kind) && <Button
+              disabled={!!pending}
               busy={pending === "preview"}
               onClick={async () => {
                 const c = parsed();
                 if (!c) return;
-                const r = await run<Preview>("POST", "/api/admin/sources/preview", { id: form.id || "draft", kind: form.kind, config: c }, { label: "preview", revalidate: false });
+                const r = await run<PreviewResponse>("POST", "/api/admin/sources/preview", { id: form.id || "draft", kind: form.kind, config: c }, { label: "preview", revalidate: false });
                 if (r) setPreview(r);
               }}
             >
               预览抓取
-            </Button>
+            </Button>}
             <Button
               tone="primary"
               busy={pending === "create"}
-              disabled={!form.id || !form.name}
+              disabled={!!pending || !form.id || !form.name}
               onClick={async () => {
                 const c = parsed();
                 if (!c) return;
@@ -140,9 +142,11 @@ export default function NewSource() {
             </Button>
           </div>
         </Card>
-        <Card title={preview ? `预览：${preview.count} 条（${preview.ms}ms）` : "预览"}>
+        <Card title={preview && !("runId" in preview) ? `预览：${preview.count} 条（${preview.ms}ms）` : "预览"}>
           {!preview ? (
-            <Empty>填好配置后点“预览抓取”，这里显示将会采集到的条目（不入库）。</Empty>
+            <Empty>{["mp_account", "external"].includes(form.kind) ? "此类型不支持创建前预览。保存后可在信源详情查看支持的采集操作。" : "填好配置后点“预览抓取”，这里显示条目或执行记录链接（不入库）。"}</Empty>
+          ) : "runId" in preview ? (
+            <OperationLink operation={preview} newTab />
           ) : preview.items.length ? (
             <ul className="space-y-3">
               {preview.items.map((i) => (

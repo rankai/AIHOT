@@ -4,11 +4,25 @@
 // local stubs by the tests that need them, and the push valves stay off. The files share
 // one database and its paid-service budgets, so they run one at a time (package.json).
 import http from "node:http";
+import assert from "node:assert/strict";
 
 const database = new URL(process.env.DATABASE_URL ?? "postgres://unset/unset").pathname.slice(1);
 if (!/_(test|ci)$/.test(database)) {
   throw new Error(`Invariant tests write rows: point DATABASE_URL at a throwaway database named *_test or *_ci (got "${database}")`);
 }
+process.env.NODE_ENV ??= "test";
+/** Verify the connected database against the configured throwaway database without exposing credentials. */
+export function assertConfiguredTestDatabase(actualName: string, actualPort?: number) {
+  const configured = new URL(process.env.DATABASE_URL ?? "postgres://unset/unset");
+  const name = decodeURIComponent(configured.pathname.slice(1));
+  assert.match(name, /_(test|ci)$/, "DATABASE_URL must name a throwaway *_test or *_ci database");
+  assert.match(actualName, /_(test|ci)$/, "Connected database must be a throwaway *_test or *_ci database");
+  assert.equal(actualName, name, "Connected database must match DATABASE_URL");
+  if (actualPort !== undefined) {
+    assert.equal(actualPort, Number(configured.port || 5432), "Connected database port must match DATABASE_URL");
+  }
+}
+
 process.env.AIHOT_CREDENTIALS_DIR = "/nonexistent-test-credentials";
 process.env.SESSION_SECRET ??= "test-session-secret-0123456789";
 process.env.IMG_PROXY_SIGN_SECRET ??= "test-img-secret-0123456789";

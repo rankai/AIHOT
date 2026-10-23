@@ -1,8 +1,10 @@
+import {expireOperationResults} from './result-retention.ts';
 // Daily housekeeping: expired leases, old run history, files past their life and derived caches.
 import { readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.ts";
 import { sql } from "../db.ts";
+import { cleanupAssets } from "./assets.ts";
 
 /** Derived caches (proxied images, share cards and posters) are rebuilt on demand; drop ones older than a month. */
 async function pruneCache(dir: string, maxAgeMs: number, now: number): Promise<number> {
@@ -27,13 +29,19 @@ async function pruneCache(dir: string, maxAgeMs: number, now: number): Promise<n
 }
 
 export async function dailyRetention(now = new Date()) {
+  const expiredResults=await expireOperationResults(now);
+  const attempts = await sql`UPDATE receipt_attempts a SET response = NULL
+    WHERE a.response IS NOT NULL AND a.started_at < ${new Date(now.getTime() - 30 * 86400_000)}
+      AND NOT EXISTS (SELECT 1 FROM operation_runs r WHERE r.status IN ('active','waiting','needs_review','stopped')
+        AND (r.current_receipt_id = a.receipt_id OR r.progress->'retainedReceiptIds' @> jsonb_build_array(a.receipt_id)))`;
   const leases = await sql`DELETE FROM delivery_leases WHERE expires_at < ${now}`;
   // Scheduled-task history: 30 days (failures 90) is enough for the runs view.
   const runs = await sql`DELETE FROM job_runs WHERE started_at < ${new Date(now.getTime() - 30 * 86400_000)} AND (status IS DISTINCT FROM 'failed' OR started_at < ${new Date(now.getTime() - 90 * 86400_000)})`;
   // Raw files with a bounded life.
-  const files = await sql<{ key: string }[]>`DELETE FROM stored_files WHERE expires_at < ${now} RETURNING key`;
+  const files = await sql<{ key: string }[]>`DELETE FROM stored_files WHERE expires_at < ${now} AND key NOT LIKE 'uploads/redfox/%' RETURNING key`;
   for (const f of files) await unlink(path.join(config.dataDir, f.key)).catch(() => {});
+  const assets = await cleanupAssets(now);
   const monthMs = 30 * 86400_000;
   const prunedCache = (await pruneCache(path.join(config.dataDir, "imgcache"), monthMs, now.getTime())) + (await pruneCache(path.join(config.dataDir, "ogcache"), monthMs, now.getTime()));
-  return { deletedLeases: leases.count, deletedJobRuns: runs.count, deletedFiles: files.length, prunedCache };
+  return { expiredResults, assets, prunedAttemptResponses: attempts.count, deletedLeases: leases.count, deletedJobRuns: runs.count, deletedFiles: files.length, prunedCache };
 }

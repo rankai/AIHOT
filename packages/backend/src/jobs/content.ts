@@ -1,3 +1,4 @@
+import { needsXArticleExtraction } from "../sources/x.ts";
 // Content processing: body extraction when the source needs it → analysis → publish → event grouping.
 // Every article reaches the queues through queueProcessing, which records when it was queued, so the
 // safety net only picks up articles nothing is working on and sends those still waiting for a body to
@@ -46,9 +47,11 @@ async function route(articleId: string, db: Db): Promise<Route | null> {
   const historical = isHistorical(row);
   const signal = row.participation_mode !== "editorial";
   const pending = row.body_status === "pending";
-  const wantsBody = row.config.fetchPublicContent === true || !!row.config.detail || row.kind === "web_list";
+  // Native subscriptions own X/MP collection config; their historical source snapshots have no page extraction options.
+  const wantsBody = row.kind !== "x_search" && row.kind !== "mp_account" &&
+    (row.config.fetchPublicContent === true || !!row.config.detail || row.kind === "web_list");
   const needsPage = !signal && (wantsBody || (row.bare && pageFetchable(row.url, row.kind)));
-  const needsXArticle = row.kind === "x_search" && (!signal || (row.participation_mode === "hot_signal" && !historical));
+  const needsXArticle = needsXArticleExtraction(row.kind,row.participation_mode,historical);
   return { step: pending && (needsPage || needsXArticle) ? "extract" : "analyze", signal, historical };
 }
 

@@ -4,6 +4,7 @@ import { sql } from "../db.ts";
 import { audit } from "./auth.ts";
 import { Conflict } from "./sources.ts";
 import { failureGroupSql, queueProcessing, requeueFailed } from "../jobs/content.ts";
+import { governedReceipt, releaseOperationReceipt } from "../providers/operations/recovery.ts";
 import { CAPABILITIES } from "../editorial/models.ts";
 
 const STALE_HEARTBEAT_MS = 3 * 60_000;
@@ -30,13 +31,19 @@ export async function runsOverview() {
       FROM pgboss.job WHERE state = 'failed' AND completed_on > now() - interval '24 hours' GROUP BY 1 ORDER BY 2 DESC`,
     sql`
       SELECT id, name, kind, health, fail_count, last_ok_at, last_fetch_at, next_fetch_at, interval_minutes, left(last_error, 200) AS last_error
-      FROM sources
-      WHERE enabled AND kind NOT IN ('mp_account', 'external')
+      FROM (SELECT s.id, s.name, s.kind, s.health, s.fail_count, s.last_ok_at, s.last_fetch_at, s.last_error, s.enabled AND coalesce(c.enabled,true) AS enabled,
+        CASE WHEN c.id IS NOT NULL THEN c.next_run_at ELSE s.next_fetch_at END AS next_fetch_at,
+        coalesce(c.interval_minutes,s.interval_minutes) AS interval_minutes FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id=s.id) effective
+      WHERE enabled AND kind <> 'external'
         AND (health = 'failing' OR next_fetch_at < now() - interval '30 minutes' OR last_ok_at < now() - make_interval(mins => greatest(interval_minutes * 6, 360)))
       ORDER BY health = 'failing' DESC, next_fetch_at LIMIT 60`,
     sql<{ status: string; n: number }[]>`SELECT status, count(*)::int AS n FROM receipts WHERE created_at > now() - interval '7 days' GROUP BY 1`,
     sql`
-      SELECT id, service, model, purpose, subject, status, attempts, left(error, 240) AS error, created_at, updated_at FROM receipts
+      SELECT r.id, r.service, r.model, r.purpose, r.subject, r.status, r.attempts, left(r.error, 240) AS error, r.created_at, r.updated_at,
+        ARRAY(SELECT o.id FROM operation_runs o WHERE o.current_receipt_id = r.id OR o.progress->'retainedReceiptIds' @> jsonb_build_array(r.id)
+          OR EXISTS (SELECT 1 FROM operation_results z WHERE z.run_id=o.id AND z.receipt_id=r.id)) AS operation_ids,
+        EXISTS (SELECT 1 FROM receipt_attempts a WHERE a.receipt_id=r.id AND a.error LIKE ${AUTO_RELEASE_NOTE + "%"}) AS automatically_released
+      FROM receipts r
       WHERE status = 'unknown' OR (status = 'failed' AND updated_at > now() - interval '3 days') OR (status = 'pending' AND updated_at < now() - interval '15 minutes')
       ORDER BY status = 'unknown' DESC, updated_at DESC LIMIT 40`,
     sql`
@@ -100,6 +107,9 @@ function analysisAttemptTag(receipt: { service: string; purpose: string; model: 
  */
 async function release(id: number, error: string, actor: string, note: string, billed: boolean | null) {
   const result = await sql.begin(async (tx) => {
+    await tx`SELECT id FROM receipts WHERE id = ${id} FOR UPDATE`;
+    const [governed] = await tx`SELECT ${governedReceipt(id)} AS yes`;
+    if (governed?.yes) return null;
     const [before] = await tx<{ subject: string | null; purpose: string; service: string; model: string | null; logical_key: string }[]>`
     UPDATE receipts SET status = 'failed', error = ${error}, updated_at = now() WHERE id = ${id} AND status = 'unknown' RETURNING subject, purpose, service, model, logical_key`;
     if (!before) return null;
@@ -126,6 +136,13 @@ export async function releaseReceipt(id: number, input: { billed: boolean; note:
   if (!row) return null;
   if (row.status !== "unknown") throw new Conflict("只有结果未知的回执需要人工核对");
   const error = `人工核对：${input.billed ? "供应商已计费但结果未取回" : "供应商未计费"}。${input.note}`;
+  const [governed] = await sql`SELECT ${governedReceipt(id)} AS yes`;
+  if (governed?.yes) {
+    const result = await releaseOperationReceipt(id, true);
+    await audit(actor, "receipt.release", `receipt:${id}`, input.note, { status: "unknown" }, { ...result, billed: input.billed });
+    if (!result.released) throw new Conflict("此回执关联任务不可恢复，请核实任务或明确放弃");
+    return { id, ...result };
+  }
   return release(id, error, actor, input.note, input.billed);
 }
 

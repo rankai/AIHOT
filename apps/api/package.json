@@ -10,6 +10,7 @@
     "@aihot/backend": "*",
     "@aihot/contracts": "*",
     "@aihot/industry": "*",
+    "@fastify/multipart": "10.1.4",
     "@modelcontextprotocol/server": "2.1.0",
     "@resvg/resvg-js": "2.6.2",
     "fastify": "5.12.5",

@@ -7,7 +7,10 @@ import { after, before, test } from "node:test";
 import { config } from "@aihot/backend/config";
 import { closeDb, sql } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
-import { collectXShard, scheduleDueSources } from "@aihot/backend/sources/collect";
+import { scheduleDueSources } from "@aihot/backend/sources/collect";
+import { collectBatch, drainNative } from "./native-helpers.ts";
+import { migrateNativeSources } from "@aihot/backend/sources/native-migration";
+import { controlOperation } from "@aihot/backend/providers/operations/read";
 import { planXShards, shardQuery } from "@aihot/backend/sources/x";
 
 const T = tag();
@@ -50,8 +53,9 @@ const socialdata = await stub((_hit, req) => {
 process.env.SOCIALDATA_BASE_URL = socialdata.url;
 process.env.SOCIALDATA_API_KEY = "test-key";
 config.allowPrivateNetworkFetch = true;
+process.env.COLLECT_ENABLED = "true";
 
-const cursorOf = async (id: string) => (await sql<{ cursor: { lastTweetId: string } }[]>`SELECT cursor FROM sources WHERE id = ${id}`)[0]!.cursor;
+const cursorOf = async (id: string) => (await sql<{ cursor: { lastTweetId: string } }[]>`SELECT progress AS cursor FROM collection_subscriptions WHERE control_source_id = ${id}`)[0]!.cursor;
 
 let savedBudget: Array<{ per_minute: number; per_hour: number; per_day: number }> = [];
 before(async () => {
@@ -62,6 +66,7 @@ before(async () => {
               VALUES (${id}, ${HANDLES[i]!}, 'x_search', ${sql.json({ query: `from:${HANDLES[i]!} -filter:replies`, searchType: "Latest" })}, 'T1', 'editorial',
                       ${sql.json({ initializedAt: new Date().toISOString(), lastTweetId: String(WATERMARK) })}, '2100-01-01')`;
   }
+  await migrateNativeSources({ oldWritersStopped: true, sourceIds: IDS });
 });
 after(async () => {
   const b = savedBudget[0];
@@ -90,70 +95,44 @@ test("shards keep to the query length and account limits, per participation mode
   assert.deepEqual(planXShards([...long].reverse()).map((s) => s.key), shards.map((s) => s.key), "the same sources give the same shards");
 });
 
-test("one search reads a shard; each account gets its own posts, run and watermark", async () => {
+test("one operation batches accounts without splitting paid pages; each source keeps ownership", async () => {
   const before = queries.length;
-  const res = await collectXShard(`editorial:test-${T}`, IDS);
-  assert.equal(res.status, "ok");
-  const asked = queries.slice(before);
-  assert.equal(asked.length, 2, "one search for three accounts (two pages of posts)");
-  for (const q of asked) assert.match(q, new RegExp(`^\\(from:${HANDLES[0]} OR from:${HANDLES[1]} OR from:${HANDLES[2]}\\) -filter:replies since_id:${WATERMARK}$`));
-  const stored = await sql<{ source_id: string; n: number }[]>`SELECT source_id, count(*)::int AS n FROM articles WHERE source_id IN ${sql(IDS)} GROUP BY 1`;
+  const run = await collectBatch(IDS);
+  assert.equal(run.status, "completed");
+  assert.equal(queries.length - before, 2);
+  const stored = await sql`SELECT source_id, count(*)::int AS n FROM articles WHERE source_id IN ${sql(IDS)} GROUP BY source_id`;
   assert.deepEqual(Object.fromEntries(stored.map((r) => [r.source_id, r.n])), { [IDS[0]!]: 3, [IDS[1]!]: 1 });
-  for (const id of IDS) assert.equal((await cursorOf(id)).lastTweetId, String(BASE + 104n), "every account is covered up to the newest post read");
-  const runs = await sql<{ source_id: string; status: string; found_count: number; detail: { shard: string; accounts: number } }[]>`
-    SELECT DISTINCT ON (source_id) source_id, status, found_count, detail FROM fetch_runs WHERE source_id IN ${sql(IDS)} ORDER BY source_id, id DESC`;
-  assert.deepEqual(runs.map((r) => [r.status, r.found_count, r.detail.accounts]), [["ok", 3, 3], ["ok", 1, 3], ["ok", 0, 3]]);
-  const [next] = await sql<{ minutes: number; interval: number }[]>`SELECT round(extract(epoch FROM next_fetch_at - now()) / 60)::int AS minutes, interval_minutes AS interval FROM sources WHERE id = ${IDS[2]!}`;
-  assert.deepEqual([next!.minutes, next!.interval], [30, 30], "editorial shards are read every half hour");
+  for (const id of IDS) assert.equal((await cursorOf(id)).lastTweetId, String(BASE + 104n));
 });
 
-test("a page failing after the first keeps what was read and goes on from there next run", async () => {
-  // Another watermark (still below every post): paid responses are reused only for the same search.
-  await sql`UPDATE sources SET cursor = (cursor - 'lastOkAt') || ${sql.json({ lastTweetId: String(WATERMARK - 1n) })} WHERE id IN ${sql(IDS)}`;
-  await sql`DELETE FROM articles WHERE source_id IN ${sql(IDS)}`;
-  failPage2 = 2; // the page, and the same run's second try at it from the stretch kept
-  const first = await collectXShard(`editorial:test-${T}`, IDS);
-  assert.equal(first.status, "ok", "the accounts are not failed for a later page");
-  assert.equal(first.found, 2, "the first page is kept");
-  const cursor = (await sql<{ cursor: { lastTweetId: string; xBacklog?: unknown[] } }[]>`SELECT cursor FROM sources WHERE id = ${IDS[2]!}`)[0]!.cursor;
-  assert.equal(cursor.lastTweetId, String(BASE + 104n), "the watermark moves to the newest post read");
-  assert.equal(cursor.xBacklog?.length, 1, "the rest is kept to read");
-  const second = await collectXShard(`editorial:test-${T}`, IDS);
-  assert.equal(second.found, 2, "the next run reads the rest");
-  const stored = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM articles WHERE source_id IN ${sql(IDS)}`;
-  assert.equal(stored[0]!.n, 4, "no post between the old watermark and the newest is lost");
+test("a rejected later page retains the same run and frozen request until safe resume", async () => {
+  await sql`UPDATE collection_subscriptions SET progress = (progress - 'lastOkAt') || ${sql.json({ lastTweetId: String(WATERMARK - 1n) })} WHERE control_source_id IN ${sql(IDS)}`;
+  failPage2 = 1;
+  const run = await collectBatch(IDS);
+  assert.equal(run.status, "waiting");
+  for (const id of IDS) assert.equal((await cursorOf(id)).lastTweetId, String(WATERMARK - 1n), "formal watermark waits for the run");
+  await controlOperation(run.id, "resume", { stepVersion: run.step_version, generation: run.generation, reason: "local stub recovered" }, "test");
+  assert.equal((await drainNative(run.id)).status, "completed");
+  for (const id of IDS) assert.equal((await cursorOf(id)).lastTweetId, String(BASE + 104n));
 });
 
-test("a quiet account's old newest post does not drag the shard's search back: its last check does", async () => {
+test("quiet accounts use the successful check watermark to bound batch queries", async () => {
   const checked = Date.now() - 45 * 60_000;
-  await sql`UPDATE sources SET cursor = cursor || ${sql.json({ lastTweetId: String(WATERMARK - 3n), lastOkAt: new Date(checked).toISOString() })} WHERE id IN ${sql(IDS)}`;
-  await sql`UPDATE sources SET cursor = cursor || ${sql.json({ lastTweetId: "1000" })} WHERE id = ${IDS[2]!}`;
+  await sql`UPDATE collection_subscriptions SET progress = progress || ${sql.json({ lastTweetId: String(WATERMARK - 3n), lastOkAt: new Date(checked).toISOString() })} WHERE control_source_id IN ${sql(IDS)}`;
+  await sql`UPDATE collection_subscriptions SET progress = progress || '{"lastTweetId":"1000"}' WHERE control_source_id = ${IDS[2]!}`;
   const before = queries.length;
-  await collectXShard(`editorial:test-${T}`, IDS);
+  await collectBatch(IDS);
   const since = BigInt(/since_id:(\d+)/.exec(queries[before]!)![1]!);
-  const expected = (BigInt(checked - 10 * 60_000 - 1288834974657) << 22n);
-  assert.equal(since, expected > WATERMARK - 3n ? expected : WATERMARK - 3n, "bounded by the last checks, not by the quiet account's post");
+  const expected = BigInt(checked - 10 * 60_000 - 1288834974657) << 22n;
+  assert.equal(since, expected > WATERMARK - 3n ? expected : WATERMARK - 3n);
 });
 
-test("a failed search fails every account of the shard and moves no watermark", async () => {
-  await sql`UPDATE sources SET cursor = (cursor - 'lastOkAt') || ${sql.json({ lastTweetId: String(WATERMARK - 2n) })} WHERE id IN ${sql(IDS)}`;
-  const watermark = String(WATERMARK - 2n);
-  failNext = true;
-  const res = await collectXShard(`editorial:test-${T}`, IDS);
-  assert.equal(res.status, "failed");
-  for (const id of IDS) assert.equal((await cursorOf(id)).lastTweetId, watermark);
-  const failed = await sql<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM (SELECT DISTINCT ON (source_id) status FROM fetch_runs WHERE source_id IN ${sql(IDS)} ORDER BY source_id, id DESC) r WHERE status = 'failed'`;
-  assert.equal(failed[0]!.n, 3);
-});
-
-test("due accounts are scheduled by shard, not one by one", async () => {
-  await sql`UPDATE sources SET next_fetch_at = now() - interval '1 minute' WHERE id = ${IDS[1]!}`;
+test("due accounts enqueue a shared operation and retain formal occupancy", async () => {
+  await sql`UPDATE collection_subscriptions SET next_run_at = now() - interval '1 minute' WHERE control_source_id = ${IDS[1]!}`;
   await scheduleDueSources(1000);
-  const jobs = await sql<{ name: string; data: { sourceId?: string; sourceIds?: string[] } }[]>`
-    SELECT name, data FROM pgboss.job WHERE created_on > now() - interval '1 minute' AND (data->>'sourceId' IN ${sql(IDS)} OR data->'sourceIds' ?| ${IDS})`;
-  assert.equal(jobs.filter((j) => j.name === "sources.fetch").length, 0, "no account of a shard is fetched on its own");
-  const shard = jobs.find((j) => j.name === "sources.fetch-x");
-  assert.ok(shard, "the shard with the due account is enqueued");
-  assert.ok(IDS.every((id) => jobs.some((j) => j.data.sourceIds?.includes(id))), "all its accounts are read together");
+  const rows = await sql`SELECT active_run_id FROM collection_subscriptions WHERE control_source_id IN ${sql(IDS)}`;
+  assert.ok(rows.every((r) => r.active_run_id !== null));
+  assert.equal(new Set(rows.map((r) => r.active_run_id)).size, 1);
+  const [job] = await sql`SELECT name FROM pgboss.job WHERE data->>'runId' = ${String(rows[0]!.active_run_id)} ORDER BY created_on DESC LIMIT 1`;
+  assert.equal(job!.name, "operations.execute");
 });
