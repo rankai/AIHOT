@@ -4,10 +4,20 @@ import { audit } from "../../admin/auth.ts";
 import { queueOperationStep } from "./queue.ts";
 import { abandonRun, lockRun, resumeRun, StaleOperationError } from "./store.ts";
 
-export async function listOperations() {
-  return sql`SELECT id, status, provider, operation_key AS "operationKey", step_key AS step, step_version AS "stepVersion",
+const OperationFilters = z.object({
+  subscriptionId: z.coerce.number().int().safe().positive().optional(),
+  status: z.enum(["active", "waiting", "needs_review", "stopped", "completed", "failed"]).optional(),
+}).strict();
+
+export async function listOperations(raw: unknown = {}) {
+  const { subscriptionId, status } = OperationFilters.parse(raw);
+  return sql`SELECT id, subscription_id AS "subscriptionId", status, provider, operation_key AS "operationKey", step_key AS step, step_version AS "stepVersion",
     generation, wait_reason AS "waitReason", next_attempt_at AS "nextAttemptAt", created_at AS "createdAt"
-    FROM operation_runs ORDER BY id DESC LIMIT 100`;
+    FROM operation_runs
+    WHERE (${subscriptionId ?? null}::bigint IS NULL OR subscription_id = ${subscriptionId ?? null}
+      OR input->'members' @> ${sql.json(subscriptionId ? [{ subscriptionId }] : [])}::jsonb)
+      AND (${status ?? null}::text IS NULL OR status = ${status ?? null})
+    ORDER BY id DESC LIMIT 100`;
 }
 export async function operationDetail(id: number) {
   const [run] = await sql`SELECT id, subscription_id AS "subscriptionId", status, provider, operation_key AS "operationKey", step_key AS step,

@@ -25,7 +25,7 @@ test("actual subscription editor requires explicit target and blank LL page, dis
     const target = (operationId: string) => ({ operationId, label: `${operationId}已证库`, fields: [], price: { amount: 0, currency: "CNY", basis: "estimated" as const } });
     const operation: PlatformOperation = { id: "PW97QFBS", platform: "wechat", label: "搜索", purpose: "query", schedulableType: "search", fields: [], collectionProviders: [{ id: "redfox", label: "Redfox" }, { id: "agentkey", label: "AgentKey" }], collectionCapabilities: { detailEnrichment: true, detailOperations: [target("XEO0QQNF"), target("I3CIBRI2")] } };
     const blank = render(operation);
-    assert.match(blank, /<th[^>]*>供应商<\/th>/); assert.match(blank, /aria-label="供应商"[^>]*disabled=""/); assert(blank.includes('<option value="redfox" selected="">Redfox</option>')); assert(blank.includes("AgentKey")); assert(blank.includes("Redfox"));
+    assert.match(blank, /<th[^>]*>订阅 \/ 平台与供应商<\/th>/); assert.match(blank, /aria-label="供应商"[^>]*disabled=""/); assert(blank.includes('<option value="redfox" selected="">Redfox</option>')); assert(blank.includes("AgentKey")); assert(blank.includes("Redfox"));
     assert.match(blank, /aria-label="详情目标 \/ 库"[^>]*required=""/); assert.match(blank, /<option value="" selected="">请选择详情目标/);
     const switchable = render({...operation, id: "OWIBYU1V", platform: "douyin"}, {parameters: {keyword: "AI"}, enrichDetails: false});
     assert.match(switchable, /aria-label="目标供应商"/);
