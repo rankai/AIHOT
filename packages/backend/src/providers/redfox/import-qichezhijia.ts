@@ -1,3 +1,5 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
 import {applyWeiboCarDetailOrigin} from "./weibo-car-detail-origin.ts";
@@ -83,7 +85,8 @@ export async function importQichezhijiaResult(resultId:number,raw:unknown,actor:
       const full=operation.data==="LLCI8QTE",body=full?record.content:record.description,publishedAt=publicationTime(record),discoveredAt=origin?new Date(origin.discoveredAt):sourceDiscoveredAt;
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=record.authorName??record.nickname;
-      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
+      const bodyMedia=full&&typeof body==="string"?videoMediaFromHtml(body,url!):[];
+      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:[...bodyMedia,...(operation.data==="TE6AGWAF"||operation.data==="CI7VW144"&&parameters.sourceType==="video"&&["3","14"].includes(String(record.workType))||origin?.workType==="original_video"||origin?.workType==="chejiahao_video"?confirmedVideoMedia(media(record)):media(record))],via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({qichezhijiaImport:{key:commandKey,intent,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null}})} WHERE id=${resultId}`;

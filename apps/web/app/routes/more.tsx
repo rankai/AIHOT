@@ -1,12 +1,12 @@
 import { SITE } from "@aihot/industry/site";
-import { FEATURES } from "@aihot/industry/features";
 import type { ReactNode } from "react";
 import { Link, useRouteLoaderData } from "react-router";
 import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { pageMeta } from "../lib/seo";
 import { ThemeSwitch } from "../components/shell/ThemeSwitch";
-import { IconBookmark, IconChart, IconChevronRight, IconFlame, IconGrid, IconHeart, IconHistory, IconMessage, IconMoon, IconPlug } from "../components/icons";
+import { IconChevronRight, IconMoon } from "../components/icons";
+import { moreGroups } from "../components/shell/nav";
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -16,35 +16,6 @@ export function headers() {
 export function meta() {
   return pageMeta({ title: "更多", path: "/more", noindex: true });
 }
-
-type Row = { to: string; label: string; icon: ReactNode };
-
-const GROUPS: Array<{ title: string; rows: Row[] }> = [
-  {
-    title: "内容",
-    rows: [
-      { to: "/topics", label: "主题索引", icon: <IconGrid size={18} /> },
-      ...(FEATURES.leaderboard ? [{ to: "/leaderboard", label: "模型榜", icon: <IconChart size={18} /> }] : []),
-      ...(FEATURES.codexResetMonitor ? [{ to: "/codex-reset", label: "Tibo重置监控", icon: <IconHistory size={18} /> }] : []),
-      { to: "/agent", label: "Agent 接入", icon: <IconPlug size={18} /> },
-    ],
-  },
-  {
-    title: "偏好",
-    rows: [
-      { to: "/hot", label: "热点榜", icon: <IconFlame size={18} /> },
-      { to: "/starred", label: "收藏", icon: <IconBookmark size={18} /> },
-    ],
-  },
-  {
-    title: "关于",
-    rows: [
-      { to: "/about", label: `关于 ${SITE.name}`, icon: <IconHeart size={18} /> },
-      { to: "/changelog", label: "更新日志", icon: <IconHistory size={18} /> },
-      { to: "/feedback", label: "意见反馈", icon: <IconMessage size={18} /> },
-    ],
-  },
-];
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -62,14 +33,14 @@ export default function MorePage() {
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <h1 className="pb-4 pt-5 text-[22px] font-bold text-ink lg:pt-1">更多</h1>
       <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0 2xl:grid-cols-3">
-        {GROUPS.map((g) => (
+        {moreGroups(root?.presentation).map((g) => (
           <Group key={g.title} title={g.title}>
-            {g.rows.map((r) => (
+            {g.items.map((r) => (
               <li key={r.to}>
                 <Link to={r.to} className="flex h-[50px] items-center gap-3 px-4 text-[15px] font-medium text-ink transition-colors active:bg-bg-sunk lg:hover:bg-bg-sunk">
-                  <span className="text-ink-3">{r.icon}</span>
-                  <span className="flex flex-1 items-center gap-2">{r.label}{r.to === "/changelog" && changelogDot && <span className="size-1.5 rounded-full bg-hot" aria-label="有新的更新" />}</span>
-                  <IconChevronRight size={16} className="text-ink-4" />
+                  <span className="shrink-0 text-ink-3"><r.icon size={18} /></span>
+                  <span className="flex min-w-0 flex-1 items-center gap-2"><span className="truncate" title={r.label}>{r.label}</span>{r.to === "/changelog" && changelogDot && <span className="size-1.5 shrink-0 rounded-full bg-hot" aria-label="有新的更新" />}</span>
+                  <IconChevronRight size={16} className="shrink-0 text-ink-4" />
                 </Link>
               </li>
             ))}

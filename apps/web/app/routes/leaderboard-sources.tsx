@@ -1,4 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
+import type { Route } from "./+types/leaderboard-sources";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { Link, useLoaderData } from "react-router";
 import type { LbSourcesResponse } from "@aihot/contracts/leaderboard";
 import { loadOr404 } from "../lib/api.server";
@@ -12,14 +15,14 @@ export async function loader({ request }: { request: Request }) {
   return loadOr404<LbSourcesResponse>("/api/site/leaderboard/sources", { signal: request.signal });
 }
 
-export function meta() {
+export function meta({ matches }: Route.MetaArgs) {
   return pageMeta({
     title: "评测来源",
     description: `了解 ${SITE.name} 采用和观察中的评测来源、方法与数据进展。`,
     path: "/leaderboard/sources",
     image: "/og/pages/leaderboard.png",
     jsonLd: breadcrumbLd([
-      { name: "模型榜", path: "/leaderboard" },
+      { name: navigationLabel(presentationFromMatches(matches), "leaderboard", "模型榜"), path: "/leaderboard" },
       { name: "评测来源", path: "/leaderboard/sources" },
     ]),
   });
@@ -30,11 +33,12 @@ export function headers() {
 }
 
 export default function LeaderboardSourcesPage() {
+  const presentation = usePresentation();
   const { groups, rankedCount, totalCount } = useLoaderData<typeof loader>();
   return (
     <div className="pb-12">
       <Link to="/leaderboard" className="mt-4 inline-flex items-center gap-1.5 py-2 text-[13px] text-ink-3 transition-colors hover:text-accent lg:mt-0">
-        <IconArrowLeft size={14} /> 返回模型榜
+        <IconArrowLeft size={14} /> {`返回${navigationLabel(presentation, "leaderboard", "模型榜")}`}
       </Link>
       <header className="pb-2 pt-3">
         <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">评测来源</h1>

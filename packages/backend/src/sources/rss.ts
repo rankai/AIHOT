@@ -2,6 +2,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { guardedFetch } from "../lib/http-fetch.ts";
 import { collapseWhitespace, stripTags } from "../lib/text.ts";
+import { confirmedVideoMedia, mediaUrl, videoMediaFromHtml } from "../content/media.ts";
 import { sanitizeBody } from "../content/sanitize.ts";
 import { identityKeyForUrl } from "../lib/url.ts";
 import { sha256, stableJson } from "../lib/ids.ts";
@@ -66,6 +67,22 @@ function imagesFrom(html: string, base: string): Array<{ kind: "image"; url: str
     if (out.length >= 6) break;
   }
   return out;
+}
+
+/** Entry-local attachment contracts; image limits do not truncate the video fact. */
+export function feedVideoMedia(entry: Record<string, any>, base: string, html = "", atom = false) {
+  const enclosures = atom ? arr(entry.link).filter((e) => e?.["@rel"] === "enclosure") : arr(entry.enclosure);
+  const contents = [...arr(entry["media:content"]), ...arr(entry["media:group"]).flatMap((g) => arr(g?.["media:content"]))];
+  const video = enclosures.some((e) => /^video\//i.test(e?.["@type"] ?? "") && mediaUrl(e?.[atom ? "@href" : "@url"], base))
+    || contents.some((e) => {
+      const medium = e?.["@medium"];
+      const type = e?.["@type"];
+      // Both declarations describe this attachment, not the entry's other images or videos.
+      return (medium === "video" || /^video\//i.test(type ?? ""))
+        && (!medium || medium === "video") && (!type || /^video\//i.test(type))
+        && mediaUrl(e?.["@url"], base);
+    });
+  return video ? confirmedVideoMedia() : videoMediaFromHtml(html, base);
 }
 
 /**
@@ -172,7 +189,7 @@ export async function fetchRss(source: SourceRow, opts: { force?: boolean } = {}
         author: text(it["dc:creator"]) || text(it.author) || null,
         publishedAt: parseDate(text(it.pubDate) || text(it["dc:date"]) || text(it.published)),
         ...feedText(bodyHtml, description, source),
-        media: media.slice(0, 6),
+        media: [...media.slice(0, 6), ...feedVideoMedia(it, link, bodyHtmlRaw)],
         categories: arr(it.category).map((c) => text(c)).filter(Boolean),
         raw: { guid: text(it.guid) || null },
       });
@@ -198,7 +215,7 @@ export async function fetchRss(source: SourceRow, opts: { force?: boolean } = {}
         publishedAt: parseDate(text(e.published) || text(e.updated)),
         sourceUpdatedAt: parseDate(text(e.updated)),
         ...feedText(bodyHtml, summary, source),
-        media: content ? imagesFrom(content, link) : [],
+        media: [...(content ? imagesFrom(content, entryUrl) : []), ...feedVideoMedia(e, entryUrl, content, true)],
         categories: arr(e.category).map((c: any) => c?.["@term"] ?? text(c)).filter(Boolean),
         raw: { id: text(e.id) || null },
       });

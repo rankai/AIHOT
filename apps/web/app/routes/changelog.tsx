@@ -1,4 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
+import type { Route } from "./+types/changelog";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { Fragment, useEffect, useState } from "react";
 import { Link, useLoaderData } from "react-router";
 import { apiGet } from "../lib/api.server";
@@ -25,8 +28,8 @@ export async function loader({ request }: { request: Request }) {
   return apiGet<{ latestVersion: string; releases: Release[] }>("/api/site/changelog", { signal: request.signal });
 }
 
-export function meta() {
-  return pageMeta({ title: "更新日志", description: `${SITE.name} 的功能更新、优化、公告与下线记录。`, path: "/changelog", image: "/og/pages/changelog.png" });
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta({ title: navigationLabel(presentationFromMatches(matches), "changelog", "更新日志"), description: `${SITE.name} 的功能更新、优化、公告与下线记录。`, path: "/changelog", image: "/og/pages/changelog.png" });
 }
 
 const KIND_DOT: Record<Release["kind"], string> = {
@@ -68,6 +71,7 @@ function ReleaseBody({ lines }: { lines: string[] }) {
 }
 
 export default function ChangelogPage() {
+  const presentation = usePresentation();
   const data = useLoaderData<typeof loader>();
   useEffect(() => setChangelogSeen(data.latestVersion), [data.latestVersion]);
   const [kind, setKind] = useState<Release["kind"] | null>(null);
@@ -115,7 +119,7 @@ export default function ChangelogPage() {
       <AsideCard title="有想法或遇到问题">
         <p className="text-[13px] leading-[1.75] text-ink-3">想要的功能、用着不顺的地方，都可以在反馈页告诉我们。</p>
         <Link to="/feedback" prefetch="intent" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">
-          去反馈 <IconChevronRight size={14} />
+          {`去${navigationLabel(presentation, "feedback", "反馈")}`} <IconChevronRight size={14} />
         </Link>
       </AsideCard>
     </>
@@ -124,7 +128,7 @@ export default function ChangelogPage() {
   return (
     <ReadingLayout aside={aside}>
       <header className="pb-6">
-        <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">更新日志</h1>
+        <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{navigationLabel(presentation, "changelog", "更新日志")}</h1>
         <p className="mt-1.5 text-[13px] text-ink-3">新功能、调整、下线，都写在这里。</p>
       </header>
       <div className="space-y-4">

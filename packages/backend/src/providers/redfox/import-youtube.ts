@@ -1,3 +1,4 @@
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
@@ -74,7 +75,7 @@ export async function importYoutubeResult(resultId:number,raw:unknown,actor:stri
       const body=record.description,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=record.author;
-      const material=await upsertMaterial({sourceId,url:url!,identityKey:`youtube:videoId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,date:record.date??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({sourceId,url:url!,identityKey:`youtube:videoId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:(confirmedVideoMedia(media(record))),via:"import",raw:{provider:"redfox",resultId,date:record.date??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({youtubeImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

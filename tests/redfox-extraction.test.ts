@@ -7,14 +7,20 @@ import { sql, closeDb } from '@aihot/backend/db';
 import { upsertMaterial } from '@aihot/backend/content/materials';
 import { queueProcessing } from '@aihot/backend/jobs/content';
 import { stopBoss, QUEUES } from '@aihot/backend/jobs/queue';
+import { collectSource } from "@aihot/backend/sources/collect";
 import { extractArticleBody } from '@aihot/backend/content/extract';
 
 const T = tag();
 let hits = 0;
 const server = http.createServer((_req, res) => {
   hits++;
+  if (_req.url === '/feed') {
+    res.writeHead(200, { 'content-type': 'application/rss+xml' });
+    res.end(`<rss><channel><item><title>Synthetic video article</title><link>${base}/collected-video</link><enclosure type="image/jpeg" url="https://example.com/list-cover.jpg"/></item></channel></rss>`);
+    return;
+  }
   res.writeHead(200, { 'content-type': 'text/html' });
-  res.end(`<html><head><title>Synthetic article</title></head><body><article><h1>Synthetic article</h1><p>${'A synthetic article describes a local experiment and its observable results in enough detail to extract the complete text. '.repeat(12)}</p></article></body></html>`);
+  res.end(`<html><head><title>Synthetic article</title></head><body><article><h1>Synthetic article</h1><p>${'A synthetic article describes a local experiment and its observable results in enough detail to extract the complete text. '.repeat(12)}</p><video src="https://example.com/video.mp4"></video></article></body></html>`);
 });
 await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -85,4 +91,17 @@ test('a blocked old extraction cannot mark a newer revision unconfirmed', async 
   assert.equal(a!.revision, 2);
   assert.equal(a!.body_text, 'New revision awaiting its own decision');
   assert.equal(hits, before);
+});
+
+test('collection reuses extracted video fact alongside an existing feed image without another fetch', async () => {
+  const sourceId = `test-extract-collect-${T}`;
+  await sql`INSERT INTO sources(id,name,kind,config,tier,participation_mode)
+    VALUES(${sourceId},'Extract reuse','rss',${sql.json({feedUrl: `${base}/feed`, detail: {publishedAtSelector: 'time', maxFetches: 1}})},'T1','editorial')`;
+  const before = hits;
+  const result = await collectSource(sourceId);
+  assert.equal(result.created, 1, result.error ?? "collection created one material");
+  assert.equal(hits - before, 2, 'one feed and its already-needed detail, no media fetch');
+  const [row] = await sql`SELECT media,body_status FROM articles WHERE source_id=${sourceId}`;
+  assert.equal(row!.body_status, 'ok');
+  assert.deepEqual(row!.media, [{kind:'image',url:'https://example.com/list-cover.jpg'}, {kind:'video',confirmed:true}]);
 });

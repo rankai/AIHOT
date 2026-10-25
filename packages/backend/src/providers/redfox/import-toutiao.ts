@@ -1,3 +1,6 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
+import {redfoxToutiaoHasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {agentKeyToutiaoEvidence} from "../agentkey/toutiao-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
@@ -115,13 +118,14 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
     for (const [idKind, idValue] of ids) await bindSourceAccount(tx, { platform: "toutiao", idKind, idValue, sourceId, evidence: { kind: "result", reference: String(resultId) } });
     let articleId: string | null = null;
     if (!account) {
+      const bodyMedia=op==="PAB6Z75Y"&&typeof record.content==="string"?videoMediaFromHtml(record.content,url!):[];
       const bodyHtml = op === "PAB6Z75Y" && typeof record.content === "string" ? sanitizeBody(record.content, url!) : null;
       const bodyText = bodyHtml ? stripTags(bodyHtml) : null;
       const publishedAt = publicationTime(op, record), discoveredAt = new Date(origin?.discoveredAt ?? sourceDiscoveredAt);
       const backfill = decideTimeline(publishedAt, discoveredAt).publishedAt ? null : `${snapshot.provider}-import-unknown-time`;
       const material = await upsertMaterial({ sourceId, url: url!, identityKey: `toutiao:workId:${nativeId}`, title: String(parsed.data.title),
         author: typeof record.nickname === "string" ? record.nickname : typeof record.authorName === "string" ? record.authorName : null,
-        bodyHtml: bodyText ? bodyHtml : null, bodyText, bodyStatus: bodyText ? "ok" : "pending", publishedAt, discoveredAt, backfill, media: media(record), via: "import",
+        bodyHtml: bodyText ? bodyHtml : null, bodyText, bodyStatus: bodyText ? "ok" : "pending", publishedAt, discoveredAt, backfill, media: [...bodyMedia,...(!agentkey&&redfoxToutiaoHasVideo(op,record)?confirmedVideoMedia(media(record)):media(record))], via: "import",
         raw: { provider: snapshot.provider, resultId, publishTime: record.publishTime ?? null, updateTime: record.updateTime ?? null, originResultId: origin?.resultId ?? null, request: snapshot.input.parameters, supplement: input.supplement ?? null } }, tx);
       articleId = material.articleId;
       if (material.created || material.revised) await queueProcessing(articleId, { db: tx });

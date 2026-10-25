@@ -127,3 +127,8 @@ test('concurrent account imports share one received owner; receipt proof and sum
  const [summary]=await sql`SELECT id FROM operation_results WHERE run_id=${first.run_id} AND kind='query_summary'`;
  await assert.rejects(imported(Number(summary!.id)),/query summaries/);
 });
+
+test('verified Toutiao article body source is confirmed independently of top-level work type',async()=>{
+ const id=digit(),uid=digit(),r=await query('PAB6Z75Y',{workId:id,uid,workUrl:url(id),title:'Body video',workType:false,content:'<p>Body</p><video><source type="video/mp4" src="/v.mp4"></video>'});
+ const a=await imported(r.id,{reason:"Verified raw body",supplement:{uid,evidence:"Confirmed author"}}),row=await material(a!.articleId!);assert.equal(row.media.some((m:any)=>m.confirmed===true),true);assert.equal(row.body_html.includes('<source'),false);
+});

@@ -85,7 +85,7 @@ test('origin detail imports locally via HTTP with original discovery, descriptio
   assert.deepEqual((await app.inject({method:'POST',url,headers,payload})).json(),imported);
   assert.equal((await app.inject({method:'POST',url,headers,payload:{...payload,supplement:{channelId:channel,evidence:'different intent'}}})).statusCode,409);
   const [article]=await sql`SELECT * FROM articles WHERE id=${imported.articleId}`;
-  assert.equal(article!.discovered_at.toISOString(),(run.input.origin as {discoveredAt:string}).discoveredAt);assert.equal(article!.backfill,true);assert.equal(article!.backfill_reason,'redfox-import-unknown-time');assert.equal(article!.body_text,'Description, not subtitles');assert.equal(article!.media.length,1);
+  assert.equal(article!.discovered_at.toISOString(),(run.input.origin as {discoveredAt:string}).discoveredAt);assert.equal(article!.backfill,true);assert.equal(article!.backfill_reason,'redfox-import-unknown-time');assert.equal(article!.body_text,'Description, not subtitles');assert.equal(article!.media.length,2);assert.equal(article!.media.find((m:{kind:string;confirmed?:boolean})=>m.kind==="video")?.confirmed,true);
   const [owner]=await sql`SELECT * FROM sources WHERE id=${imported.sourceId}`;assert.equal(owner!.participation_mode,'isolated');assert.equal(owner!.site_fulltext,false);assert.equal(hits,before);
  }finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='fake-youtube';config.devAdmin=null;await app.close();}
 });

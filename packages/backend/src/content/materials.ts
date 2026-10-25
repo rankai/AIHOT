@@ -6,14 +6,8 @@ import { identityKeyForUrl } from "../lib/url.ts";
 import { resolveMaterialIdentity, saveMaterialAliases, type ConfirmedWorkIdentity } from "./material-identities.ts";
 import { collapseWhitespace, stripTags } from "../lib/text.ts";
 
-export interface MediaItem {
-  kind: "image" | "video";
-  url: string;
-  width?: number | null;
-  height?: number | null;
-  alt?: string | null;
-  poster?: string | null;
-}
+import { mergeMedia, videoMediaFromHtml, type MediaItem } from "./media.ts";
+export type { MediaItem } from "./media.ts";
 
 export interface XPostData {
   tweetId: string;
@@ -142,6 +136,7 @@ export async function upsertMaterial(m: MaterialInput, db: Db = sql): Promise<Ma
 async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   const identityKey = identityKeyFor(m);
   const discoveredAt = m.discoveredAt ?? new Date();
+  const sourceUpdatedAt = validSourceUpdatedAt(m.sourceUpdatedAt, discoveredAt);
   const title = collapseWhitespace(m.title).slice(0, 1000) || m.url;
 
   const t = decideTimeline(m.publishedAt, discoveredAt, m.backfill);
@@ -150,15 +145,16 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   const incomingHtml = m.bodyHtml?.trim() ? m.bodyHtml : null;
   const incomingText = m.bodyText?.trim() ? m.bodyText : incomingHtml ? stripTags(incomingHtml) || null : null;
   const hasBody = incomingText !== null || incomingHtml !== null;
+  const incomingMedia = mergeMedia(mergeMedia([], m.media), incomingHtml ? videoMediaFromHtml(incomingHtml, m.url) : []);
   const hash = contentHash({ title, bodyText: incomingText, excerpt: m.excerpt });
   const [inserted] = await db<{ id: string }[]>`
     INSERT INTO articles (id, source_id, identity_key, url, title, author, language, published_at, published_at_claim,
       discovered_at, source_updated_at, timeline_at, backfill, backfill_reason, revision, content_hash, excerpt,
       body_text, body_html, body_status, media, x_post, raw)
     VALUES (${newId}, ${m.sourceId}, ${identityKey}, ${m.url}, ${title}, ${m.author ?? null}, ${m.language ?? null},
-      ${t.publishedAt}, ${m.publishedAt ?? null}, ${discoveredAt}, ${m.sourceUpdatedAt ?? null}, ${t.timelineAt},
+      ${t.publishedAt}, ${m.publishedAt ?? null}, ${discoveredAt}, ${sourceUpdatedAt}, ${t.timelineAt},
       ${t.backfill}, ${t.backfillReason}, 1, ${hash}, ${m.excerpt ?? null}, ${incomingText}, ${incomingHtml},
-      ${m.bodyStatus ?? (hasBody ? "ok" : "pending")}, ${db.json((m.media ?? []) as never)},
+      ${m.bodyStatus ?? (hasBody ? "ok" : "pending")}, ${db.json(incomingMedia as never)},
       ${m.xPost ? db.json(m.xPost as never) : null}, ${m.raw === undefined ? null : db.json(m.raw as never)})
     ON CONFLICT (identity_key) DO NOTHING RETURNING id`;
   if (inserted) {
@@ -169,8 +165,8 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
     return { articleId: newId, created: true, revised: false, backfill: t.backfill };
   }
 
-  const [existing] = await db<{ id: string; source_id: string; revision: number; content_hash: string | null; backfill: boolean; title: string; body_text: string | null; body_html: string | null; body_status: string; excerpt: string | null }[]>`
-    SELECT id, source_id, revision, content_hash, backfill, title, body_text, body_html, body_status, excerpt FROM articles WHERE identity_key = ${identityKey} FOR UPDATE`;
+  const [existing] = await db<{ id: string; source_id: string; revision: number; content_hash: string | null; backfill: boolean; title: string; body_text: string | null; body_html: string | null; body_status: string; excerpt: string | null; media: MediaItem[]; source_updated_at: Date | null }[]>`
+    SELECT id, source_id, revision, content_hash, backfill, title, body_text, body_html, body_status, excerpt, media, source_updated_at FROM articles WHERE identity_key = ${identityKey} FOR UPDATE`;
   await db`INSERT INTO article_discoveries (article_id, source_id, via, discovered_at)
            VALUES (${existing!.id}, ${m.sourceId}, ${m.via}, ${discoveredAt}) ON CONFLICT DO NOTHING`;
   const unchanged: MaterialResult = { articleId: existing!.id, created: false, revised: false, backfill: existing!.backfill };
@@ -178,9 +174,6 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   // discovery only: its title and summary are its own rendering, and taking them made the article flip
   // between the two sources' versions on every fetch. Only the article's own source revises it.
   if (existing!.source_id !== m.sourceId) return unchanged;
-  // Verified same-source metadata can fill a missing field without inventing a content revision.
-  if (m.media?.length) await db`UPDATE articles SET media = ${db.json(m.media as never)}
-    WHERE id = ${existing!.id} AND (media IS NULL OR media = '[]'::jsonb)`;
   // Decide the pair under the row lock, before computing the revision hash.
   const replaceBody = hasBody && !(m.bodyUpdate === "fill-missing"
     && (existing!.body_text?.trim() || existing!.body_html?.trim()));
@@ -189,6 +182,15 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   const bodyStatus = replaceBody ? m.bodyStatus ?? "ok" : existing!.body_status;
   const excerpt = m.excerpt ?? existing!.excerpt;
   const next = contentHash({ title, bodyText, excerpt });
+  // Reject an already superseded text rendering before it can restore corrected media.
+  const [seen] = existing!.content_hash !== null && existing!.content_hash !== next ? await db`SELECT 1 FROM article_revisions WHERE article_id = ${existing!.id} AND content_hash = ${next} LIMIT 1` : [];
+  if (seen) return unchanged;
+  const mediaCurrent = !existing!.source_updated_at || (sourceUpdatedAt && sourceUpdatedAt >= existing!.source_updated_at);
+  const media = mediaCurrent ? mergeMedia(existing!.media, incomingMedia) : existing!.media;
+  if (JSON.stringify(media) !== JSON.stringify(existing!.media)) await db`UPDATE articles SET media = ${db.json(media as never)} WHERE id = ${existing!.id}`;
+  if (mediaCurrent && sourceUpdatedAt && incomingMedia.some((m) => m.kind === "video" && m.confirmed)) {
+    await db`UPDATE articles SET source_updated_at = greatest(source_updated_at, ${sourceUpdatedAt}) WHERE id = ${existing!.id}`;
+  }
   if (existing!.content_hash === next) {
     // HTML is not a text revision, but an accepted new pair must still replace stale markup.
     if (replaceBody) await db`UPDATE articles SET body_text = ${bodyText}, body_html = ${bodyHtml},
@@ -206,22 +208,27 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
              VALUES (${existing!.id}, ${existing!.revision}, ${next}, ${title}, ${bodyText}) ON CONFLICT DO NOTHING`;
     return unchanged;
   }
-  // A version this article already had is no new material (listings that alternate between two
-  // renderings, pages that rotate promotions): the current revision was analysed and published once
-  // already. Any earlier version counts, however long ago: a rotation with many variants would
-  // otherwise start over, and a real edit reverted later is rare and loses nothing.
-  const [seen] = await db`SELECT 1 FROM article_revisions WHERE article_id = ${existing!.id} AND content_hash = ${next} LIMIT 1`;
-  if (seen) return unchanged;
-  // Nor is the stored version with other characters lost in transit, or with them restored.
+  // Characters lost in transit or restored do not constitute a new version.
   if (sameBarringLoss(existing!.title, title) && sameBarringLoss(existing!.body_text, bodyText) && sameBarringLoss(existing!.excerpt, excerpt)) return unchanged;
+
+  // Real text revisions retain the old display replacement semantics, while confirmed facts survive
+  // incomplete media input. Metadata-only discovery above still only fills missing display images.
+  const revisedInput = mediaCurrent ? incomingMedia : incomingMedia.map((m) => {
+    if (m.kind !== "video") return m;
+    const { confirmed, ...display } = m;
+    return display;
+  });
+  const revisedMedia = m.media
+    ? mergeMedia(mergeMedia([], revisedInput), existing!.media.filter((m) => m.kind === "video" && m.confirmed === true))
+    : media;
 
   // Omitted optional X facts are unknown; explicit null/[] clears them. Merge only at the top level.
   const [row] = await db<{ revision: number }[]>`
     UPDATE articles SET
       title = ${title}, author = coalesce(${m.author ?? null}, author), language = coalesce(${m.language ?? null}, language),
-      source_updated_at = ${m.sourceUpdatedAt ?? null}, excerpt = coalesce(${m.excerpt ?? null}, excerpt),
+      source_updated_at = greatest(source_updated_at, ${sourceUpdatedAt}), excerpt = coalesce(${m.excerpt ?? null}, excerpt),
       body_text = ${bodyText}, body_html = ${bodyHtml}, body_status = ${bodyStatus},
-      media = CASE WHEN ${m.media ? db.json(m.media as never) : null}::jsonb IS NULL THEN media ELSE ${m.media ? db.json(m.media as never) : null}::jsonb END,
+      media = ${db.json(revisedMedia as never)},
       x_post = CASE WHEN ${m.xPost ? db.json(m.xPost as never) : null}::jsonb IS NULL THEN x_post ELSE coalesce(x_post, '{}'::jsonb) || ${m.xPost ? db.json(m.xPost as never) : null}::jsonb END,
       revision = revision + 1, content_hash = ${next}, processing_state = 'new', updated_at = now()
     WHERE id = ${existing!.id}
@@ -229,4 +236,60 @@ async function upsertIn(db: Db, m: MaterialInput): Promise<MaterialResult> {
   await db`INSERT INTO article_revisions (article_id, revision, content_hash, title, body_text)
            VALUES (${existing!.id}, ${row!.revision}, ${next}, ${title}, ${bodyText})`;
   return { articleId: existing!.id, created: false, revised: true, backfill: existing!.backfill };
+}
+
+function validSourceUpdatedAt(value: Date | null | undefined, now = new Date()): Date | null {
+  return value && Number.isFinite(value.getTime()) && value.getTime() <= now.getTime() + FUTURE_TOLERANCE_MS ? value : null;
+}
+
+/** Historical evidence is applied only to the exact same-source material snapshot inspected. */
+export async function mergeMaterialMedia(input: {
+  articleId: string; sourceId: string; identityKey: string; media: MediaItem[];
+  expectedRevision: number; expectedMedia: MediaItem[];
+  evidenceSourceUpdatedAt?: Date;
+  /** Complete-media negative evidence, proven newer using the source timestamp. */
+  completeNoVideoAt?: Date;
+}, db: Db = sql): Promise<boolean> {
+  const run = async (tx: Db) => {
+    const evidenceTime = validSourceUpdatedAt(input.evidenceSourceUpdatedAt);
+    if (input.evidenceSourceUpdatedAt && !evidenceTime) return false;
+    if (input.completeNoVideoAt && !validSourceUpdatedAt(input.completeNoVideoAt)) return false;
+    const [row] = await tx<{ source_id: string; identity_key: string; revision: number; media: MediaItem[]; source_updated_at: Date | null }[]>`
+      SELECT source_id, identity_key, revision, media, source_updated_at FROM articles WHERE id = ${input.articleId} FOR UPDATE`;
+    if (!row || row.source_id !== input.sourceId || row.identity_key !== input.identityKey
+      || row.revision !== input.expectedRevision || JSON.stringify(row.media) !== JSON.stringify(input.expectedMedia)) return false;
+    if (!input.completeNoVideoAt && row.source_updated_at
+      && (!evidenceTime || evidenceTime < row.source_updated_at)) return false;
+    let media = mergeMedia(row.media, input.media);
+    if (input.completeNoVideoAt) {
+      if (!row.source_updated_at || !Number.isFinite(input.completeNoVideoAt.getTime())
+        || input.completeNoVideoAt <= row.source_updated_at || input.media.some((m) => m.kind === "video" && m.confirmed)) return false;
+      media = media.map((m) => { if (m.kind !== "video") return m; const { confirmed, ...rest } = m; return rest; });
+      await tx`UPDATE articles SET media = ${tx.json(media as never)}, source_updated_at = ${input.completeNoVideoAt} WHERE id = ${input.articleId}`;
+    } else if (JSON.stringify(media) !== JSON.stringify(row.media) || input.evidenceSourceUpdatedAt) {
+      await tx`UPDATE articles SET media = ${tx.json(media as never)},
+        source_updated_at = greatest(source_updated_at, ${input.evidenceSourceUpdatedAt ?? null}) WHERE id = ${input.articleId}`;
+    }
+    return true;
+  };
+  return "begin" in db ? (db as typeof sql).begin(run) : run(db);
+}
+
+/** Undo only the media snapshot written by a local repair; subsequent work always wins. */
+export async function restoreMaterialMedia(input: {
+  articleId: string; sourceId: string; identityKey: string;
+  expectedRevision: number; expectedMedia: MediaItem[]; media: MediaItem[];
+  expectedSourceUpdatedAt: Date | null; sourceUpdatedAt: Date | null;
+}, db: Db = sql): Promise<boolean> {
+  const run = async (tx: Db) => {
+    const [row] = await tx<{ source_id: string; identity_key: string; revision: number; media: MediaItem[]; source_updated_at: Date | null }[]>`
+      SELECT source_id, identity_key, revision, media, source_updated_at FROM articles WHERE id = ${input.articleId} FOR UPDATE`;
+    if (!row || row.source_id !== input.sourceId || row.identity_key !== input.identityKey
+      || row.revision !== input.expectedRevision || JSON.stringify(row.media) !== JSON.stringify(input.expectedMedia)
+      || (row.source_updated_at?.getTime() ?? null) !== (input.expectedSourceUpdatedAt?.getTime() ?? null)) return false;
+    await tx`UPDATE articles SET media = ${tx.json(input.media as never)}, source_updated_at = ${input.sourceUpdatedAt}
+      WHERE id = ${input.articleId}`;
+    return true;
+  };
+  return "begin" in db ? (db as typeof sql).begin(run) : run(db);
 }

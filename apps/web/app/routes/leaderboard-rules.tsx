@@ -1,6 +1,9 @@
 // Public method statement for the leaderboard (method v15, docs/leaderboard.md).
 // The copy states how rankings are actually computed; it changes only together with the method.
 import { SITE, withSubject } from "@aihot/industry/site";
+import type { Route } from "./+types/leaderboard-rules";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { Link, useLoaderData } from "react-router";
 import type { LbRunInfo } from "@aihot/contracts/leaderboard";
 import { loadOr404 } from "../lib/api.server";
@@ -20,14 +23,14 @@ export async function loader({ request }: { request: Request }) {
   return loadOr404<RulesData>("/api/site/leaderboard/rules", { signal: request.signal });
 }
 
-export function meta() {
+export function meta({ matches }: Route.MetaArgs) {
   return pageMeta({
     title: "共识指数计算方法",
     description: `查看 ${SITE.name} 模型榜如何核验公开成绩、比较共同参评结果、处理缺失证据，并确定排名和 0—100 共识指数。`,
     path: "/leaderboard/rules",
     image: "/og/pages/leaderboard.png",
     jsonLd: breadcrumbLd([
-      { name: "模型榜", path: "/leaderboard" },
+      { name: navigationLabel(presentationFromMatches(matches), "leaderboard", "模型榜"), path: "/leaderboard" },
       { name: "排名怎么算", path: "/leaderboard/rules" },
     ]),
   });
@@ -122,6 +125,7 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 }
 
 export default function LeaderboardRulesPage() {
+  const presentation = usePresentation();
   const { run, budgets, anchors } = useLoaderData<typeof loader>();
   const aside = (
     <>
@@ -149,7 +153,7 @@ export default function LeaderboardRulesPage() {
       <AsideCard title="继续看">
         <nav aria-label="继续看" className="-mx-2 -mb-1">
           {[
-            ["/leaderboard", "模型榜"],
+            ["/leaderboard", navigationLabel(presentation, "leaderboard", "模型榜")],
             ["/leaderboard/sources", "每一份评测证据"],
           ].map(([to, label]) => (
             <Link key={to} to={to!} prefetch="intent" className="flex items-center justify-between rounded-control px-2 py-2 text-[13.5px] text-ink-2 transition-colors hover:bg-bg-sunk hover:text-ink">
@@ -164,7 +168,7 @@ export default function LeaderboardRulesPage() {
   return (
     <ReadingLayout aside={aside}>
       <Link to="/leaderboard" className="inline-flex items-center gap-1.5 py-2 text-[13px] text-ink-3 transition-colors hover:text-accent">
-        <IconArrowLeft size={14} /> 返回模型榜
+        <IconArrowLeft size={14} /> {`返回${navigationLabel(presentation, "leaderboard", "模型榜")}`}
       </Link>
 
       <header className="pt-3">

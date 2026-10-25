@@ -1,3 +1,5 @@
+import { DEFAULT_SITE_PRESENTATION as DEFAULT_PRESENTATION, navigationLabel } from "./lib/presentation";
+import type { SitePresentation } from "@aihot/contracts/presentation";
 import { titled } from "./lib/seo";
 import { SITE } from "@aihot/industry/site";
 import {
@@ -26,17 +28,19 @@ export const links: Route.LinksFunction = () => [
 
 interface SiteMeta {
   changelogVersion: string | null;
+  presentation: SitePresentation;
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
   try {
     return await apiGet<SiteMeta>("/api/site/meta", { signal: request.signal });
   } catch {
-    return { changelogVersion: null } satisfies SiteMeta;
+    return { changelogVersion: null, presentation: DEFAULT_PRESENTATION } satisfies SiteMeta;
   }
 }
 
-export const shouldRevalidate: ShouldRevalidateFunction = () => false;
+// Reload shared navigation metadata on normal page navigation and explicit revalidation.
+export const shouldRevalidate: ShouldRevalidateFunction = ({ currentUrl, nextUrl, defaultShouldRevalidate }) => currentUrl.pathname !== nextUrl.pathname || defaultShouldRevalidate;
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -67,7 +71,7 @@ export function meta({ error }: Route.MetaArgs) {
 }
 
 /** Sidebar, main column and phone tab bar around a page (or an error). */
-function SiteShell({ changelogVersion, children }: { changelogVersion: string | null; children: ReactNode }) {
+function SiteShell({ changelogVersion, presentation, children }: { changelogVersion: string | null; presentation: SitePresentation; children: ReactNode }) {
   const navigation = useNavigation();
   return (
     <div className="flex min-h-dvh">
@@ -75,13 +79,13 @@ function SiteShell({ changelogVersion, children }: { changelogVersion: string | 
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-control focus:bg-surface focus:px-3 focus:py-2">
         跳到正文
       </a>
-      <Sidebar changelogVersion={changelogVersion} />
+      <Sidebar changelogVersion={changelogVersion} presentation={presentation} />
       {/* Mobile shell (≤ 960px): one centred column, the tab bar below. Desktop: the page fills the main area
           up to the list width (--page-max-wide), centred beyond it. */}
       <main id="main" className="min-w-0 flex-1 pb-[calc(72px+env(safe-area-inset-bottom))] lg:px-7 lg:pb-[72px] lg:pt-6">
         <div className="mx-auto w-full max-w-[640px] px-4 lg:max-w-[var(--page-max-wide)] lg:px-0">{children}</div>
       </main>
-      <MobileTabBar changelogVersion={changelogVersion} />
+      <MobileTabBar changelogVersion={changelogVersion} presentation={presentation} />
       <BackToTop />
     </div>
   );
@@ -94,7 +98,7 @@ export default function App() {
   // The admin has its own chrome.
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return <Outlet />;
   return (
-    <SiteShell changelogVersion={meta.changelogVersion}>
+    <SiteShell changelogVersion={meta.changelogVersion} presentation={meta.presentation ?? DEFAULT_PRESENTATION}>
       <Outlet />
     </SiteShell>
   );
@@ -117,10 +121,10 @@ export function ErrorBoundary() {
         </p>
         <div className="mt-6 flex justify-center gap-2.5">
           <Link to="/" className={buttonClass("primary")}>
-            回到精选
+            {`回到${navigationLabel(site?.presentation, "selected", "精选")}`}
           </Link>
           <Link to="/all" className={buttonClass("secondary")}>
-            浏览全部动态
+            {`浏览${navigationLabel(site?.presentation, "all", "全部动态")}`}
           </Link>
         </div>
       </div>
@@ -128,5 +132,5 @@ export function ErrorBoundary() {
   );
   // Admin errors stay inside the admin's own chrome.
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return body;
-  return <SiteShell changelogVersion={site?.changelogVersion ?? null}>{body}</SiteShell>;
+  return <SiteShell changelogVersion={site?.changelogVersion ?? null} presentation={site?.presentation ?? DEFAULT_PRESENTATION}>{body}</SiteShell>;
 }

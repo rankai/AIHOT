@@ -13,8 +13,9 @@ import {executeOperationStep} from "@aihot/backend/providers/operations/execute"
 import {recoverOperations} from "@aihot/backend/providers/operations/recovery";
 const feeds=new Map<string,{handle:string;base:bigint}>();let seq=0,hits=0,failDetail:string|null=null,wrongAuthor=false,nullableUser=false,singlePage=false,missingTimelineText=false;
 const noiseIds=new Set<string>();
+let videoShape:unknown;
 const base=BigInt(Date.now())*1000000n;
-function tweet(id:string,userId:string,handle:string|null=null){return {tweetId:id,createdAt:new Date().toISOString(),text:noiseIds.has(id)?"Synthetic noise marker":"Synthetic collection material",author:{userId,username:handle},replyToTweetId:null,replyToUserId:null,replyToUsername:null};}
+function tweet(id:string,userId:string,handle:string|null=null){return {...(videoShape?{medias:videoShape}:{}),tweetId:id,createdAt:new Date().toISOString(),text:noiseIds.has(id)?"Synthetic noise marker":"Synthetic collection material",author:{userId,username:handle},replyToTweetId:null,replyToUserId:null,replyToUsername:null};}
 const server=http.createServer((req,res)=>{const chunks:Buffer[]=[];req.on("data",c=>chunks.push(c));req.on("end",()=>{
   hits++;const body=JSON.parse(Buffer.concat(chunks).toString());
   if(req.url?.endsWith("userTimeline")){
@@ -204,4 +205,15 @@ test("nullable timeline handles reuse bound account evidence during outbound-dis
     const results=await sql`SELECT provenance FROM operation_results WHERE run_id=${run.id} AND kind='article'`;
     assert.ok(results.every(r=>r.provenance.accountResultId===accountResultId && r.provenance.accountUserId===s.uid));
   } finally {nullableUser=false;singlePage=false;process.env.COLLECT_ENABLED="true";process.env.REDFOX_CALLS_ENABLED="true";process.env.REDFOX_API_KEY="synthetic";}
+});
+
+
+test("Redfox timeline and required detail both persist own video facts without inspecting unknown video elements",async()=>{
+ for(const detail of [false,true]){
+  const s=await source();if(!detail)await sql`UPDATE collection_subscriptions SET config=${sql.json({query:`from:${s.handle}`})} WHERE control_source_id=${s.id}`;
+  await switchTo(s.id,"redfox");singlePage=true;videoShape=detail?[{type:"video"}]:{videos:[{}]};
+  try{const run=await createCollection(s.id,{actor:"test",key:tag(),reason:"schedule"});await drain(run.id);assert.equal((await row(run.id)).status,"completed");
+   const articles=await sql`SELECT media FROM articles WHERE source_id=${s.id}`;assert.equal(articles.length,2);assert.ok(articles.every(a=>a.media.some((m:{kind:string;confirmed?:boolean})=>m.kind==="video"&&m.confirmed===true)));
+  }finally{singlePage=false;videoShape=undefined;}
+ }
 });

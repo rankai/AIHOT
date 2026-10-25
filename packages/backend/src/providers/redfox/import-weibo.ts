@@ -9,6 +9,7 @@ import { sha256,stableJson } from "../../lib/ids.ts";
 import { audit } from "../../admin/auth.ts";
 import { bindSourceAccount } from "../../sources/account-bindings.ts";
 import { decideTimeline,upsertMaterial } from "../../content/materials.ts";
+import {mediaUrl} from "../../content/media.ts";
 import { queueProcessing } from "../../jobs/content.ts";
 import { StaleOperationError } from "../operations/store.ts";
 import { UnsupportedReplacement } from "../../sources/x-replacement.ts";
@@ -89,7 +90,8 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
       const publishedAt=weiboPublishedAt(work.publishTime);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:agentkey?"agentkey-import-unknown-time":"redfox-import-unknown-time";
       const bodyText=agentkey&&received.isLongText!==false?null:work.text;
-      const material=await upsertMaterial({sourceId,url,identityKey:`weibo:opusId:${work.opusId}`,title:(work.text??"微博作品").slice(0,200),author:work.nickname,bodyUpdate:origin||verified?.detail?"fill-missing":undefined,bodyText,bodyStatus:bodyText?"ok":"pending",publishedAt,discoveredAt,backfill,media:weiboMedia(work),via:"import",raw:{provider:agentkey?"agentkey":"redfox",resultId,publishTime:work.publishTime??null,...(agentkey?{upstream:"TikHub",operationId:executionInput.operationId,tool:executionInput.tool,urlSource:received.urlSource,isLongText:received.isLongText??null,textScope:received.textScope,receivedText:work.text??null}: {})},
+      const hasVideo=!agentkey&&(operation==="TXQPVGJG"&&work.type==="video"||operation==="API_1789098514899"&&!!mediaUrl(work.videoUrl));
+      const material=await upsertMaterial({sourceId,url,identityKey:`weibo:opusId:${work.opusId}`,title:(work.text??"微博作品").slice(0,200),author:work.nickname,bodyUpdate:origin||verified?.detail?"fill-missing":undefined,bodyText,bodyStatus:bodyText?"ok":"pending",publishedAt,discoveredAt,backfill,media:weiboMedia(work,hasVideo),via:"import",raw:{provider:agentkey?"agentkey":"redfox",resultId,publishTime:work.publishTime??null,...(agentkey?{upstream:"TikHub",operationId:executionInput.operationId,tool:executionInput.tool,urlSource:received.urlSource,isLongText:received.isLongText??null,textScope:received.textScope,receivedText:work.text??null}: {})},
         confirmedIdentity:confirmedShortId?{platform:"weibo",opusId:work.opusId,mblogid:confirmedShortId,uid,evidence:{kind:"result",reference:String(resultId)}}:undefined},tx);
       articleId=material.articleId;
       if(material.created || material.revised)await queueProcessing(articleId,{db:tx});

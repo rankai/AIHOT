@@ -16,7 +16,7 @@ import {updateSource} from '@aihot/backend/admin/sources';
 import {resumeRun,receiptOptions,claimRun} from '@aihot/backend/providers/operations/store';
 import {queryWechat} from '@aihot/backend/providers/redfox/wechat';
 let accountWxOnly=false,accountBizOnly=false;
-let hits=0,disconnect=false,bodyContent='<p>Synthetic complete body</p>',badAuthor=false;
+let hits=0,disconnect=false,bodyContent='<p>Synthetic complete body</p><video><source type="video/mp4" src="/v.mp4"></video>',badAuthor=false;
 let account={account:'synthetic-account',wxId:'gh_synthetic123',bizInfo:'SyntheticBiz'};
 let listed:{workUuid:string;title:string;workUrl:string;bizInfo?:string;publishTime?:string}[]=[];
 const server=http.createServer((req,res)=>{hits++;let body='';req.on('data',c=>body+=c);req.on('end',()=>{
@@ -38,7 +38,11 @@ async function switchTo(id:string,target:'redfox'|'dajiala',library:'wide'|'prem
 function post(premium=false){const id=tag();return {workUuid:id,title:'Synthetic MP article',workUrl:premium?`https://mp.weixin.qq.com/s/${id}`:`https://mp.weixin.qq.com/s?__biz=${account.bizInfo}&mid=${Date.now()}&idx=1&sn=${id}`,...(premium?{}:{bizInfo:account.bizInfo})};}
 test('both libraries run list/detail/material; switches preserve source, subscription, permissions and interval',async()=>{
  const s=await source(),initial=hits;await preflightMpReplacement(s.id,'redfox');assert.equal(hits,initial);
- for(const library of ['wide','premium'] as const){await switchTo(s.id,'redfox',library);listed=[post(library==='premium')];const run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);assert.equal((await row(run.id)).step_key,'redfox.wechat.detail');await step(run.id);assert.equal((await row(run.id)).status,'completed');const [r]=await sql`SELECT article_id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`;const [a]=await sql`SELECT * FROM articles WHERE id=${r!.article_id}`;assert.equal(a!.source_id,s.id);assert.match(a!.body_text,/Synthetic complete/);assert.equal(a!.backfill,true);assert.equal(a!.raw.redfoxMp.authorEvidence,'account-list-context');}
+ for(const library of ['wide','premium'] as const){await switchTo(s.id,'redfox',library);listed=[post(library==='premium')];const run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);assert.equal((await row(run.id)).step_key,'redfox.wechat.detail');await step(run.id);assert.equal((await row(run.id)).status,'completed');const [r]=await sql`SELECT article_id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`;const [a]=await sql`SELECT * FROM articles WHERE id=${r!.article_id}`;assert.equal(a!.source_id,s.id);assert.match(a!.body_text,/Synthetic complete/);assert.equal(a!.media.some((m:any)=>m.confirmed===true),true);assert.equal(a!.body_html.includes('<source'),false);assert.equal(a!.backfill,true);assert.equal(a!.raw.redfoxMp.authorEvidence,'account-list-context');if(library==='wide'){
+  const {scanVideoHistory,applyVideoHistoryEntry}=await import('@aihot/backend/content/video-history');
+  await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${r!.article_id}`;
+  const manifest=await sql.begin('read only',tx=>scanVideoHistory(tx,5000)),entry=manifest.entries.find(e=>e.articleId===r!.article_id);assert.ok(entry,'retained MP full body proof');await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));
+ }}
  await switchTo(s.id,'dajiala');const [sub]=await sql`SELECT * FROM collection_subscriptions WHERE id=${s.sub}`;const [src]=await sql`SELECT * FROM sources WHERE id=${s.id}`;assert.equal(sub!.provider,'dajiala');assert.equal(sub!.interval_minutes,73);assert.equal(src!.site_fulltext,true);assert.equal(src!.participation_mode,'editorial');assert.equal(sub!.progress.pageReceiptId,undefined);
 });
 test('missing evidence blocks only Redfox; PATCH preserves library and permission edits are not X Article restrictions',async()=>{

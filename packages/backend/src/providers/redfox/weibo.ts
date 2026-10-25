@@ -1,4 +1,5 @@
 import type { MediaItem } from "../../content/materials.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import { z } from "zod";
 import { RedfoxResponseError, redfoxRequest } from "./client.ts";
 import type { PaidRequestOptions } from "../receipts.ts";
@@ -46,10 +47,10 @@ function mediaUrl(value: string | null | undefined): string | null {
   if(!value)return null;
   try {const url=new URL(value);return ["http:","https:"].includes(url.protocol) && !url.username && !url.password?url.href:null;}catch{return null;}
 }
-export function weiboMedia(work: z.infer<typeof WeiboWork>): MediaItem[] {
+export function weiboMedia(work: z.infer<typeof WeiboWork>,confirmedVideo=false): MediaItem[] {
   const images=[...new Set([...(work.picUrl??[]),...(work.images??[])].map(mediaUrl).filter((url):url is string=>url!==null))];
   const media:MediaItem[]=images.map(url=>({kind:"image",url}));
   const video=mediaUrl(work.videoUrl);
   if(video)media.push({kind:"video",url:video,poster:mediaUrl(work.cover)});
-  return media;
+  return confirmedVideo?confirmedVideoMedia(media):media;
 }

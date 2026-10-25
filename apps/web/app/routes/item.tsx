@@ -2,6 +2,7 @@ import { SITE, withSubject } from "@aihot/industry/site";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLoaderData, useNavigate } from "react-router";
 import type { Route } from "./+types/item";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
 import type { SiteItemDetail } from "@aihot/contracts/site";
 import { loadOr404 } from "../lib/api.server";
 import { breadcrumbLd, pageMeta, siteUrl, titled } from "../lib/seo";
@@ -15,6 +16,7 @@ import { Menu, MenuItem } from "../components/ui/Menu";
 import { StarButton } from "../features/feed/parts";
 import { GroupSources } from "../features/feed/ReadingGroup";
 import { StoryFollowups } from "../features/item/StoryFollowups";
+import { VideoPoster } from "../features/feed/VideoPoster";
 import { MediaGallery } from "../features/item/MediaGallery";
 import { QuotedPost } from "../features/item/QuotedPost";
 import { IconArrowLeft, IconCopy, IconDownload, IconExternal, IconImage, IconMenu, IconShare } from "../components/icons";
@@ -26,7 +28,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return { item };
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("内容不存在") }, { name: "robots", content: "noindex" }];
   const { item } = loaderData;
   return pageMeta({
@@ -38,7 +40,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
     noindex: !item.indexable,
     jsonLd: breadcrumbLd([
       { name: SITE.name, path: "/" },
-      { name: item.selected ? "精选" : "全部动态", path: item.selected ? "/" : "/all" },
+      { name: navigationLabel(presentationFromMatches(matches), item.selected ? "selected" : "all", item.selected ? "精选" : "全部动态"), path: item.selected ? "/" : "/all" },
       { name: item.title, path: `/items/${item.id}` },
     ]),
   });
@@ -125,7 +127,7 @@ export default function ItemPage() {
   const publishedIso = item.publishedAt ?? item.discoveredAt;
   const summaryOnly = item.readingMode === "summary-only";
   const showOutline = item.outline.length >= 3;
-  const originalLabel = isX ? "在 X 查看原推" : "打开原文";
+  const originalLabel = item.video ? "去原站观看" : isX ? "在 X 查看原推" : "打开原文";
 
   const related = item.relatedStories.filter((s) => s.publicId !== item.story?.publicId);
 
@@ -255,7 +257,7 @@ export default function ItemPage() {
         <span className="flex-1" />
         <StarButton item={item} size={32} />
         <a href={item.links.original} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1 px-1.5 text-[14px] text-ink-2">
-          <IconExternal size={15} /> 原文
+          <IconExternal size={15} /> {item.video ? "去原站观看" : "原文"}
         </a>
         <button type="button" aria-label="分享" onClick={share} className="inline-flex size-8 items-center justify-center rounded-full text-ink-3 hover:text-ink">
           <IconShare size={17} />
@@ -307,6 +309,13 @@ export default function ItemPage() {
             <section className={isX ? "mt-4" : "mt-7 xl:mt-8"}>
               <div className="mb-2 text-[12px] font-semibold text-accent">{summaryOnly ? "摘要" : "AI 导读"}</div>
               <p className="text-[18px] leading-[1.7] text-ink xl:text-[20px] xl:leading-[1.7]">{item.summary}</p>
+            </section>
+          )}
+
+          {item.video && (
+            <section className="mt-6" aria-label="视频观看">
+              {!(isX && item.x!.media.length > 0) && <VideoPoster key={item.video.poster ?? "placeholder"} video={item.video} className="max-w-[480px]" />}
+              <a href={item.links.original} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline">去原站观看 <IconExternal size={13} /></a>
             </section>
           )}
 

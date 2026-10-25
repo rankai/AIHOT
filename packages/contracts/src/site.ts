@@ -42,7 +42,14 @@ export interface StoryRef {
   title: string;
 }
 
+/** Confirmed video fact; only a licensed image preview, never a playback URL. */
+export interface VideoPreview {
+  poster: string | null;
+  posterSrcSet?: string;
+}
+
 export interface ItemSummary {
+  video: VideoPreview | null;
   id: string;
   revision: number;
   title: string;
@@ -64,7 +71,7 @@ export interface ItemSummary {
 }
 
 /** The fields rendered by a site feed card; full original text lives in the item detail. */
-export interface FeedItemSummary extends Pick<ItemSummary, "id" | "title" | "summary" | "reason" | "publishedAt" | "timelineAt" | "category" | "tags" | "score" | "selected" | "channel"> {
+export interface FeedItemSummary extends Pick<ItemSummary, "id" | "title" | "summary" | "reason" | "publishedAt" | "timelineAt" | "category" | "tags" | "score" | "selected" | "channel" | "video"> {
   source: Pick<SourceRef, "name">;
   x: (Pick<XPostView, "authorName" | "handle" | "avatarUrl" | "avatarSrcSet" | "media"> & {
     quoted: Omit<NonNullable<XPostView["quoted"]>, "url"> | null;
@@ -121,9 +128,11 @@ export interface TimelineResponse {
 }
 
 export interface PoolResponse {
-  filters: TimelineFilters & { q: string | null; tab: "time" | "relevance" };
+  column?: { id: `custom-${string}`; label: string; scope: "all" | "videos"; category?: string; tag?: string };
+  filters: TimelineFilters & { q: string | null; tab: "time" | "relevance"; videosOnly: boolean };
   items: FeedItemSummary[];
   page: number;
+  pageSize: number;
   pageCount: number;
   total: number;
   todayCount: number;

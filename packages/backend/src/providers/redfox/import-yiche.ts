@@ -1,3 +1,5 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
 import {applyWeiboCarDetailOrigin} from "./weibo-car-detail-origin.ts";
@@ -87,7 +89,8 @@ export async function importYicheResult(resultId:number,raw:unknown,actor:string
       const full=operation.data==="VYSP68M2",body=full?record.content:record.description,publishedAt=publicationTime(record,operation.data==="YGYYT0G0"?1:undefined),discoveredAt=origin?new Date(origin.discoveredAt):sourceDiscoveredAt;
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=record.authorName;
-      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
+      const bodyMedia=full&&typeof body==="string"?videoMediaFromHtml(body,url!):[];
+      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:[...bodyMedia,...((operation.data==="3BXWEB6Y"||record.workType===4||origin?.workType==="video"||operation.data==="YIGCY5US"&&parameters.sourceType==="shipin")?confirmedVideoMedia(media(record)):media(record))],via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({yicheImport:{key:commandKey,intent,namespace:typeof namespace==="string"?namespace:null}})} WHERE id=${resultId}`;

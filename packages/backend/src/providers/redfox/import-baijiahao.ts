@@ -1,3 +1,5 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
@@ -77,7 +79,8 @@ export async function importBaijiahaoResult(resultId:number,raw:unknown,actor:st
       const full=operation.data==="API_1789097000710",body=full?record.content??record.clearContent:null,publishedAt=publicationTime(record),discoveredAt=sourceDiscoveredAt;
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=record.nickname;
-      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
+      const bodyMedia=full&&typeof body==="string"?videoMediaFromHtml(body,url!):[];
+      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:[...bodyMedia,...(operation.data==="API_1789097000761"?confirmedVideoMedia(media(record)):media(record))],via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({baijiahaoImport:{key:commandKey,intent,namespace:typeof namespace==="string"?namespace:null}})} WHERE id=${resultId}`;

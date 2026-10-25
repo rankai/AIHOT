@@ -13,6 +13,8 @@ import {collectionDiscoveredAt} from "./collection-page-proof.ts";
 import {parseXResearch} from "./x-research.ts";
 import {xResearchOperations} from "./x-research-contract.ts";
 import {xResultSnapshot,agentKeyXEvidence,agentKeyXWork} from "../agentkey/x-evidence.ts";
+import {redfoxXHasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 const Input=z.object({sourceId:z.string().min(1).optional(),reason:z.string().trim().min(1).max(500)}).strict();
 const Received=z.object({tweetId:z.string().regex(/^\d+$/).max(30),text:z.string().nullable().optional(),content:z.string().nullable().optional(),createdAt:z.string().nullable().optional(),lang:z.string().nullable().optional(),replyTo:z.string().nullable().optional(),quoted:z.object({authorName:z.string(),handle:z.string(),text:z.string(),url:z.string()}).optional(),metrics:z.record(z.string(),z.unknown()).optional(),user:z.object({userId:z.string().regex(/^\d+$/).max(30),username:z.string().regex(/^[A-Za-z0-9_]{1,15}$/),displayName:z.string().nullable().optional()}).passthrough(),medias:z.array(z.record(z.string(),z.unknown())).nullable().optional()}).passthrough();
 const RedfoxReceived=Received.omit({lang:true,replyTo:true,quoted:true,metrics:true}).extend({createdAt:z.string()});
@@ -59,6 +61,7 @@ export async function importReceivedXWork(tx:Tx,resultId:number,raw:unknown,acto
   if(!binding){try{await bindSourceAccount(tx,{platform:"x",idKind:"user_id",idValue:record.user.userId,sourceId,evidence:{kind:"result",reference:String(resultId)}});}catch(error){if(error instanceof Error&&error.message==="Account identity already belongs to another source")throw new StaleOperationError(error.message);throw error;}}
   const media=provider==="agentkey"&&record.medias===undefined?undefined:(record.medias??[]).flatMap(m=>{if(m.type!=="photo"||typeof m.coverUrl!=="string")return [];try{const u=new URL(m.coverUrl);return ["http:","https:"].includes(u.protocol)&&!u.username&&!u.password?[{kind:"image" as const,url:m.coverUrl,width:null,height:null,poster:null}]:[];}catch{return [];}});
   const candidate=xPostToCandidate({tweetId:record.tweetId,text,handle:record.user.username,authorName:record.user.displayName??record.user.username,...(provider==="redfox"?{avatarUrl:null,media,lang:record.lang??null}:{...(media!==undefined?{media}:{}),...(record.lang!==undefined?{lang:record.lang}:{})}),...(provider==="redfox"?{replyTo:null,quoted:null}:{...(record.replyTo!==undefined?{replyTo:record.replyTo}:{}),...(record.quoted?{quoted:record.quoted}:{})})},validTime?date:null,record.metrics??{favorite:null,retweet:null,views:null});
+  if(provider==="redfox"&&redfoxXHasVideo(record.medias))candidate.media=confirmedVideoMedia(candidate.media);
   if(provider==="agentkey"){candidate.media=media;candidate.bodyText=null;candidate.bodyStatus="pending";candidate.excerpt=text;}
   const material=await upsertMaterial({...candidate,sourceId,bodyUpdate:"fill-missing",discoveredAt,backfill,via:"import",raw:{...candidate.raw as Record<string,unknown>,provider,...(provider==="agentkey"?{receivedText:text}:{}),resultId,tweetId:record.tweetId,userId:record.user.userId,createdAt:record.createdAt??null}},tx);
   if(material.created||material.revised)await queueProcessing(material.articleId,{db:tx});

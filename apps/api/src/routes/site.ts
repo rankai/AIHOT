@@ -5,6 +5,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { isCategoryKey, isChannelKey, type CategoryKey, type ChannelKey } from "@aihot/contracts/taxonomy";
 import { InvalidCursorError } from "@aihot/backend/lib/cursor";
 import { exportMarkdown, loadItemDetail, siteItemDetail } from "@aihot/backend/publication/detail";
+import { isCustomNavigationEntry, type CustomNavigationEntry } from "@aihot/contracts/presentation";
+import { loadPresentationSettings, loadPublicPresentation } from "@aihot/backend/admin/presentation";
 import { loadPool, SearchBusyError } from "@aihot/backend/publication/pool";
 import { loadTimeline } from "@aihot/backend/publication/timeline";
 import { loadStoryFollowups } from "@aihot/backend/publication/followups";
@@ -48,7 +50,7 @@ export function siteHandler(fn: Handler): Handler {
       if (error instanceof BadRequest) return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: error.message });
       if (error instanceof InvalidCursorError) return sendProblem(req, reply, { status: 400, code: "invalid_cursor", detail: error.message });
       if (error instanceof SearchBusyError) {
-        return sendProblem(req, reply, { status: 503, code: "temporarily_unavailable", detail: "search busy", retryAfter: error.retryAfter });
+        return sendProblem(req, reply, { status: 503, code: "search_busy", detail: "search busy", retryAfter: error.retryAfter });
       }
       req.log.error({ err: error, path: req.url.split("?")[0] }, "site api error");
       return sendProblem(req, reply, { status: 503, code: "temporarily_unavailable", detail: "temporarily unavailable", retryAfter: 10 });
@@ -81,7 +83,7 @@ export async function parseFilters(q: Record<string, string>): Promise<FilterPar
 
 export function registerSite(app: FastifyInstance) {
   app.get("/api/site/meta", siteHandler(async (req, reply) => {
-    return sendJsonWithEtag(req, reply, siteMeta(), { etagPrefix: "meta", cacheControl: "public, max-age=60, s-maxage=60" });
+    return sendJsonWithEtag(req, reply, await siteMeta(), { etagPrefix: "meta", cacheControl: "public, max-age=60, s-maxage=60" });
   }));
 
   if (FEATURES.codexResetMonitor) registerCodexReset(app);
@@ -89,7 +91,8 @@ export function registerSite(app: FastifyInstance) {
   app.get("/api/site/timeline", siteHandler(async (req, reply) => {
     const q = looseQuery(req);
     const filters = await parseFilters(q);
-    const limit = Math.min(Math.max(Number(q.limit) || 20, 1), 40);
+    const presentation = await loadPublicPresentation();
+    const limit = q.limit === undefined ? presentation.pageSizes.selected : Math.min(Math.max(Number(q.limit) || presentation.pageSizes.selected, 1), 40);
     const unfiltered = filters.channel === "all" && !filters.category && !filters.tag && !filters.topic && !q.cursor;
     const [data, hot] = await Promise.all([
       loadTimeline({ ...filters, cursor: q.cursor || null, limit }),
@@ -102,11 +105,36 @@ export function registerSite(app: FastifyInstance) {
 
   app.get("/api/site/pool", siteHandler(async (req, reply) => {
     const q = looseQuery(req);
-    const filters = await parseFilters(q);
-    const page = Math.min(Math.max(Number(q.page) || 1, 1), 50);
+    let column: CustomNavigationEntry | undefined;
+    let filters: FilterParams;
+    let videosOnly: boolean;
+    let defaultPageSize: number;
+    if (q.columnId !== undefined) {
+      if (Object.keys(q).some(key => !["columnId", "q", "tab", "page", "pageSize"].includes(key))) throw new BadRequest("column filters cannot be overridden");
+      const { presentation } = await loadPresentationSettings();
+      column = presentation.navigation.filter(isCustomNavigationEntry).find(row => row.id === q.columnId);
+      if (!column) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "column not found" });
+      if (column.category && !isCategoryKey(column.category)) throw new Error("Column category unavailable");
+      filters = { channel: "all", category: column.category as CategoryKey | undefined ?? null, tag: column.tag ?? null, topic: null, topicTags: null };
+      videosOnly = column.scope === "videos";
+      defaultPageSize = column.pageSize;
+    } else {
+      filters = await parseFilters(q);
+      if (q.videosOnly !== undefined && q.videosOnly !== "true" && q.videosOnly !== "false") throw new BadRequest("videosOnly must be true or false");
+      videosOnly = q.videosOnly === "true";
+      const presentation = await loadPublicPresentation();
+      defaultPageSize = presentation.pageSizes[videosOnly ? "videos" : "all"];
+    }
+    const page = Math.max(Math.floor(Number(q.page)) || 1, 1);
+    if (q.pageSize !== undefined && (!/^[1-9]\d*$/.test(q.pageSize) || Number(q.pageSize) > 40)) throw new BadRequest("pageSize must be an integer from 1 to 40");
+    const pageSize = q.pageSize === undefined ? defaultPageSize : Number(q.pageSize);
     const search = q.q?.trim() ? q.q.trim().slice(0, 200) : null;
     const tab = q.tab === "relevance" ? "relevance" : "time";
-    const data = await loadPool({ ...filters, q: search, tab, page });
+    const data = await loadPool({ ...filters, q: search, tab, page, pageSize, videosOnly });
+    if (column) {
+      const { id, label, scope, category, tag } = column;
+      data.column = { id, label, scope, ...(category ? { category } : {}), ...(tag ? { tag } : {}) };
+    }
     const { generatedAt: _, ...content } = data;
     return sendJsonWithEtag(req, reply, data, { etagPrefix: "pool", cacheControl: "public, max-age=60, s-maxage=60", etagOf: content });
   }));

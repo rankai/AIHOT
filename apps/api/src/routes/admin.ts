@@ -4,6 +4,7 @@ import { listOperations, operationDetail, operationResults, controlOperation } f
 import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { loadPresentationSettings, savePresentation } from "@aihot/backend/admin/presentation";
 import { actorOf } from "@aihot/backend/admin/auth";
 
 import { importSelectBenchRun, listSelectBenchRuns, selectBenchRun } from "@aihot/backend/admin/selectbench";
@@ -139,6 +140,8 @@ export function registerAdmin(app: FastifyInstance) {
 
   // Settings
   app.get("/api/admin/settings", adminHandler(async () => ({ contact: await loadContact(), targets: await listTargets(), budgets: await listBudgets() })));
+  app.get("/api/admin/settings/presentation", adminHandler(async () => loadPresentationSettings()));
+  app.put("/api/admin/settings/presentation", adminHandler(async (req, _reply, admin) => savePresentation(req.body, actorOf(admin))));
   app.post("/api/admin/settings/contact-qr", adminHandler(async (req, _reply, admin) => {
     const b = body<{ slot: "wechatQr" | "feishuQr"; image: string }>(req);
     return replaceContactQr({ slot: b.slot, data: decodeImage(b.image) }, actorOf(admin));

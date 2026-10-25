@@ -3,12 +3,15 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { ReportNavigationEntry, ReportKind } from "@aihot/contracts/site";
 import { PillTabs } from "../../components/ui/Tabs";
+import { navigationLabel } from "../../lib/presentation";
+import { usePresentation } from "../../lib/use-presentation";
 import { IconChevronRight } from "../../components/icons";
 import { KINDS, KIND_LABEL, KIND_PATH, archiveGroups, archiveMark, chipLabel, reportPath } from "./format";
 
 /** 日报 / 周报 / 月报 as the site's pill switch, spread across the column. */
 function KindSwitch({ kind }: { kind: ReportKind }) {
-  return <PillTabs fill layoutId="report-kind" label="切换日报、周报、月报" active={kind} items={KINDS.map((k) => ({ key: k, label: KIND_LABEL[k], to: KIND_PATH[k] }))} />;
+  const presentation = usePresentation();
+  return <PillTabs fill layoutId="report-kind" label="切换日报、周报、月报" active={kind} items={KINDS.map((k) => ({ key: k, label: k === "daily" ? navigationLabel(presentation, "daily", KIND_LABEL[k]) : KIND_LABEL[k], to: KIND_PATH[k] }))} />;
 }
 
 /** Desktop archive column: every issue of this kind, grouped, the current one highlighted. */
@@ -89,12 +92,13 @@ function ArchiveGroup({ g, kind, current, initiallyOpen }: {
 
 /** Phone header: kind tabs, then the three latest issues and a way further back. */
 export function ReportPhoneNav({ kind, index, current, today }: { kind: ReportKind; index: ReportNavigationEntry[]; current: string | null; today: string }) {
+  const presentation = usePresentation();
   const recent = index.slice(0, 3);
   const earlier = kind === "daily" ? "/daily/archive" : "#report-history";
   const chip = "inline-flex h-9 shrink-0 items-center rounded-full border px-4 text-[13px] transition-colors";
   return (
     <div className="pt-3 lg:hidden">
-      <PillTabs fill layoutId="report-kind-phone" label="切换日报、周报、月报" active={kind} items={KINDS.map((k) => ({ key: k, label: KIND_LABEL[k], to: KIND_PATH[k] }))} />
+      <PillTabs fill layoutId="report-kind-phone" label="切换日报、周报、月报" active={kind} items={KINDS.map((k) => ({ key: k, label: k === "daily" ? navigationLabel(presentation, "daily", KIND_LABEL[k]) : KIND_LABEL[k], to: KIND_PATH[k] }))} />
       {recent.length > 0 && (
         <div className="scrollbar-none -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
           {recent.map((e) => {

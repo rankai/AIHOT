@@ -1,3 +1,4 @@
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectionDiscoveredAt} from "./collection-page-proof.ts";
 import {z} from "zod";
@@ -55,7 +56,7 @@ export async function importManualWorkResult(resultId:number,raw:unknown,actor:s
   const time=typeof record.publishTime==="string"&&z.iso.datetime({offset:true}).safeParse(record.publishTime).success?new Date(record.publishTime):null;
   const publishedAt=time&&Number.isFinite(time.getTime())?time:null,discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
   const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
-  const material=await upsertMaterial({sourceId:input.sourceId,url,title:String(parsed.data.title),author:typeof record.nickname==="string"?record.nickname:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement}},tx);
+  const material=await upsertMaterial({sourceId:input.sourceId,url,title:String(parsed.data.title),author:typeof record.nickname==="string"?record.nickname:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:((platform==="kuaishou"&&record.workType==="1"&&!!safeUrl(record.videoUrl)||platform==="shipinhao"&&snapshot.input.operationId==="OE4KUEUO"&&!!safeUrl(record.videoUrl)&&record.workType!=="normal"&&record.workType!=="图文")?confirmedVideoMedia(media(record)):media(record)),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement}},tx);
   if(material.created||material.revised)await queueProcessing(material.articleId,{db:tx});
   await tx`UPDATE operation_results SET source_id=${input.sourceId},article_id=${material.articleId},provenance=provenance||${tx.json({manualWorkImport:{key:commandKey,intent,receivedWorkId:typeof parsed.data.workId==="string"?parsed.data.workId:null,workIdKind:typeof parsed.data.workIdKind==="string"?parsed.data.workIdKind:null,requestedWorkId:typeof parsed.data.requestedWorkId==="string"?parsed.data.requestedWorkId:null}})} WHERE id=${resultId}`;
   await audit(actor,"material.import",`result:${resultId}`,input.reason,null,{sourceId:input.sourceId,articleId:material.articleId,supplement:input.supplement},undefined,tx);
