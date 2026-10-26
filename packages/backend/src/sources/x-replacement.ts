@@ -1,3 +1,4 @@
+import {videoDownloadCapability} from "./subscription-video-candidates.ts";
 import { sql, type Db, type Tx } from "../db.ts";
 import { credential } from "../config.ts";
 import { unsupportedConfig } from "./config-keys.ts";
@@ -59,6 +60,7 @@ export async function preflightXReplacement(sourceId: string, target: "redfox" |
     check("ordering",logical.searchType===undefined || ["Latest","Top"].includes(String(logical.searchType)),"按原生采集器支持的搜索排序执行");
     check("incremental",!source.effective_progress?.continuation,source.effective_progress?.continuation?"请先完成 Redfox 尚未读取的分页，再切换":"没有待完成的 Redfox 分页，可切换供应商","subscription.progress");
   }
+  check("videoDownload",true,videoDownloadCapability("x",target,""),"subscription.config");
   return {sourceId,target,mappingVersion:X_MAPPING_VERSION,sourceVersion:new Date(source.updated_at).toISOString(),subscriptionVersion:source.edit_version??null,
     supported:checks.every(c=>c.conclusion==="supported" || c.conclusion==="unverified"),checks,
     mapping:target==="redfox"?{operation:"redfox.x.timeline",restId:bindings.length===1?bindings[0]!.id_value:null}: {operation:"x.search",query:logical.query,searchType:logical.searchType??"Latest"}};
@@ -84,6 +86,7 @@ export async function switchXCollection(sourceId:string,raw:unknown,actor:string
     const targetProgress={...(providerProgress[input.target]??{})};
     if(previous.lastTweetId && (!targetProgress.lastTweetId || BigInt(previous.lastTweetId)>BigInt(targetProgress.lastTweetId)))targetProgress.lastTweetId=previous.lastTweetId;
     if(previous.initializedAt)targetProgress.initializedAt=previous.initializedAt;
+    await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription provider changed',next_attempt_at=NULL,job_id=NULL WHERE subscription_id=${sub.id} AND operation_key='subscription.video.download' AND status NOT IN ('completed','failed')`;
     await tx`UPDATE collection_subscriptions SET provider=${input.target},operation_key=${input.target==="redfox"?"redfox.x.timeline":"x.search"},config=${tx.json(config as never)},
       progress=${tx.json({...targetProgress,providerProgress:archived} as never)},execution_version=execution_version+1,edit_version=edit_version+1,active_run_id=NULL,next_run_at=now(),updated_at=now() WHERE id=${sub.id}`;
     await tx`UPDATE sources SET execution_version=execution_version+1,updated_at=now() WHERE id=${sourceId}`;

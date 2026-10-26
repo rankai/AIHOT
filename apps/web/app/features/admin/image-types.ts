@@ -21,7 +21,8 @@ export interface ImageOptions {
 }
 export interface PrivateAsset {
   key: string; content_type: string; bytes: number; purpose: string; status: string;
-  metadata: { filename: string; kind?: "image" | "audio" | "video" | "text"; width?: number | null; height?: number | null; pages?: number; validation?: string };
+  created_at?: string | null; expires_at?: string | null; expired?: boolean; source?: { articleId: string | null; sourceId: string | null; subscriptionId: number | null; runId: number } | null;
+  metadata: { origin?: string | null; filename: string; kind?: "image" | "audio" | "video" | "text"; width?: number | null; height?: number | null; pages?: number; validation?: string };
 }
 export interface AssetPage { items: PrivateAsset[]; nextCursor: string | null }
 export function assetContentUrl(key: string) { return `/api/admin/assets/${encodeURIComponent(key)}/content`; }
@@ -30,6 +31,7 @@ export function referenceImage(asset: PrivateAsset): asset is PrivateAsset & { m
 }
 export function validImageDimension(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value > 0; }
 export function referenceIssue(asset: PrivateAsset, options: Pick<ImageOptions, "referenceBytes" | "referencePixels">) {
+  if (asset.expired) return "此素材已过期";
   if (asset.status !== "available") return asset.status === "deleted" ? "此素材已删除" : "此素材暂不可用";
   if (asset.metadata.kind && asset.metadata.kind !== "image" || !["image/png", "image/jpeg", "image/webp"].includes(asset.content_type)) return "参考素材须为 PNG、JPEG 或 WebP 图片";
   if (!validImageDimension(asset.metadata.width) || !validImageDimension(asset.metadata.height)) return "参考图片缺少有效的正整数宽高";

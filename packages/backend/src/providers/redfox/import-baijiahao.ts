@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -26,6 +27,7 @@ export async function importBaijiahaoResult(resultId:number,raw:unknown,actor:st
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const operation=BaijiahaoOperationId.safeParse(snapshot.input.operationId);
     if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="baijiahao"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Baijiahao result");
     const sourceDiscoveredAt=await collectionDiscoveredAt(tx,snapshot,"baijiahao",operation.data);
@@ -84,6 +86,7 @@ export async function importBaijiahaoResult(resultId:number,raw:unknown,actor:st
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({baijiahaoImport:{key:commandKey,intent,namespace:typeof namespace==="string"?namespace:null}})} WHERE id=${resultId}`;
+    if(articleId){const videoHtml=operation.data==="API_1789097000710"?record.content??record.clearContent:undefined;await registerImportedVideo(tx,resultId,{platform:"baijiahao",operationId:String(parsed.data.operationId),record,confirmed:(operation.data==="API_1789097000761"),singleVideo:true,videoProof:"verified-current-work-or-owned-body",...(typeof videoHtml==="string"?{html:videoHtml}:{})});}
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

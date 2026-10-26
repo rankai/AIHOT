@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -28,6 +29,7 @@ export async function importQichezhijiaResult(resultId:number,raw:unknown,actor:
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
     const operation=QichezhijiaOperationId.safeParse(executionInput.operationId);
     if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="qichezhijia"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Qichezhijia result");
@@ -90,6 +92,7 @@ export async function importQichezhijiaResult(resultId:number,raw:unknown,actor:
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({qichezhijiaImport:{key:commandKey,intent,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null}})} WHERE id=${resultId}`;
+    if(articleId){const videoHtml=operation.data==="LLCI8QTE"?record.content:undefined;await registerImportedVideo(tx,resultId,{platform:"qichezhijia",operationId:String(parsed.data.operationId),record,confirmed:(operation.data==="TE6AGWAF"||operation.data==="CI7VW144"&&parameters.sourceType==="video"&&["3","14"].includes(String(record.workType))||origin?.workType==="original_video"||origin?.workType==="chejiahao_video"),singleVideo:true,videoProof:"verified-current-work-or-owned-body",...(typeof videoHtml==="string"?{html:videoHtml}:{})});}
     await audit(actor,"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {redfoxXiaohongshuHasVideo} from "./video-media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {agentKeyXiaohongshuEvidence,xiaohongshuResultSnapshot} from "../agentkey/xiaohongshu-evidence.ts";
@@ -39,6 +40,7 @@ export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:
   const execute=async(tx:Tx)=>{
     const snapshot=await xiaohongshuResultSnapshot(tx,resultId);
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const {parsed,origin,sourceDiscoveredAt}=snapshot.provider==="agentkey"?await agentKeyXiaohongshuEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="xiaohongshu_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as XiaohongshuIdentity,identity:XiaohongshuIdentity={...received};
     if(snapshot.provider==="agentkey"&&(input.supplement||!received.userId||!account&&(!parsed.data.workId||!parsed.data.url)))throw new UnsupportedReplacement("AgentKey import requires received native URL and author identity; manual supplements cannot replace evidence");
@@ -82,6 +84,7 @@ export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({xiaohongshuImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
+    if(articleId)await registerImportedVideo(tx,resultId,{platform:"xiaohongshu",operationId:String(parsed.data.operationId),record:record,confirmed:(snapshot.provider==="agentkey"?record.workType==="video":redfoxXiaohongshuHasVideo(String(parsed.data.operationId),record)),singleVideo:true,videoProof:"verified-current-work-type",workId:nativeId!});
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

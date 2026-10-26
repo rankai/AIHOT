@@ -1,3 +1,4 @@
+import {videoDownloadCapability} from "./subscription-video-candidates.ts";
 import {agentKeyWechatEvidence} from "../providers/agentkey/wechat-evidence.ts";
 import { z } from "zod";
 import { sql,type Db,type Tx } from "../db.ts";
@@ -76,6 +77,7 @@ export async function preflightMpReplacement(sourceId:string,target:"redfox"|"da
     }
   }
   const parameters=selected==="premium"?{account:identity.account??null}:identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)?{wxId:identity.wxId}:{bizInfo:identity.bizInfo??null};
+  check("videoDownload",true,videoDownloadCapability("wechat",target,""),"subscription.config");
   return {sourceId,target,library:target==="redfox"?selected:null,mappingVersion:MP_MAPPING_VERSION,sourceVersion:new Date(s.updated_at).toISOString(),subscriptionVersion:s.edit_version??null,supported:checks.every(c=>["supported","unverified"].includes(c.conclusion)),checks,
     mapping:target==="agentkey"?{operation:"agentkey.wechat_mp.account_articles",parameters:{username:identity.wxId??identity.account??null,offset:"",page_size:20,item_show_type:0,raw:false},identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:target==="redfox"?{operation:"redfox.wechat.collection",...mpOperations[selected],parameters,identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:{operation:"mp.history",parameters:{ghid:config.ghid??config.wxid}},
     impact:{...(target!=="dajiala"?{firstImport:!s.effective_progress?.lastCheckedAt,firstImportNote:!s.effective_progress?.lastCheckedAt?"最多8条，全部标记历史回填；不按无时区日期筛选7天范围":null}:{}),delay:target==="redfox"?"T+1":target==="agentkey"?"TikHub 刷新时效未知":null,intervalMinutes:s.effective_interval??s.interval_minutes,activeRunId:s.active_run_id??null,sourceId,subscriptionId:s.subscription_id??null,note:"保留原材料与权限；切换使旧轮失去提交资格，供应商/库的分页与 UUID 不跨库复用"}};
@@ -96,6 +98,7 @@ export async function switchMpCollection(sourceId:string,raw:unknown,actor:strin
     const {providerProgress={},...previous}=sub.progress;
     const from=sub.provider==="redfox"?`redfox:${sub.config.redfoxLibrary}`:sub.provider;
     const progress={lastCheckedAt:previous.lastCheckedAt??null,providerProgress:{...providerProgress,[from]:previous}};
+    await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription provider changed',next_attempt_at=NULL,job_id=NULL WHERE subscription_id=${sub.id} AND operation_key='subscription.video.download' AND status NOT IN ('completed','failed')`;
     await tx`UPDATE collection_subscriptions SET provider=${input.target},operation_key=${input.target==="redfox"?"redfox.wechat.collection":input.target==="agentkey"?"agentkey.wechat_mp.account_articles":"mp.history"},config=${tx.json(config as never)},progress=${tx.json(progress as never)},execution_version=execution_version+1,edit_version=edit_version+1,active_run_id=NULL,next_run_at=now(),updated_at=now() WHERE id=${sub.id}`;
     await tx`UPDATE sources SET execution_version=execution_version+1,updated_at=now() WHERE id=${sourceId}`;
     await audit(actor,"source.switch_collection",`source:${sourceId}`,input.reason,{provider:sub.provider,library:sub.config.redfoxLibrary??null},{provider:input.target,library:input.target==="redfox"?input.library:null,mappingVersion:MP_MAPPING_VERSION},undefined,tx);

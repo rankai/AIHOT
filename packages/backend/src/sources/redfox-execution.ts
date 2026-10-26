@@ -1,3 +1,4 @@
+import {registerImportedVideo} from "./subscription-video.ts";
 import { sql,type Tx } from "../db.ts";
 import { upsertMaterial } from "../content/materials.ts";
 import { queueProcessing } from "../jobs/content.ts";
@@ -50,6 +51,9 @@ async function saveTweet(tx:Tx,e:Execution,input:Input,page:RedfoxTimeline,tweet
   }
   const material=input.mode==="collection"?await upsertMaterial({...value,sourceId:input.source.id,via:"fetch",discoveredAt:new Date(input.startedAt),backfill:!input.source.cursor.initializedAt?"first-import":null},tx):null;
   const resultId=await saveResult(tx,e,{itemKey:`x:${tweet.tweetId}`,kind:"article",data:input.mode==="preview"?value as unknown as Record<string,unknown>:{tweetId:tweet.tweetId},receiptId,...(material?{articleId:material.articleId,sourceId:input.source.id}:{})});
+  if(material){const [receipt]=await tx`SELECT model FROM receipts WHERE id=${receiptId}`;
+    const videos=Array.isArray(tweet.medias)?tweet.medias.filter(m=>redfoxXHasVideo([m])):(tweet.medias as {videos?:unknown[]}|null)?.videos?.filter(m=>redfoxXHasVideo({videos:[m]}))??[];
+    await registerImportedVideo(tx,resultId,{platform:"x",operationId:receipt.model,record:tweet,confirmed:redfoxXHasVideo(tweet.medias),singleVideo:videos.length===1,videoProof:"verified-own-media-type",workId:tweet.tweetId});}
   if(reused)await tx`UPDATE operation_results SET provenance=provenance || ${tx.json({accountResultId:reused.resultId,accountUserId:input.restId})} WHERE id=${resultId}`;
   if(material && (material.created || material.revised))await queueProcessing(material.articleId,{db:tx});
 }

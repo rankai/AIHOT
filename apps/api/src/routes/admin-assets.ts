@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import multipart from "@fastify/multipart";
 import { actorOf, type AdminPrincipal } from "@aihot/backend/admin/auth";
-import { assetUploadOptions, AssetError, VIDEO_BYTES, uploadLimitForMime, UPLOAD_BYTES, UPLOAD_TIMEOUT_MS, uploadKey, prepareUpload, writeUpload, publishUpload, listAssets, getAsset, openAsset, deleteAsset } from "@aihot/backend/operations/assets";
+import { assetUploadOptions, AssetError, VIDEO_BYTES, uploadLimitForMime, UPLOAD_BYTES, UPLOAD_TIMEOUT_MS, uploadKey, prepareUpload, writeUpload, publishUpload, listAssets, assetMetadata, openAsset, deleteAsset } from "@aihot/backend/operations/assets";
 import { requireAdmin } from "./admin-auth.ts";
 import { sendProblem } from "../http/respond.ts";
 
@@ -27,7 +27,7 @@ export async function registerAdminAssets(app: FastifyInstance) {
     return listAssets(after);
   });
   app.get("/api/admin/assets/options", async () => assetUploadOptions());
-  app.get("/api/admin/assets/:key", async req => getAsset((req.params as {key:string}).key));
+  app.get("/api/admin/assets/:key", async req => assetMetadata((req.params as {key:string}).key));
   app.delete("/api/admin/assets/:key", async req => deleteAsset((req.params as {key:string}).key,actorOf(principals.get(req)!)));
   app.get("/api/admin/assets/:key/content", async (req,reply) => {
     const {asset,handle}=await openAsset((req.params as {key:string}).key);

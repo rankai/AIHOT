@@ -56,7 +56,13 @@ export interface GuardedResponse {
   url: string;
   headers: Headers;
   body: Buffer;
+  transferredBytes?: number;
   text(): string;
+}
+export class DownloadError extends Error {
+  readonly reason:"too_large"|"unavailable";
+  readonly transferredBytes:number;
+  constructor(reason:"too_large"|"unavailable", transferredBytes:number, message:string) { super(message); this.reason=reason; this.transferredBytes=transferredBytes; }
 }
 
 /** How the collectors introduce themselves: the site's own crawler name and address (industry/site.ts). */
@@ -69,7 +75,7 @@ export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}
 /** Streaming binary download with the same URL/DNS/redirect guard, never supplier credentials. */
 export async function guardedDownload(input:string,file:string,opts:Pick<GuardedFetchOptions,"timeoutMs"|"maxBytes">={}) {
   const response=await request(input,{...opts,route:"egress"},file);
-  return {status:response.status,url:response.url,headers:response.headers};
+  return {status:response.status,url:response.url,headers:response.headers,transferredBytes:response.transferredBytes??0};
 }
 async function request(input:string,opts:GuardedFetchOptions,file?:string):Promise<GuardedResponse> {
   // One budget includes DNS, every redirect and the body. Restarting it at each hop allowed a
@@ -100,9 +106,17 @@ async function request(input:string,opts:GuardedFetchOptions,file?:string):Promi
     }
     if(file) {
       if(res.status!==200 || !res.body){await res.body?.cancel();throw new Error(`Image download HTTP ${res.status}`);}
+      const declared=res.headers.get("content-length");
+      // A size header can reject early, never grant permission to exceed the streaming cap.
+      if(declared && /^\d+$/.test(declared) && Number(declared)>maxBytes){await res.body.cancel();throw new DownloadError("too_large",0,"Downloaded image exceeds local size limit");}
       let bytes=0;
-      await pipeline(Readable.fromWeb(res.body as never),new Transform({transform(chunk:Buffer,_encoding,done){bytes+=chunk.length;if(bytes>maxBytes)return done(new Error("Downloaded image exceeds local size limit"));done(null,chunk);}}),createWriteStream(file,{flags:"wx",mode:0o600}),{signal});
-      return {status:res.status,url:url.toString(),headers:res.headers as unknown as Headers,body:Buffer.alloc(0),text:()=>""};
+      try {
+        await pipeline(Readable.fromWeb(res.body as never),new Transform({transform(chunk:Buffer,_encoding,done){bytes+=chunk.length;if(bytes>maxBytes)return done(new DownloadError("too_large",bytes,"Downloaded image exceeds local size limit"));done(null,chunk);}}),createWriteStream(file,{flags:"wx",mode:0o600}),{signal});
+      } catch(error) {
+        if(error instanceof DownloadError || ["ENOSPC","EACCES","EROFS","EEXIST"].includes((error as NodeJS.ErrnoException)?.code??""))throw error;
+        throw new DownloadError("unavailable",bytes,"Media download was incomplete or unavailable");
+      }
+      return {status:res.status,url:url.toString(),headers:res.headers as unknown as Headers,body:Buffer.alloc(0),transferredBytes:bytes,text:()=>""};
     }
     const chunks: Buffer[] = [];
     let size = 0;

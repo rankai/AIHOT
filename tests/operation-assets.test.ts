@@ -221,7 +221,7 @@ test("persistent cleanup cursors advance past 200 registered files and 50 failed
     const [cursor]=await sql`SELECT value FROM settings WHERE key='assets.orphan-cursor'`;assert.ok(cursor!.value);
     const second=await cleanupAssets();assert.ok(second.orphans>=1);await assert.rejects(stat(assetPath(orphan)));
     assert.equal((await sql`SELECT status FROM stored_files WHERE key=${last}`)[0]!.status,"deleted");
-    assert.ok(second.deleted>=1);
+    assert.ok(first.deleted>=1);assert.equal(second.failures.filter(key=>blocked.includes(key)).length,50);
   } finally {
     for(const key of [...registered,...blocked,orphan,last])await rm(assetPath(key),{recursive:true,force:true});
     await sql`DELETE FROM stored_files WHERE key = ANY(${sql.array([...registered,...blocked,last])})`;
@@ -271,5 +271,38 @@ test("private upload options expose actual input limits and MOV permits an eight
     const box=Buffer.alloc(8);box.writeUInt32BE(8);box.write(kind,4);
     const upload=await app.inject({method:"POST",url:"/api/admin/assets",headers:headers(),payload:body(Buffer.concat([box,mov]),"video/quicktime","tiny.mov")});
     assert.equal(upload.statusCode,201,upload.body);assert.equal(upload.json().content_type,"video/quicktime");
+  }
+});
+
+test("one retention pass drains expired pages, attempts failures once and defers later expiry",async()=>{
+  const [cursor]=await sql`SELECT value FROM settings WHERE key='assets.deletion-cursor'`;
+  const keys=Array.from({length:54},()=>`uploads/redfox/${randomUUID().replaceAll("-","")+randomUUID().replaceAll("-","")}`).sort();
+  const blocked=keys[0]!,protectedKey=keys[51]!,later=keys[53]!,cutoff=new Date(Date.now()-1000);
+  let runId:number|undefined;
+  try{
+    await mkdir(path.dirname(assetPath(blocked)),{recursive:true});
+    for(const key of keys){
+      if(key===blocked)await mkdir(assetPath(key));else await writeFile(assetPath(key),image);
+      await sql`INSERT INTO stored_files(key,content_type,bytes,purpose,metadata,expires_at) VALUES(${key},'video/mp4',${image.length},'operation-output',${sql.json({filename:"synthetic.mp4",origin:"subscription-video",kind:"video"})},now()+interval '1 day')`;
+    }
+    runId=(await sql.begin(tx=>newRun(tx,protectedKey))).id;
+    await sql`UPDATE stored_files SET expires_at=${new Date(cutoff.getTime()-1000)} WHERE key IN ${sql(keys.filter(key=>key!==later))}`;
+    await sql`UPDATE stored_files SET expires_at=${new Date(cutoff.getTime()+500)} WHERE key=${later}`;
+    // Resume after a failed key: more than 50 upper keys and the lower key belong to this pass.
+    await sql`INSERT INTO settings(key,value) VALUES('assets.deletion-cursor',${sql.json(blocked)}) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
+    const first=await cleanupAssets(cutoff);
+    assert.equal(first.failures.filter(key=>key===blocked).length,1);assert.equal(first.failures.filter(key=>key===protectedKey).length,1);
+    const remaining=await sql`SELECT key FROM stored_files WHERE key IN ${sql(keys)} AND status<>'deleted' ORDER BY key`;
+    assert.deepEqual(remaining.map(r=>r.key),[blocked,protectedKey,later]);
+    for(const key of keys.filter(key=>![blocked,protectedKey,later].includes(key)))await assert.rejects(stat(assetPath(key)));
+    await rmdir(assetPath(blocked));await writeFile(assetPath(blocked),image);
+    await sql`UPDATE operation_runs SET status='completed' WHERE id=${runId}`;
+    const second=await cleanupAssets();assert.ok(!second.failures.includes(blocked)&&!second.failures.includes(protectedKey));
+    assert.equal((await sql`SELECT key FROM stored_files WHERE key IN ${sql(keys)} AND status<>'deleted'`).length,0);
+  }finally{
+    if(runId)await sql`UPDATE operation_runs SET status='completed' WHERE id=${runId}`;
+    for(const key of keys)await rm(assetPath(key),{recursive:true,force:true});
+    await sql`DELETE FROM stored_files WHERE key IN ${sql(keys)}`;
+    if(cursor)await sql`UPDATE settings SET value=${sql.json(cursor.value)} WHERE key='assets.deletion-cursor'`;else await sql`DELETE FROM settings WHERE key='assets.deletion-cursor'`;
   }
 });

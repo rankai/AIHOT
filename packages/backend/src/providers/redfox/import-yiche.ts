@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -28,6 +29,7 @@ export async function importYicheResult(resultId:number,raw:unknown,actor:string
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
     const operation=YicheOperationId.safeParse(executionInput.operationId);
     if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="yiche"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Yiche result");
@@ -94,6 +96,7 @@ export async function importYicheResult(resultId:number,raw:unknown,actor:string
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({yicheImport:{key:commandKey,intent,namespace:typeof namespace==="string"?namespace:null}})} WHERE id=${resultId}`;
+    if(articleId){const videoHtml=operation.data==="VYSP68M2"?record.content:undefined;await registerImportedVideo(tx,resultId,{platform:"yiche",operationId:String(parsed.data.operationId),record,confirmed:(operation.data==="3BXWEB6Y"||record.workType===4||origin?.workType==="video"||operation.data==="YIGCY5US"&&parameters.sourceType==="shipin"),singleVideo:true,videoProof:"verified-current-work-or-owned-body",...(typeof videoHtml==="string"?{html:videoHtml}:{})});}
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

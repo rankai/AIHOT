@@ -5,7 +5,7 @@ export interface PlatformCollectionProviderPreflight {
   currentProvider: string;
   targetProvider: "redfox" | "agentkey";
   supported: boolean;
-  checks: Array<{key: "operation" | "parameters" | "details" | "credentials" | "execution"; conclusion: "supported" | "unsupported" | "unavailable"; evidence: string}>;
+  checks: Array<{key: "operation" | "parameters" | "details" | "credentials" | "execution" | "videoDownload"; conclusion: "supported" | "unsupported" | "unavailable"; evidence: string}>;
   impact: {activeRunId: number | null; enabled: boolean; intervalMinutes: number; limits: {pages: number; items: number; details: number}; note: string};
 }
 export interface PlatformField {

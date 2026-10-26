@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {z} from "zod";
 import {sql,type Tx} from "../../db.ts";
@@ -41,6 +42,7 @@ export async function importXSearchResult(resultId:number,raw:unknown,actor:stri
 }
 /** Shared X author/material transaction after a specific producer proves the received tweet. */
 export async function importReceivedXWork(tx:Tx,resultId:number,raw:unknown,actor:string,key:unknown,received:unknown,discoveredAt:Date,provider:"redfox"|"agentkey"="redfox"){
+ await lockVideoParentSubscriptions(tx,resultId);
  const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw),record=Received.parse(provider==="redfox"?{...RedfoxReceived.parse(received),lang:undefined,replyTo:undefined,quoted:undefined,metrics:undefined}:received),text=record.text??record.content,date=new Date(record.createdAt??""),validTime=Number.isFinite(date.getTime())&&/(?:Z|[+-]\d{2}:?\d{2})(?:\s+\d{4})?$/.test(record.createdAt??"");
  if(typeof text!=="string"||!text.trim()||provider==="redfox"&&!validTime)throw new UnsupportedReplacement("X work lacks verified text or a valid timezone-bearing publication time");
   const timeline=decideTimeline(validTime?date:null,discoveredAt),backfill=timeline.publishedAt?null:`${provider}-import-unknown-time`;
@@ -66,6 +68,7 @@ export async function importReceivedXWork(tx:Tx,resultId:number,raw:unknown,acto
   const material=await upsertMaterial({...candidate,sourceId,bodyUpdate:"fill-missing",discoveredAt,backfill,via:"import",raw:{...candidate.raw as Record<string,unknown>,provider,...(provider==="agentkey"?{receivedText:text}:{}),resultId,tweetId:record.tweetId,userId:record.user.userId,createdAt:record.createdAt??null}},tx);
   if(material.created||material.revised)await queueProcessing(material.articleId,{db:tx});
   await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${material.articleId},provenance=provenance||${tx.json({xSearchImport:{key:commandKey,intent,userId:record.user.userId,tweetId:record.tweetId}})} WHERE id=${resultId}`;
+  await registerImportedVideo(tx,resultId,{platform:"x",operationId:"5K5EG87P",record,confirmed:provider==="redfox"&&redfoxXHasVideo(record.medias),singleVideo:(record.medias??[]).filter(m=>redfoxXHasVideo([m])).length===1,videoProof:"verified-own-media-type"});
   await audit(actor,"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId:material.articleId,userId:record.user.userId},undefined,tx);
   return {resultId,sourceId,articleId:material.articleId};
 }

@@ -9,8 +9,9 @@ export interface OperationRow {
   id: number; subscriptionId?: number | null; status: string; provider: string; operationKey: string; step: string; stepVersion: number;
   generation: number; waitReason: string | null; nextAttemptAt: string | null; createdAt: string;
 }
-export interface OperationFile { key: string; status: string; contentType: string; bytes: number; filename: string; width: number | null; height: number | null }
+export interface OperationFile { kind?: "image" | "audio" | "video" | "text"; origin?: string | null; createdAt?: string | null; expiresAt?: string | null; expired?: boolean; source?: import("./image-types").PrivateAsset["source"]; key: string; status: string; contentType: string; bytes: number; filename: string; width: number | null; height: number | null }
 export interface OperationResult {
+  videoDownloadRunId?: number | null; videoDownloadRunIds?: number[] | null;
   id: number; kind: string; data: Record<string, unknown>; receiptId: number | null;
   articleId: string | null; articleTitle?: string | null; sourceId: string | null; fileKey: string | null; imported: boolean; file: OperationFile | null;
 }
@@ -18,7 +19,7 @@ export interface OperationDetail extends OperationRow {
   subscriptionId: number | null;
   currentReceiptId: number | null; receiptId: number | null; receipt: { status: string; attempts: number; model?: string | null } | null; jobState: string | null;
   nextAction: string; nextResultCursor: number | null; results: OperationResult[];
-  inputs: { tool?:string;upstream?:string;xhsCommentPlan?: XhsCommentPlan; videoPlan?: VideoPlan; family?: string; aiSearchPlan?: AiSearchPlan; operationId?: string; platform?: string; mode?: string; draft?: boolean; window?: string; sources?: Array<{ id: string; name?: string; config?: Record<string, unknown>; interval_minutes?: number }>; parameters?: Record<string, unknown>; fileKeys?: string[]; transcriptionPlan?: TranscriptionPlan; imagePlan?: { referenceUploadLimit: number; submissionLimit: number; pollLimit: number; pollDeadlineSeconds: number; submissionCost: null }; recoveryUnavailable?: boolean };
+  inputs: { videoDownload?: import("./subscription-video-data").VideoDownloadInput; tool?:string;upstream?:string;xhsCommentPlan?: XhsCommentPlan; videoPlan?: VideoPlan; family?: string; aiSearchPlan?: AiSearchPlan; operationId?: string; platform?: string; mode?: string; draft?: boolean; window?: string; sources?: Array<{ id: string; name?: string; config?: Record<string, unknown>; interval_minutes?: number }>; parameters?: Record<string, unknown>; fileKeys?: string[]; transcriptionPlan?: TranscriptionPlan; imagePlan?: { referenceUploadLimit: number; submissionLimit: number; pollLimit: number; pollDeadlineSeconds: number; submissionCost: null }; recoveryUnavailable?: boolean };
   progress: Record<string, unknown>;
   attempts: Array<{ id: number; attempt: number; status: string; started_at: string; finished_at: string | null; error: string | null; has_retained_response: boolean }>;
 }
@@ -26,7 +27,9 @@ export const operationStatus: Record<string, string> = { active: "进行中", wa
 export const operationAction: Record<string, string> = { "view-results": "查看结果", "review-unknown": "核对未知回执", "review-or-resume": "核对后恢复或放弃", "local-recovery": "等待本地恢复已收响应", "wait-for-job": "等待队列执行", "wait-for-recovery": "等待恢复调度" };
 export function operationEnded(status: string) { return status === "completed" || status === "failed"; }
 
+export const operationProviderLabel = (provider: string) => provider === "local" ? "本地保存" : provider;
 export const operationLabel: Record<string, string> = {
+  "subscription.video.download": "订阅视频保存",
   "agentkey.x.search": "AgentKey X 帖子搜索",
   "agentkey.x.account_posts": "AgentKey X 账号帖子",
   "agentkey.x.detail": "AgentKey X 帖子详情",

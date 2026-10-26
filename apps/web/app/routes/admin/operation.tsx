@@ -1,3 +1,4 @@
+import { SubscriptionVideoProgress } from "../../features/admin/subscription-video-result";
 import { agentKeyXAccountUsername } from "../../features/admin/x-search-import-data";
 import { WorkResultSelection } from "../../features/admin/work-result-selection";
 import { collectionSubscriptionsHref, isCollectionOperationKey } from "../../features/admin/collection-subscription-data";
@@ -21,7 +22,7 @@ import type { ImageOptions } from "../../features/admin/image-types";
 import { useAdminAction } from "../../features/admin/action";
 import { AdminPage, Button, ButtonLink, Card, DataTable, Empty, Json, KV, ReasonDialog, Time } from "../../features/admin/ui";
 import { OperationResultItem, type BindingSource } from "../../features/admin/operation-result";
-import { operationAction, operationLabel, operationEnded, type OperationDetail, type OperationResult } from "../../features/admin/operation-types";
+import { operationAction, operationLabel, operationProviderLabel, operationEnded, type OperationDetail, type OperationResult } from "../../features/admin/operation-types";
 import { mpCollectionCost, mpLibrary, mpLibraryLabel } from "../../features/admin/operation-switch-data";
 import { OperationBadge, useOperationPolling } from "../../features/admin/operation-ui";
 import { platformLabels } from "../../features/admin/platform-labels";
@@ -77,7 +78,7 @@ export default function Operation({ loaderData: r }: Route.ComponentProps) {
   const records = r.results.filter(result => xhsCommentTask && result.kind === "xhs_comment_task" || videoTask && ["video_task", "video_reference"].includes(result.kind) || ["image_task", "image_reference"].includes(result.kind) || transcriptionTask && result.kind === "transcription_task" && isTranscriptionResult(result.kind, result.data) || aiSearchTask && result.kind === "ai_search_task" && isAiSearchResult(result.kind, result.data));
   const recordIds = new Set(records.map(result => result.id));
   const primaryResults = r.results.filter(result => !recordIds.has(result.id));
-  const invalidatedSubscription = collectionTask && r.status === "stopped" && r.waitReason === "Subscription execution configuration changed";
+  const invalidatedSubscription = (collectionTask || !!r.inputs.videoDownload) && r.status === "stopped" && r.waitReason === "Subscription execution configuration changed";
   const ended = operationEnded(r.status);
   const toolView = videoTask ? "videos" : imageTask ? "images" : aiSearchTask ? "ai-search" : mediaUploadTask ? "assets" : transcriptionTask || xhsCommentTask || r.inputs.platform === "tools" ? "tools" : r.operationKey.startsWith("redfox.x.") ? "x" : "platforms";
   const historyHref = r.subscriptionId ? `/admin/operations?subscriptionId=${r.subscriptionId}` : "/admin/operations";
@@ -86,13 +87,14 @@ export default function Operation({ loaderData: r }: Route.ComponentProps) {
   const platformLabel = platformLabels[platform];
   const socialQuery = socialResearchPlatform(r.inputs.operationId) === platform && !!socialResearchPlatform(r.inputs.operationId);
   const querySubtitle = platform === "tools" ? "工具查询" : socialQuery ? `${platformLabel ?? platform} 评论 / 关注研究` : platformLabel ? `${platformLabel}${platform === "youtube" ? " 视频查询" : platform === "instagram" ? " 查询" : platform === "shipinhao" || platform === "kuaishou" ? "查询" : platform === "tiktok" ? " 平台查询" : "平台查询"}` : "平台查询";
-  return <AdminPage title={<span className="flex flex-wrap items-center gap-2">执行记录 #{r.id}<OperationBadge status={r.status} /></span>} subtitle={`${r.provider} · ${r.operationKey === "redfox.sync.query" ? querySubtitle : operationLabel[r.operationKey] ?? r.operationKey}`} actions={<><Button busy={refresh.state !== "idle"} onClick={() => refresh.revalidate()}>刷新</Button><ButtonLink to={`/admin/data-tools?view=${toolView}`}>返回工具</ButtonLink><ButtonLink to={historyHref}>{r.subscriptionId ? "同订阅执行历史" : "执行记录列表"}</ButtonLink></>}>
+  return <AdminPage title={<span className="flex flex-wrap items-center gap-2">执行记录 #{r.id}<OperationBadge status={r.status} /></span>} subtitle={`${operationProviderLabel(r.provider)} · ${r.operationKey === "redfox.sync.query" ? querySubtitle : operationLabel[r.operationKey] ?? r.operationKey}`} actions={<><Button busy={refresh.state !== "idle"} onClick={() => refresh.revalidate()}>刷新</Button><ButtonLink to={`/admin/data-tools?view=${toolView}`}>返回工具</ButtonLink><ButtonLink to={historyHref}>{r.subscriptionId ? "同订阅执行历史" : "执行记录列表"}</ButtonLink></>}>
     <nav aria-label="执行记录定位" className="mb-4 flex flex-wrap gap-4 text-[13px]">
       <a className="text-accent" href="#progress">查看进度</a><a className="text-accent" href="#results">查看结果</a>
       {collectionTask && r.subscriptionId && <Link className="text-accent" to={collectionSubscriptionsHref(r.subscriptionId)}>返回采集订阅 #{r.subscriptionId}</Link>}
       {r.inputs.sources?.length ? <div className="flex flex-wrap gap-3">{!r.inputs.draft && r.inputs.sources.length > 1 && <span className="text-ink-3">选择相关信源：</span>}{r.inputs.sources.map(s => r.inputs.draft ? <span key={s.id}>草稿 {s.id}（未保存）</span> : <Link key={s.id} className="text-accent" to={`/admin/sources/${encodeURIComponent(s.id)}`}>{r.inputs.sources!.length === 1 ? "返回信源：" : ""}{s.name ?? s.id}</Link>)}</div> : null}
     </nav>
     <div id="progress" className="scroll-mt-5"><Card title="当前进度" className="mb-5">
+      {r.inputs.videoDownload && <SubscriptionVideoProgress input={r.inputs.videoDownload} progress={r.progress} ended={ended} />}
       {collectionTask && <p className="mb-4 border-b border-line pb-4 text-[13px] text-ink-3">{platformLabel ?? platform}采集订阅 · {ended ? "本轮已结束，可查看结果" : r.step.endsWith(".page") ? "查询本页候选与研究记录" : r.step.endsWith(".detail") ? "补全已接通的必要详情" : "按真实身份处理作品或保留待核实结果"}。研究记录与作品候选分别保留，结果不表示全部已入库；权限不因订阅提高。</p>}
       {xhsCommentTask && <XhsCommentProgress operation={r} />}
       {videoTask && <VideoProgress operation={r} />}

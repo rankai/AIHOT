@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {redfoxTiktokHasVideo} from "./video-media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -39,6 +40,7 @@ export async function importTiktokResult(resultId:number,raw:unknown,actor:strin
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
     const operation=TiktokOperationId.safeParse(executionInput.operationId);
     if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="tiktok"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Tiktok result");
@@ -90,6 +92,7 @@ export async function importTiktokResult(resultId:number,raw:unknown,actor:strin
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({tiktokImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
+    if(articleId)await registerImportedVideo(tx,resultId,{platform:"tiktok",operationId:String(parsed.data.operationId),record:record,confirmed:(redfoxTiktokHasVideo(String(parsed.data.operationId),record)),singleVideo:true,videoProof:"verified-current-work-type",workId:nativeId!});
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

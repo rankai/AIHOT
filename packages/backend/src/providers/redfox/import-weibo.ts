@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {agentKeyWeiboEvidence} from "../agentkey/weibo-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
@@ -21,6 +22,7 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
   const execute=async (tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,r.limits,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const agentkey=snapshot.provider==="agentkey";
     if(agentkey&&input.supplement)throw new UnsupportedReplacement("AgentKey requires original received identity; manual supplements are not supported");
     const verified=agentkey?await agentKeyWeiboEvidence(tx,snapshot):null;
@@ -97,6 +99,7 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
       if(material.created || material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({weiboImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
+    if(articleId)await registerImportedVideo(tx,resultId,{platform:"weibo",operationId:String(operation),record:received,confirmed:(!agentkey&&(operation==="TXQPVGJG"&&received.type==="video"||operation==="API_1789098514899"&&!!mediaUrl(received.videoUrl))),singleVideo:true,videoProof:"verified-current-work-type"});
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,uid,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };
