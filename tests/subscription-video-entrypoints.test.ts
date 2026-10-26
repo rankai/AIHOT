@@ -16,10 +16,11 @@ import {videoResourcesFromHtml} from '@aihot/backend/content/media';
 import {assertSupportedConfig} from '@aihot/backend/sources/config-keys';
 import {assetMetadata,listAssets,getAsset} from '@aihot/backend/operations/assets';
 
-import {createPlatformSubscription,startPlatformSubscription} from '@aihot/backend/sources/platform-subscriptions';
+import {createPlatformSubscription,startPlatformSubscription,updatePlatformSubscription} from '@aihot/backend/sources/platform-subscriptions';
 import {importManualWorkResult} from '@aihot/backend/providers/redfox/import-manual-work';
 import {importTiktokResult} from '@aihot/backend/providers/redfox/import-tiktok';
 import {createSynchronousQuery} from '@aihot/backend/providers/redfox/synchronous';
+import {registerSubscriptionVideo} from '@aihot/backend/sources/subscription-video';
 import {upsertMaterial} from '@aihot/backend/content/materials';
 
 import {preflightXReplacement,switchXCollection} from '@aihot/backend/sources/x-replacement';
@@ -139,5 +140,90 @@ test('native provider switching preserves auto-save, invalidates an unknown pars
  const stopped=await state(download.id);assert.equal(stopped.status,'stopped');assert.equal(stopped.generation,unknown.generation+2);assert.equal(stopped.current_receipt_id,unknown.current_receipt_id);assert.equal((await sql`SELECT status FROM receipts WHERE id=${unknown.current_receipt_id}`)[0]!.status,'unknown');
  assert.equal(logicalMpConfig({ghid:'test',redfoxLibrary:'wide',autoDownloadVideo:true}).autoDownloadVideo,true);
  for(const platform of ['x','weibo','toutiao','douyin'])assert.match(videoDownloadCapability(platform,'agentkey','QEQLCKD6'),/暂不会自动保存/);
- assert.match(videoDownloadCapability('shipinhao','redfox','E7G00COY'),/定时列表缺少可靠视频类型/);
+ assert.match(videoDownloadCapability('shipinhao','redfox','E7G00COY'),/经人工核实本条原文和作者并入库后保存/);
+});
+
+
+test('Shipinhao lists with or without received IDs confirm and save only after manual import, with repeat and cross-subscription reuse',async()=>{
+ const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic Shipinhao','external','isolated')`;
+ for(const operationId of ['E7G00COY','OVUTOTCV'])for(const withId of [true,false]){
+  const original=`https://weixin.qq.com/sph/${tag()}`,record={...(withId?{videoId:tag()}:{}),description:'Verified list video',videoUrl:mediaUrl+'/shipinhao'};
+  const parameters=operationId==='E7G00COY'?{keyword:tag()}:{nickname:tag()};
+  const collected=await platformCollect(operationId,parameters,{list:[record]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+  assert.equal(await child(collected.run.id),undefined);
+  const input={sourceId,reason:'Checked list work',supplement:{url:original,evidence:'Verified this original and its author'}};
+  const imported=await importManualWorkResult(result.id,input,'test',tag());
+  const [article]=await sql`SELECT media,identity_key FROM articles WHERE id=${imported!.articleId}`;
+  assert.ok(article!.media.some((m:any)=>m.kind==='video'&&m.confirmed));
+  const run=await child(collected.run.id);assert.ok(run);assert.equal(run.input.workId,article!.identity_key);
+  const before=gets.length;assert.equal((await step(run.id)).status,'completed');assert.deepEqual(gets.slice(before),['/shipinhao']);
+  const [file]=await sql`SELECT f.* FROM stored_files f JOIN operation_results r ON r.file_key=f.key WHERE r.run_id=${run.id}`;
+  assert.equal((await getAsset(file!.key)).bytes,bytes.length);
+  await importManualWorkResult(result.id,input,'test',tag());assert.equal((await child(collected.run.id)).id,run.id);
+  const again=await platformCollect(operationId,parameters,{list:[record]});await importManualWorkResult(again.results.find(r=>r.kind==='shipinhao_work')!.id,input,'test',tag());
+  const reused=await child(again.run.id),beforeReuse=gets.length;assert.equal((await step(reused.id)).status,'completed');assert.equal(gets.length,beforeReuse);
+  const [reuseFile]=await sql`SELECT file_key FROM operation_results WHERE run_id=${reused.id} AND file_key IS NOT NULL`;assert.equal(reuseFile!.file_key,file!.key);
+  assert.equal((await sql`SELECT expires_at FROM stored_files WHERE key=${file!.key}`)[0]!.expires_at.toISOString(),file!.expires_at.toISOString());
+ }
+});
+
+
+test('Shipinhao empty, cover-only and contradictory works never register; standalone queries and disabled subscriptions stay inert',async()=>{
+ const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic manual boundaries','external','isolated')`;
+ const input=()=>({sourceId,reason:'Verified work',supplement:{url:`https://weixin.qq.com/sph/${tag()}`,evidence:'Verified original and author'}});
+ for(const fields of [{videoUrl:''},{coverUrl:mediaUrl+'/cover'},{videoUrl:mediaUrl+'/video',workType:'normal'},{videoUrl:mediaUrl+'/video',workType:'图文'},{videoUrl:'javascript:bad'}]){
+  const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Not confirmed',...fields}]});
+  const imported=await importManualWorkResult(collected.results.find(r=>r.kind==='shipinhao_work')!.id,input(),'test',tag());
+  assert.equal(await child(collected.run.id),undefined);assert.equal((await sql`SELECT media FROM articles WHERE id=${imported!.articleId}`)[0]!.media.some((m:any)=>m.confirmed),false);
+ }
+ collectionData={list:[{description:'Standalone video',videoUrl:mediaUrl+'/video'}]};
+ const query=await createSynchronousQuery({operationId:'E7G00COY',parameters:{keyword:tag()}},'test',tag());await step(query.id);
+ const [q]=await sql`SELECT id FROM operation_results WHERE run_id=${query.id} AND kind='shipinhao_work'`;await importManualWorkResult(q!.id,input(),'test',tag());assert.equal(await child(query.id),undefined);
+ for(const patch of [{enabled:false},{autoDownloadVideo:false}]){
+  const collected=await platformCollect('OVUTOTCV',{nickname:tag()},{list:[{description:'Pending save',videoUrl:mediaUrl+'/pending'}]});
+  await importManualWorkResult(collected.results.find(r=>r.kind==='shipinhao_work')!.id,input(),'test',tag());const run=await child(collected.run.id);assert.ok(run);
+  const [sub]=await sql`SELECT * FROM collection_subscriptions WHERE id=${collected.sub.id}`;
+  const before=gets.length,receipts=(await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n;
+  await updatePlatformSubscription(sub!.id,{editVersion:sub!.edit_version,config:{...sub!.config,provider:sub!.provider,enabled:sub!.enabled,limits:sub!.limits,intervalMinutes:sub!.interval_minutes,...patch}},'test');
+  await step(run.id);assert.equal((await state(run.id)).status,'stopped');assert.equal(gets.length,before);assert.equal((await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n,receipts);
+ }
+});
+
+
+test('Shipinhao cross-source discovery survives an ineligible original author without granting a download',async()=>{
+ for(const operationId of ['E7G00COY','OVUTOTCV'])for(const enabled of [false,true]){
+  const owner=tag(),target=tag(),url=`https://weixin.qq.com/sph/${tag()}`;
+  await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${owner},'Original author','external','isolated'),(${target},'Chosen author','external','isolated')`;
+  const old=await upsertMaterial({sourceId:owner,url,title:'Original work',bodyText:'Original body',via:'import'});
+  await sql`UPDATE sources SET enabled=${enabled} WHERE id=${owner}`;
+  const [beforeArticle]=await sql`SELECT * FROM articles WHERE id=${old.articleId}`,beforeSources=await sql`SELECT * FROM sources WHERE id IN (${owner},${target}) ORDER BY id`;
+  const parameters=operationId==='E7G00COY'?{keyword:tag()}:{nickname:tag()};
+  const collected=await platformCollect(operationId,parameters,{list:[{description:'New discovery',videoUrl:mediaUrl+'/discovery'}]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+  const beforeGets=gets.length,receipts=(await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n;
+  const imported=await importManualWorkResult(result.id,{sourceId:target,reason:'Verified discovery',supplement:{url,evidence:'Verified this original and author'}},'test',tag());
+  assert.equal(imported!.articleId,old.articleId);
+  const [stored]=await sql`SELECT article_id,source_id,provenance FROM operation_results WHERE id=${result.id}`;
+  assert.equal(stored!.article_id,old.articleId);assert.equal(stored!.source_id,target);assert.ok(stored!.provenance.manualWorkImport);
+  assert.equal((await sql`SELECT 1 FROM article_discoveries WHERE article_id=${old.articleId} AND source_id=${target} AND via='import'`).length,1);
+  assert.deepEqual((await sql`SELECT * FROM articles WHERE id=${old.articleId}`)[0],beforeArticle);
+  assert.deepEqual(await sql`SELECT * FROM sources WHERE id IN (${owner},${target}) ORDER BY id`,beforeSources);
+  const download=await child(collected.run.id);
+  if(enabled){assert.ok(download);assert.equal(stored!.provenance.videoDownloadRunId,download.id);assert.equal(download.input.videoDownloadOwnership.sourceId,owner);}
+  else{assert.equal(download,undefined);assert.equal(stored!.provenance.videoDownloadRunId,undefined);assert.equal(stored!.provenance.videoDownloadRunIds,undefined);}
+  assert.equal(gets.length,beforeGets);assert.equal((await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n,receipts);
+ }
+});
+
+test('real video registration association errors still propagate and roll back the material transaction',async()=>{
+ const sourceId=tag(),url=`https://weixin.qq.com/sph/${tag()}`;
+ await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Rollback author','external','isolated')`;
+ const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Rollback work',videoUrl:mediaUrl+'/rollback'}]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+ await assert.rejects(sql.begin(async tx=>{
+  const material=await upsertMaterial({sourceId,url,title:'Must roll back',via:'import'},tx);
+  await tx`UPDATE operation_results SET article_id=${material.articleId},source_id=${sourceId} WHERE id=${result.id}`;
+  await registerSubscriptionVideo(tx,{parentRunId:collected.run.id,parentResultId:result.id,articleId:material.articleId,sourceId:'wrong-parent-author',workId:url,originalUrl:url,platform:'shipinhao',singleVideo:true,videoProof:'synthetic-verified-work'});
+ }),/Video registration requires the committed parent material association/);
+ assert.equal((await sql`SELECT 1 FROM articles WHERE url=${url}`).length,0);
+ assert.equal((await sql`SELECT 1 FROM article_discoveries WHERE source_id=${sourceId}`).length,0);
+ const [stored]=await sql`SELECT article_id,source_id,provenance FROM operation_results WHERE id=${result.id}`;assert.equal(stored!.article_id,null);assert.equal(stored!.source_id,null);assert.equal(stored!.provenance.videoDownloadRunId,undefined);assert.equal(await child(collected.run.id),undefined);
 });

@@ -39,7 +39,7 @@ export function ManualWorkActions({ result: r }: { result: OperationResult }) {
     }}>查询此作品详情</Button><p className="text-[12px] text-ink-3">新建普通只读查询任务，文档基价 0.04 元/请求，实际实扣未核对；使用 query 次数预算。原任务和结果不改写，不自动导入。</p>{!detail && <p className="text-[12px] text-amber">此项没有实际收到的{platform === "shipinhao" ? " videoId" : " photoId"}，不能用请求 ID、其他种类 ID 或昵称发起同作品详情。</p>}</div>}
     <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>查看人工归属的作者信源</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!imported && <Button size="sm" disabled={!!pending} onClick={() => setOpen(true)}>逐项人工导入作品</Button>}</div>
     {!imported && <p className="text-[12px] text-ink-3">结果保留在此；只有人工选择隔离信源、核实本项原文及作者关系并明确导入，才进入材料链。不建立稳定账号绑定，不继承其他权限。</p>}
-    <ReasonDialog open={open} title={`人工导入${name}作品`} description="必须显式选择已启用的隔离 external 信源，并核实此项作品原文与所选作者的关系。不会按昵称自动匹配或绑定永久账号，也不提高参与方式、全文或一手权限；旧文章去重保留原归属。此命令不请求供应商。" busy={!!pending} onClose={close} onSubmit={async reason => {
+    <ReasonDialog open={open} title={`人工导入${name}作品`} description="必须显式选择已启用的隔离 external 信源，并核实此项作品原文与所选作者的关系。不会按昵称自动匹配或绑定永久账号，也不提高参与方式、全文或一手权限；旧文章去重保留原归属。入库本身在本地执行；若关联的有效订阅已开启自动保存视频，后台优先下载已收视频地址，必要时可能额外产生 Redfox 媒体解析费用，受 redfox.media 次数预算控制；结果可在关联执行记录查看。" busy={!!pending} onClose={close} onSubmit={async reason => {
       setError(null);
       const command = manualWorkImportRequest(r.kind, r.data, { sourceId, url, evidence, reason }, candidates.state, rows);
       if (command.error) { setError(command.error); return false; }

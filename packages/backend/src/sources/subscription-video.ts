@@ -5,7 +5,7 @@ import { createRun, type RunRow } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
 import { lockSubscription } from "./subscriptions.ts";
 import { collectedVideoCandidates, frozenVideoManifest, videoResolver, type VideoManifest } from "./subscription-video-candidates.ts";
-import { SUBSCRIPTION_VIDEO_DOWNLOAD } from "./subscription-video-ownership.ts";
+import { SUBSCRIPTION_VIDEO_DOWNLOAD, lockVideoDownloadOwners } from "./subscription-video-ownership.ts";
 
 /** Manual imports must take the same subscription-before-source lock order as collectors. */
 export async function lockVideoParentSubscriptions(tx:Tx,resultId:number) {
@@ -62,6 +62,8 @@ export async function registerSubscriptionVideo(tx: Tx, input: {
   if(!receipt||!["received","completed"].includes(receipt.status))throw new Error("Video registration requires retained receipt evidence");
   const manifest=input.manifest??frozenVideoManifest(result.receipt_id,receipt.attempts,result.data,input.singleVideo?[{candidates:[]}]:[],input.singleVideo);
   if(manifest.receiptId!==result.receipt_id||manifest.attempt!==receipt.attempts)throw new Error("Video manifest does not match the received source attempt");
+  // Losing optional save eligibility must not roll back a valid import; registration errors still propagate.
+  if(!await lockVideoDownloadOwners(tx,sub.id,input.articleId))return null;
   const run = await createRun(tx, { actor: "subscription-video", commandKey, provider: "local", operationKey: SUBSCRIPTION_VIDEO_DOWNLOAD,
     contractVersion: 1, subscriptionIds: [sub.id], stepKey: manifest.targets.some(t=>t.candidates.length)?"subscription.video.save":"subscription.video.resolve", limits: { retries: 1 }, input: {
       ...input, manifest, collector: parent.provider, sourceReceiptId: result.receipt_id,

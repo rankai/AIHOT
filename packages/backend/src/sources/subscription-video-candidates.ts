@@ -102,6 +102,6 @@ export function videoDownloadCapability(platform:string,provider:string,operatio
   const retained="保留自动保存开关。";
   if(provider==="agentkey"&&(["x","x-research","weibo","toutiao"].includes(platform)||platform==="douyin"&&operation!=="OWIBYU1V"))return retained+"目标路线目前没有可核实的视频类型，因此暂不会自动保存；不会为确认类型额外购买或回切供应商。";
   if(platform==="wechat")return retained+(provider==="dajiala"?"从已收正文中有归属证明的视频元素提取地址；":provider==="agentkey"?"仅已收 H5 正文视频元素或明确视频类型可登记；":"仅已核实视频链接或正文视频元素可登记；")+"公众号没有独立解析兜底，缺址记录原因，不自动补购。";
-  if(platform==="shipinhao")return retained+"当前定时列表缺少可靠视频类型；独立详情查询不触发自动保存。";
+  if(platform==="shipinhao")return retained+"列表须有已核实视频地址，经人工核实本条原文和作者并入库后保存；地址不可用时可按媒体预算使用固定 Redfox 解析器。独立查询不触发自动保存。";
   return retained+(provider==="agentkey"?"仅已核实的视频记录可登记；当前无已核实直接下载字段。":"优先使用已收且已核实的直接视频地址。")+(videoResolver(platform==="x-research"?"x":platform)?"缺址或失败可按限额使用固定 Redfox 解析器，不切换采集商。":"没有独立解析兜底，缺址记录原因。");
 }
