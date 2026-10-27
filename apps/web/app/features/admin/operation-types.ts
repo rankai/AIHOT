@@ -6,7 +6,7 @@ export interface OperationAccepted { runId: number; status: string }
 export interface SourcePreview { ms: number; count: number; items: Array<{ title: string; url: string; publishedAt: string | null; excerpt: string }> }
 export type PreviewResponse = SourcePreview | OperationAccepted;
 export interface OperationRow {
-  id: number; status: string; provider: string; operationKey: string; step: string; stepVersion: number;
+  id: number; subscriptionId?: number | null; status: string; provider: string; operationKey: string; step: string; stepVersion: number;
   generation: number; waitReason: string | null; nextAttemptAt: string | null; createdAt: string;
 }
 export interface OperationFile { key: string; status: string; contentType: string; bytes: number; filename: string; width: number | null; height: number | null }

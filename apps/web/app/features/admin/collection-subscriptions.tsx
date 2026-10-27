@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PlatformCollectionProviderPreflight } from "@aihot/contracts/redfox";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { useAdminAction } from "./action";
@@ -15,30 +15,33 @@ export function CollectionSubscriptions({ subscriptions, operations, requestedId
   const rows = refresh.data?.subscriptions ?? subscriptions, available = collectionOperations(operations), platforms = [...new Set(available.map(operation => operation.platform))];
   const [selected, setSelected] = useState<number | null>(seed ? null : requestedId), [filter, setFilter] = useState("");
   const [newSequence, setNewSequence] = useState(0), [newSeed, setNewSeed] = useState(seed);
+  const editor = useRef<HTMLDivElement>(null), [editorRequest, setEditorRequest] = useState(() => (seed && available.some(operation => operation.id === seed.operationId) || requestedId !== null && rows.some(row => row.id === requestedId)) ? 1 : 0);
+  const edit = (id: number | null) => { setSelected(id); setEditorRequest(value => value + 1); };
+  useEffect(() => {
+    if (!editorRequest) return;
+    editor.current?.scrollIntoView({ block: "start" });
+    editor.current?.querySelector<HTMLInputElement>('input[aria-label="订阅名称"]')?.focus({ preventScroll: true });
+  }, [editorRequest]);
   return <div className="min-w-0 space-y-5">
-    <Card title="采集订阅" right={<><Button size="sm" disabled={!!actions.pending} busy={refresh.state !== "idle"} onClick={() => refresh.load(collectionSubscriptionsHref(selected))}>刷新状态（保留草稿）</Button><Button size="sm" disabled={!!actions.pending} onClick={() => { setSelected(null); setNewSeed(null); setNewSequence(value => value + 1); }}>新建订阅</Button></>} pad={false}>
+    <Card title="采集订阅" right={<><Button size="sm" disabled={!!actions.pending} busy={refresh.state !== "idle"} onClick={() => refresh.load(collectionSubscriptionsHref(selected))}>刷新状态（保留草稿）</Button><Button size="sm" disabled={!!actions.pending} onClick={() => { edit(null); setNewSeed(null); setNewSequence(value => value + 1); }}>新建订阅</Button></>} pad={false}>
       <div className="space-y-3 border-b border-line p-4 text-[13px] text-ink-3"><p>稳定作者与原文齐全的作品沿原材料流程处理，新作者先隔离；缺身份或原文只留结果，可显式查询补全。相关话题、推荐和账号研究不自动成为新闻。已有信源的主订阅、参与方式与公开权限仍在对应信源详情中管理，本视图管理平台采集订阅。</p><Field label="订阅平台筛选"><Select aria-label="订阅平台筛选" value={filter} disabled={!!actions.pending} onChange={e => setFilter(e.target.value)}><option value="">全部平台</option>{[...new Set([...platforms, ...rows.map(row => row.platform)])].map(platform => <option key={platform} value={platform}>{platformLabels[platform] ?? platform}</option>)}</Select></Field></div>
       <DataTable rows={rows.filter(row => !filter || row.platform === filter)} rowKey={row => row.id} empty="还没有匹配的采集订阅；可在本页新建订阅，默认停用，不会调用供应商。" columns={[
-        { key: "name", label: "订阅", render: row => <button disabled={!!actions.pending} className="text-left font-medium text-accent disabled:opacity-50" onClick={() => setSelected(row.id)}>{row.name}</button> },
-        { key: "platform", label: "平台", render: row => platformLabels[row.platform] ?? row.platform },
-        { key: "provider", label: "供应商", render: row => {
+        { key: "name", label: "订阅 / 平台与供应商", render: row => {
           const operation = available.find(candidate => candidate.id === row.operationId);
-          return operation ? collectionProviderLabel(operation, row.provider) : row.provider;
+          return <div className="space-y-1"><button disabled={!!actions.pending} className="text-left font-medium text-accent disabled:opacity-50" onClick={() => edit(row.id)}>{row.name}</button><p className="text-[12px] text-ink-3">{platformLabels[row.platform] ?? row.platform} · {operation ? collectionProviderLabel(operation, row.provider) : row.provider}</p></div>;
         } },
-        { key: "kind", label: "采集内容", render: row => { const operation = available.find(operation => operation.id === row.operationId); return operation ? providerOperation(operation, row.provider).label : row.operationId; } },
-        { key: "details", label: "详情补全", render: row => {
-          const base = available.find(operation => operation.id === row.operationId), operation = base ? providerOperation(base, row.provider) : undefined, legacy = operation ? collectionLegacyDetail(operation, row) : null;
-          const target = operation ? collectionDetailOperations(operation).find(choice => choice.operationId === row.detailOperationId) ?? legacy : undefined;
-          return row.enrichDetails ? <div className="max-w-64 space-y-1 break-words text-[12px]"><p>{target?.label ?? row.detailOperationId ?? "目标未配置"}{legacy ? "（旧配置兼容）" : ""}</p>{row.detailPage != null && <p>详情页码：{row.detailPage}</p>}<p>每轮最多 {row.limits.details} 个详情步骤，使用 collect 预算</p><p>{collectionDetailPriceNote(target)}</p></div> : "未开启";
+        { key: "details", label: "采集内容 / 详情补全", render: row => {
+          const base = available.find(candidate => candidate.id === row.operationId), operation = base ? providerOperation(base, row.provider) : undefined;
+          const legacy = operation ? collectionLegacyDetail(operation, row) : null, target = operation ? collectionDetailOperations(operation).find(choice => choice.operationId === row.detailOperationId) ?? legacy : undefined;
+          return <div className="max-w-64 space-y-1 break-words"><p>{operation?.label ?? row.operationId}</p><p className="text-[12px] text-ink-3">{row.enrichDetails ? <>{target?.label ?? row.detailOperationId ?? "目标未配置"}{legacy ? "（旧配置兼容）" : ""} · 每轮最多 {row.limits.details} 个详情步骤{row.detailPage != null ? ` · 页码 ${row.detailPage}` : ""}</> : "未开启详情补全"}</p></div>;
         } },
-        { key: "enabled", label: "启停", render: row => <Badge tone={row.enabled ? "ok" : "muted"}>{row.enabled ? "已启用" : "已停用"}</Badge> },
-        { key: "interval", label: "周期", render: row => `${row.intervalMinutes} 分钟` },
-        { key: "next", label: "下次运行", render: row => <Time at={row.nextRunAt} /> },
-        { key: "run", label: "当前执行记录", render: row => row.activeRun ? <div className="space-y-1"><Link className="text-accent" to={`/admin/operations/${row.activeRun.id}`}>#{row.activeRun.id}</Link><div><OperationBadge status={row.activeRun.status} /></div>{row.activeRun.waitReason && <p className="max-w-64 text-[12px] text-ink-3">{row.activeRun.waitReason}</p>}</div> : "无在途执行" },
-        { key: "edit", label: "", render: row => <Button size="sm" disabled={!!actions.pending} onClick={() => setSelected(row.id)}>编辑</Button> },
+        { key: "schedule", label: "启停 / 调度", render: row => <div className="space-y-1"><Badge tone={row.enabled ? "ok" : "muted"}>{row.enabled ? "已启用" : "已停用"}</Badge><p className="text-[12px] text-ink-3">每 {row.intervalMinutes} 分钟</p><p className="text-[12px] text-ink-3">下次：<Time at={row.nextRunAt} /></p></div> },
+        { key: "run", label: "当前执行记录", render: row => row.activeRun ? <div className="space-y-1"><Link className="text-accent" to={`/admin/operations/${row.activeRun.id}#progress`}>查看进度 #{row.activeRun.id}</Link><div><OperationBadge status={row.activeRun.status} /></div>{row.activeRun.waitReason && <p className="max-w-64 text-[12px] text-ink-3">{row.activeRun.waitReason}</p>}</div> : "无在途执行" },
+        { key: "history", label: "历史与结果", render: row => <Link className="whitespace-nowrap text-accent" to={`/admin/operations?subscriptionId=${row.id}`}>执行历史与结果</Link> },
+        { key: "edit", label: "", render: row => <Button size="sm" disabled={!!actions.pending} onClick={() => edit(row.id)}>编辑</Button> },
       ]} />
     </Card>
-    {selected !== null && !rows.some(row => row.id === selected) ? <p className="text-[13px] text-amber">当前列表中没有此订阅，请刷新或选择其他订阅。</p> : <SubscriptionEditor key={selected ?? `new-${newSequence}`} initial={rows.find(row => row.id === selected) ?? null} rows={rows} operations={available} seed={newSeed} actions={actions} onRefresh={() => refresh.load(collectionSubscriptionsHref(selected))} refreshing={refresh.state !== "idle"} />}
+    <div ref={editor} className="scroll-mt-5">{selected !== null && !rows.some(row => row.id === selected) ? <p className="text-[13px] text-amber">当前列表中没有此订阅，请刷新或选择其他订阅。</p> : <SubscriptionEditor key={selected ?? `new-${newSequence}`} initial={rows.find(row => row.id === selected) ?? null} rows={rows} operations={available} seed={newSeed} actions={actions} onRefresh={() => refresh.load(collectionSubscriptionsHref(selected))} refreshing={refresh.state !== "idle"} />}</div>
   </div>;
 }
 function SubscriptionEditor({ initial, rows, operations, seed, actions, onRefresh, refreshing }: { initial: CollectionSubscription | null; rows: CollectionSubscription[]; operations: PlatformOperation[]; seed?: CollectionSeed | null; actions: ReturnType<typeof useAdminAction>; onRefresh: () => void; refreshing: boolean }) {
@@ -124,6 +127,6 @@ function SubscriptionEditor({ initial, rows, operations, seed, actions, onRefres
       setDrafts(previous => ({...previous, [result.config.operationId]: collectionDraft(baseOperation!, updated)}));
       setTargetProvider(latest!.provider); setPreflight(null); setSwitchOpen(false); setPreviewId(null); setError(null); setSaved(`订阅 #${result.id} 已切换，配置版本已同步。`); onRefresh();
     }} />
-    {id && <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4 text-[13px]">{latest?.activeRun ? <Link className="text-accent" to={`/admin/operations/${latest.activeRun.id}`}>本轮执行 #{latest.activeRun.id}：查看进度与结果</Link> : <Button disabled={!!pending || !latest?.enabled} busy={pending === "run-subscription"} onClick={async () => { const result = await run<OperationAccepted>("POST", `/api/admin/redfox/collections/${id}/run`, undefined, { label: "run-subscription", revalidate: false }); if (result) navigate(`/admin/operations/${result.runId}`); }}>运行一轮</Button>}{!latest?.enabled && <span className="text-ink-4">先保存并启用订阅，才可运行一轮。</span>}</div>}
+    {id && <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4 text-[13px]"><Link className="text-accent" to={`/admin/operations?subscriptionId=${id}`}>执行历史与结果</Link>{latest?.activeRun ? <Link className="text-accent" to={`/admin/operations/${latest.activeRun.id}`}>本轮执行 #{latest.activeRun.id}：查看进度与结果</Link> : <Button disabled={!!pending || !latest?.enabled} busy={pending === "run-subscription"} onClick={async () => { const result = await run<OperationAccepted>("POST", `/api/admin/redfox/collections/${id}/run`, undefined, { label: "run-subscription", revalidate: false }); if (result) navigate(`/admin/operations/${result.runId}`); }}>运行一轮</Button>}{!latest?.enabled && <span className="text-ink-4">先保存并启用订阅，才可运行一轮。</span>}</div>}
   </Card>;
 }

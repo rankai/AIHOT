@@ -65,7 +65,7 @@ export function registerAdmin(app: FastifyInstance) {
     if (result && "runId" in result) reply.code(202);
     return orNotFound(req, reply, result);
   }));
-  app.get("/api/admin/operations/runs", adminHandler(async () => ({ rows: await listOperations() })));
+  app.get("/api/admin/operations/runs", adminHandler(async (req) => ({ rows: await listOperations({ subscriptionId: q(req).subscriptionId, status: q(req).status }) })));
   app.get("/api/admin/operations/runs/:id", adminHandler(async (req, reply) => orNotFound(req, reply, await operationDetail(Number(param(req, "id"))))));
   app.get("/api/admin/operations/runs/:id/results", adminHandler(async (req, reply) => {
     const detail = await operationDetail(Number(param(req, "id")));
