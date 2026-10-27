@@ -128,7 +128,7 @@ function sameWork(sourceUrl:string|null,articleUrl:string,evidence?:string){
   const a=identify(sourceUrl),b=identify(articleUrl);
   if(a&&b){if(a.platform!==b.platform||a.id!==b.id)throw new StaleOperationError('Received original identifies a different work');return;}
  }
- if(!evidence)throw new UnsupportedReplacement('Explicit same-work evidence is required; task IDs, media URLs and sharing prose do not prove authorship');
+ if(!evidence)throw new UnsupportedReplacement('请填写“同一作品核实依据”，说明此结果与所选材料属于同一作品。仅凭任务 ID、媒体地址或分享文案无法确认。');
 }
 async function usableResult(db:Db,resultId:number){
  const r=await parentResult(db,resultId);

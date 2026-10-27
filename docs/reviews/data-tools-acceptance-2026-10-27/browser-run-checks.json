@@ -1,0 +1,338 @@
+[
+  {
+    "tool": "X账号",
+    "path": "/admin/operations/1",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=x"
+  },
+  {
+    "tool": "X详情",
+    "path": "/admin/operations/2",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=x"
+  },
+  {
+    "tool": "图片生成 gptImage2",
+    "path": "/admin/operations/3",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "图片生成 gptImage25",
+    "path": "/admin/operations/4",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "图片生成 geminiBanana21",
+    "path": "/admin/operations/5",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "图片生成 seedreamPro",
+    "path": "/admin/operations/6",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "图片生成 seedreamLite",
+    "path": "/admin/operations/7",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "转写 抖音",
+    "path": "/admin/operations/8",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "转写 小红书",
+    "path": "/admin/operations/9",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "转写 视频号",
+    "path": "/admin/operations/10",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "转写 快手",
+    "path": "/admin/operations/11",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "转写 哔哩哔哩",
+    "path": "/admin/operations/12",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "转写 视频播放直链",
+    "path": "/admin/operations/13",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 获取哔哩哔哩音频地址",
+    "path": "/admin/operations/14",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 短视频下载器",
+    "path": "/admin/operations/15",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 YouTube视频下载",
+    "path": "/admin/operations/16",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 X(Twitter)视频下载",
+    "path": "/admin/operations/17",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 TikTok视频下载",
+    "path": "/admin/operations/18",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 小红书视频下载",
+    "path": "/admin/operations/19",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 视频号视频下载",
+    "path": "/admin/operations/20",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 抖音视频下载",
+    "path": "/admin/operations/21",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 快手视频下载",
+    "path": "/admin/operations/22",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 哔哩哔哩视频下载",
+    "path": "/admin/operations/23",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 Instagram视频下载",
+    "path": "/admin/operations/24",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 哔哩哔哩视频字幕提取",
+    "path": "/admin/operations/25",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 YouTube视频字幕提取",
+    "path": "/admin/operations/26",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "同步 多平台违禁词查询",
+    "path": "/admin/operations/27",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "评论提交",
+    "path": "/admin/operations/28",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "评论查询",
+    "path": "/admin/operations/29",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "AI搜索 Kimi K3",
+    "path": "/admin/operations/30",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 Kimi K2.5",
+    "path": "/admin/operations/31",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 元宝",
+    "path": "/admin/operations/32",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 千问",
+    "path": "/admin/operations/33",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 百度",
+    "path": "/admin/operations/34",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 豆包",
+    "path": "/admin/operations/35",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索 DeepSeek",
+    "path": "/admin/operations/36",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "AI搜索已有任务",
+    "path": "/admin/operations/37",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=ai-search"
+  },
+  {
+    "tool": "视频生成",
+    "path": "/admin/operations/38",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=videos"
+  },
+  {
+    "tool": "视频已有任务",
+    "path": "/admin/operations/39",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=videos"
+  },
+  {
+    "tool": "图片已有任务",
+    "path": "/admin/operations/40",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "转写已有任务",
+    "path": "/admin/operations/41",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=tools"
+  },
+  {
+    "tool": "平台 Redfox抖音作品",
+    "path": "/admin/operations/42",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=platforms"
+  },
+  {
+    "tool": "账户 API_1792036841619",
+    "path": "/admin/operations/43",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=platforms"
+  },
+  {
+    "tool": "账户 API_1792043329817",
+    "path": "/admin/operations/44",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=platforms"
+  },
+  {
+    "tool": "平台 AgentKey抖音作品",
+    "path": "/admin/operations/45",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=platforms"
+  },
+  {
+    "tool": "私有素材供应商上传",
+    "path": "/admin/operations/46",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=assets"
+  },
+  {
+    "tool": "图片生成复用供应商参考",
+    "path": "/admin/operations/47",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=images"
+  },
+  {
+    "tool": "视频生成复用供应商参考",
+    "path": "/admin/operations/48",
+    "completed": true,
+    "resultTextPresent": true,
+    "returnLink": "/admin/data-tools?view=videos"
+  }
+]

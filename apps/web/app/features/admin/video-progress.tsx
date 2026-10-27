@@ -10,7 +10,7 @@ export function VideoProgress({ operation: r }: { operation: OperationDetail }) 
   const missing = r.results.some(result => result.kind === "video" && result.data.role === "video" && videoLastFrameMissing(result.data));
   const query = new URLSearchParams({ view: "videos", ...(facts.taskId ? { videoTaskId: facts.taskId } : {}) });
   return <div className="mb-4 min-w-0 space-y-3 border-b border-line pb-4 text-[13px]">
-    <p className="font-medium">Redfox Seedance · {r.status === "completed" ? "已保存收到的产物" : r.status === "failed" ? "本轮已结束" : r.status === "stopped" ? "本地处理已停止" : r.status === "needs_review" ? "需要人工核对" : steps[r.step] ?? "处理视频任务"}</p>
+    <p className="font-medium">Redfox Seedance · {r.status === "completed" ? "已保存生成结果" : r.status === "failed" ? "本轮已结束" : r.status === "stopped" ? "本地处理已停止" : r.status === "needs_review" ? "需要人工核对" : steps[r.step] ?? "处理视频任务"}</p>
     {facts.taskId && <p className="whitespace-pre-wrap break-all text-ink-3">供应商任务 ID：{facts.taskId}</p>}
     {facts.progress !== null && <div><label className="mb-1 flex justify-between gap-3 text-[12px] text-ink-3" htmlFor={`video-progress-${r.id}`}><span>最近实收进度</span><span>{facts.progress}%</span></label><progress id={`video-progress-${r.id}`} value={facts.progress} max={100} className="h-2 w-full accent-[var(--accent)]" /></div>}
     {facts.latest && <p className="text-[12px] text-ink-3">本页最近供应商事实：{typeof facts.latest.data.status === "string" ? videoProviderStatuses[facts.latest.data.status] ?? facts.latest.data.status : "提交已记录"}。仅代表当前结果页，当前业务状态以上方本轮执行状态为准。</p>}

@@ -1,12 +1,13 @@
 import { assetUploadFile, assetUploadFormat, mergeAssetRows } from "./asset-data";
 import type { AssetUploadOptions } from "./asset-types";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import { useAdminAction } from "./action";
 import { assetContentUrl, assetSize, referenceImage, referenceIssue, type AssetPage, type ImageOptions, type PrivateAsset } from "./image-types";
 import { Button, Field, Input } from "./ui";
 export function ImageReferences({ options, initialPage, selected, onSelect, onRemove, disabled, onUploadingChange, uploadOptions, updates, onAssetChange }: { uploadOptions: AssetUploadOptions; updates: PrivateAsset[]; onAssetChange: (asset: PrivateAsset) => void; options: ImageOptions; initialPage: AssetPage; selected: PrivateAsset[]; onSelect: (asset: PrivateAsset) => void; onRemove: (key: string) => void; disabled: boolean; onUploadingChange: (uploading: boolean) => void }) {
   const { run, pending } = useAdminAction();
+  const uploadHintId = useId();
   const more = useFetcher<{ assets: AssetPage }>();
   const [page, setPage] = useState(initialPage);
   const [file, setFile] = useState<File | null>(null);
@@ -40,7 +41,8 @@ export function ImageReferences({ options, initialPage, selected, onSelect, onRe
     setMessage("已上传到本地私有素材，尚未请求供应商。");
   };
   return <div className="space-y-3">
-    <div className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1"><Field label="上传参考图片" hint={`每张 PNG / JPEG / WebP，最多 ${options.referenceBytes / 1_000_000} MB、${options.referencePixels / 1_000_000} MP，单帧图片；最多选 ${options.maxReferences} 张。`}><Input aria-label="上传参考图片" type="file" accept="image/png,image/jpeg,image/webp" disabled={disabled || !!pending} onChange={e => { setFile(e.target.files?.[0] ?? null); setMessage(null); }} /></Field></div><Button disabled={!file || disabled || !!pending} busy={pending === "upload"} onClick={upload}>上传到本地</Button>{pending === "upload" && <Button onClick={() => controller.current?.abort()}>取消上传</Button>}</div>
+    <div className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1"><Field label="上传参考图片"><Input aria-label="上传参考图片" aria-describedby={uploadHintId} type="file" accept="image/png,image/jpeg,image/webp" disabled={disabled || !!pending} onChange={e => { setFile(e.target.files?.[0] ?? null); setMessage(null); }} /></Field></div><Button disabled={!file || disabled || !!pending} busy={pending === "upload"} onClick={upload}>上传到本地</Button>{pending === "upload" && <Button onClick={() => controller.current?.abort()}>取消上传</Button>}</div>
+    <p id={uploadHintId} className="text-[12px] text-ink-4">每张 PNG / JPEG / WebP，最多 {options.referenceBytes / 1_000_000} MB、{options.referencePixels / 1_000_000} MP，单帧图片；最多选 {options.maxReferences} 张。</p>
     {message && <p role="status" className="text-[12.5px] text-ink-3">{message}</p>}
     <div className="rounded-control bg-bg-sunk p-3"><div className="mb-2 text-[13px] font-medium">已选参考 {selectedImages.length}/{options.maxReferences}</div>{selectedImages.length ? <ul className="flex flex-wrap gap-3">{selectedImages.map(asset => <li key={asset.key} className="w-32"><img src={assetContentUrl(asset.key)} alt={asset.metadata.filename} className="h-24 w-full rounded-control object-contain bg-surface" /><p className="mt-1 truncate text-[12px]">{asset.metadata.filename}</p><Button size="sm" disabled={disabled || !!pending} onClick={() => onRemove(asset.key)}>移除参考</Button></li>)}</ul> : <p className="text-[12.5px] text-ink-4">可不选参考，直接用文字生成。</p>}</div>
     <details className="rounded-control border border-line p-3"><summary className="cursor-pointer text-[13px] text-ink-2">选择已有私有图片（已载入 {images.length} 张）</summary><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">{images.map(asset => {

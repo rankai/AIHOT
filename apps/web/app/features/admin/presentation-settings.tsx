@@ -55,7 +55,7 @@ export function PresentationSettings({ settings }: { settings: AdminPresentation
       if (result) { setSaved(result); setDraft(structuredClone(result.presentation)); setAttempted(false); setFeedback("保存成功，已回显服务器配置。"); }
       else setFeedback("未能保存，当前草稿已保留，请根据错误提示重试。");
     }}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><p className="max-w-3xl text-[12.5px] leading-relaxed text-ink-3">隐藏只移除入口，旧链接与内容权限不变。精选和手机端“更多”固定显示；同一组内可调整顺序。</p><Button disabled={pending !== null} onClick={() => { if (newRow) { locate(newRow.id); return; } const row = newCustomColumn(draft); setDraft(insertCustomColumn(draft, row)); locate(row.id); }}>新建栏目</Button></div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="max-w-3xl text-[12.5px] leading-relaxed text-ink-3">隐藏只移除入口，旧链接与内容权限不变。精选和手机端“更多”固定显示；同一组内可调整顺序。</p><Button disabled={pending !== null} onClick={() => { if (newRow) { locate(newRow.id); return; } const row = newCustomColumn(draft); setDraft(insertCustomColumn(draft, row)); locate(row.id); }}>新建栏目</Button></div>
       <fieldset disabled={pending !== null}>
         <legend className="mb-2 text-[13px] font-semibold text-ink">站点栏目</legend>
         <div className="space-y-4">{NAV_GROUPS.map((title) => {
