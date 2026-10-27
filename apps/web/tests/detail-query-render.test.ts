@@ -14,12 +14,13 @@ import { detailQueryOperation } from "../app/features/admin/detail-query-data.ts
 
 test("real work and six account result cards show local options lookup without paid controls; research and old details remain separate", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aihot-detail-query-")), require = createRequire(import.meta.url);
-  const bundle = await rolldown({ input: { query: new URL("../app/features/admin/platform-query.tsx", import.meta.url).pathname, result: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, fields: new URL("../app/features/admin/platform-fields.tsx", import.meta.url).pathname }, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
+  const bundle = await rolldown({ input: { query: new URL("../app/features/admin/platform-query.tsx", import.meta.url).pathname, result: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, fields: new URL("../app/features/admin/platform-fields.tsx", import.meta.url).pathname, ownership: new URL("../app/features/admin/source-ownership.tsx", import.meta.url).pathname }, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
   try {
     await bundle.write({ dir: directory, entryFileNames: "[name].mjs", format: "esm" });
     const { OperationResultView } = await import(pathToFileURL(join(directory, "result.mjs")).href), { PlatformFields } = await import(pathToFileURL(join(directory, "fields.mjs")).href);
+    const { WorkSourceProvider } = await import(pathToFileURL(join(directory, "ownership.mjs")).href);
     const renderElement = (element: ReactElement) => { const router = createMemoryRouter([{ path: "/admin/operations/200", element }], { initialEntries: ["/admin/operations/200"] }); try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); } };
-    const render = (platform: string, kind: string, data: Record<string, unknown> = {}) => { const result: OperationResult = { id: 42, kind, data: { platform, title: "已收作品", record: {}, ...data }, receiptId: 7, sourceId: null, articleId: null, file: null, fileKey: null, imported: false }; return renderElement(createElement(OperationResultView, { result })); };
+    const render = (platform: string, kind: string, data: Record<string, unknown> = {}) => { const result: OperationResult = { id: 42, kind, data: { platform, title: "已收作品", record: {}, ...data }, receiptId: 7, sourceId: null, articleId: null, file: null, fileKey: null, imported: false }; return renderElement(createElement(WorkSourceProvider, { inputs: { members: [{ sourceId: "owned" }] }, results: [result], children: createElement(OperationResultView, { result }) })); };
     for (const platform of ["douyin", "xiaohongshu", "wechat", "tiktok", "bilibili", "weibo", "qichezhijia", "dongchedi", "yiche"]) {
       const html = render(platform, `${platform}_work`);
       assert.equal((html.match(/查看可用详情接口/g) ?? []).length, 1, platform);
@@ -30,8 +31,8 @@ test("real work and six account result cards show local options lookup without p
     for (const kind of ["baijiahao_work", "baijiahao_account"]) assert.equal((render("baijiahao", kind).match(/查看可用详情接口/g) ?? []).length, 1, kind);
     for (const data of [{identity: {}, workId: "123", url: "https://www.douyin.com/video/123"}, {identity: {uid: "456"}, workId: null, url: "https://www.douyin.com/video/123"}]) {
       const html = render("douyin", "douyin_work", {...data, provider: "agentkey"});
-      assert.match(html, /AgentKey.*稳定/);
-      assert.match(html, /<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/);
+      if (data.workId) { assert(!html.includes("AgentKey 结果缺少")); assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(html)); }
+      else { assert.match(html, /AgentKey.*作品 ID/); assert.match(html, /<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/); }
       assert(!html.includes("本原生链接含作品 ID，可由服务端据此核实"));
       const redfox = render("douyin", "douyin_work", {...data, provider: "redfox"});
       assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(redfox));
@@ -51,7 +52,7 @@ test("real work and six account result cards show local options lookup without p
       else { assert(html.includes("&lt;b&gt;实收评论&lt;/b&gt;")); assert(!html.includes("<b>实收评论</b>")); }
     }
     const mpIncomplete = render("wechat", "wechat_work", {provider:"agentkey",identity:{},url:"https://mp.weixin.qq.com/s/short"});
-    assert.match(mpIncomplete, /<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/);
+    assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(mpIncomplete));
     assert(!mpIncomplete.includes("查看可用详情接口"));
     for (const [operationId, kind, tool] of [
       ["douyin.comments", "social_comment", "TikHub/fetch_video_comments_api_v1_douyin_app_v3_fetch_video_comments_get"],
@@ -74,7 +75,7 @@ test("real work and six account result cards show local options lookup without p
     const ttArticle = render("toutiao", "toutiao_work", {provider:"agentkey",operationId:"PAB6Z75Y",title:"<b>分享标题</b>",workId:"123",requestedWorkId:"123",url:"https://m.toutiao.com/article/123/?share=local",identity:{uid:"456"},record:{workId:"123",workUrl:"https://m.toutiao.com/article/123/?share=local",authorName:"已收作者"}});
     assert(ttArticle.includes("标题来自上游分享标题")); assert(ttArticle.includes("正文待补")); assert(ttArticle.includes("&lt;b&gt;分享标题&lt;/b&gt;")); assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(ttArticle));
     const ttMissing = render("toutiao", "toutiao_work", {provider:"agentkey",operationId:"PAB6Z75Y",identity:{},workId:"123",url:"https://m.toutiao.com/article/123/"});
-    assert.match(ttMissing, /<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/); assert(ttMissing.includes("不能用手工输入代替响应证据"));
+    assert(!/<button[^>]*disabled=""[^>]*>本地导入作品<\/button>/.test(ttMissing)); assert(!ttMissing.includes("不能用手工输入代替响应证据"));
     const ttComment = render("toutiao", "social_comment", {provider:"agentkey",operationId:"toutiao.comments",tool:"TikHub/get_comments_api_v1_toutiao_app_get_comments_get",role:"comment",record:{id:"9007199254740993123",id_str:"9007199254740993123",text:"<b>评论研究</b>",create_time:123,user:{uid:"456",nickname:"评论者"}},timeUnits:{create_time:"unspecified"}});
     assert(ttComment.includes("&lt;b&gt;评论研究&lt;/b&gt;")); assert(ttComment.includes("评论 ID · id")); assert(ttComment.includes("定时单页快照")); assert(!ttComment.includes("本地导入作品")); assert(!/<button[^>]*>[^<]*绑定账号/.test(ttComment));
     const ttProfile = render("toutiao", "query_summary", {provider:"agentkey",operationId:"toutiao.account_profile",count:0,profileIsBlank:true,statusText:"本次返回空白账号资料；不能据此推断注销或私密",record:{user_id:"456",publish_count:0,digg_count:0,followers_count:0,followings_count:0}});
@@ -148,15 +149,16 @@ test("real work and six account result cards show local options lookup without p
 
 test("AgentKey X research routes all kinds before generic account actions and preserves received roles", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aihot-agentkey-x-")), require = createRequire(import.meta.url);
-  const bundle = await rolldown({ input: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
+  const bundle = await rolldown({ input: { result: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, ownership: new URL("../app/features/admin/source-ownership.tsx", import.meta.url).pathname }, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
   try {
-    await bundle.write({ file: join(directory, "result.mjs"), format: "esm" });
+    await bundle.write({ dir: directory, entryFileNames: "[name].mjs", format: "esm" });
     const { OperationResultView } = await import(pathToFileURL(join(directory, "result.mjs")).href);
+    const { WorkSourceProvider } = await import(pathToFileURL(join(directory, "ownership.mjs")).href);
     const { operationLabel } = await import("../app/features/admin/operation-types.ts");
     const common = { platform: "x-research", provider: "agentkey", importable: false };
     const render = (kind: string, data: Record<string, unknown>, bindingSources?: Array<{ id: string; name: string; participation_mode: string }>) => {
       const result: OperationResult = { id: 42, kind, data: { ...common, ...data }, receiptId: 7, sourceId: null, articleId: null, file: null, fileKey: null, imported: false };
-      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(OperationResultView, { result, bindingSources }) }], { initialEntries: ["/admin/operations/200"] });
+      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(WorkSourceProvider, { inputs: { members: [{ sourceId: "owned" }] }, results: [result], children: createElement(OperationResultView, { result, bindingSources }) }) }], { initialEntries: ["/admin/operations/200"] });
       try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); }
     };
     const pairs = [["search", "帖子搜索"], ["account_posts", "账号帖子"], ["detail", "帖子详情"], ["comments", "会话评论"], ["account_profile", "账号资料"], ["followers", "粉丝列表"], ["following", "关注列表"], ["list_posts", "列表帖子"], ["community_posts", "社区帖子"], ["trending", "趋势词"], ["list_members", "列表成员"], ["community_members", "社区成员"]];
@@ -164,7 +166,7 @@ test("AgentKey X research routes all kinds before generic account actions and pr
     const author = { rest_id: "9007199254740993123", screen_name: null, name: "外层作者", verified: false };
     const record = { tweetId: "101", text: "外层文本<script>plain</script>", display_text: "外层展示文本", created_at: "Thu Oct 22 08:00:00 +0800 2026", author, authorContext: { rest_id: author.rest_id, screen_name: "actual_context", source: "received-account-context" }, role: "retweet-wrapper", favorites: 0, retweeted: { id: "202" }, retweeted_tweet: { tweetId: "202", text: "内层原帖文本", author: { rest_id: "303", screen_name: "original_author" } }, quoted: { tweetId: "404", display_text: "引用文本", user_info: { rest_id: "505", screen_name: "quoted_author" } } };
     const work = render("x_research_work", { operationId: "x.account_posts", title: "收到的帖子", record, role: "retweet-wrapper", pinned: true, requestedScope: { screen_name: "requested_scope" } });
-    for (const value of ["转发外层帖子", "外层文本&lt;script&gt;plain&lt;/script&gt;", "外层展示文本", "内层原帖文本", "original_author", "引用文本", "quoted_author", "同一 rest_id 的实收账号上下文", "actual_context", "置顶是独立标记", "null（上游为空）", "favorites", "+0800"]) assert(work.includes(value), value);
+    for (const value of ["转发外层帖子", "外层文本&lt;script&gt;plain&lt;/script&gt;", "外层展示文本", "内层原帖文本", "original_author", "引用文本", "quoted_author", "实收账号上下文", "actual_context", "置顶是独立标记", "null（上游为空）", "favorites", "+0800"]) assert(work.includes(value), value);
     assert(!work.includes("<script>plain</script>")); assert(!work.includes("<img"));
     const kinds = [
       ["x_research_work", { operationId: "5K5EG87P", record: { ...record, user: { userId: "123", username: "legacy" }, createdAt: "2026-10-20T00:00:00Z" } }],
@@ -183,7 +185,7 @@ test("AgentKey X research routes all kinds before generic account actions and pr
       assert(!html.includes("不得绑定")); assert(!html.includes('href="/admin/sources/'));
     }
     const detail = render("x_detail_work", { operationId: "x.detail", record: { ...record, author: null, authorContext: { rest_id: author.rest_id, screen_name: "wrong-context", source: "received-account-context" } } });
-    assert(!detail.includes("同一 rest_id 的实收账号上下文")); assert(detail.includes("本帖实收 author 作者字段"));
+    assert(detail.includes("实收账号上下文")); assert(detail.includes("本帖实收 author 作者字段"));
     const profile = render("account", kinds[2][1]);
     assert(profile.includes("actual_profile")); assert(profile.includes("protected")); assert(profile.includes("false（布尔值）"));
     const pinnedProfile = render("account", { operationId: "x.account_profile", title: "actual_profile", record: { profile: "actual_profile", pinned_tweet_ids_str: ["000123456789012345678901", "9007199254740993987"] }, requestedScope: { pinned_tweet_ids_str: ["request-only-pin"] } });

@@ -35,10 +35,10 @@ test("received unsupported originals and conflicting video IDs cannot be replace
   assert.equal(youtubeImportFields("youtube_work", { workId: "dQw4w9WgXcQ", identity: { channelId }, url }).canImport, false);
 });
 
-test("only received identity DTO supplies ownership; handle, name and raw channel fields do not", () => {
+test("received identity DTO preserves optional author provenance without treating handles or raw channel fields as IDs", () => {
   const fields = youtubeImportFields("youtube_work", { workId: id, url, identity: {}, record: { channelId, author: "display name", channelHandle: "@handle", channelUrl: "https://youtube.com/@handle" } });
   assert.equal(fields.channelId, null);
-  assert.equal(fields.needsIdentity, true);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.equal(fields.needsUrl, false);
   assert.equal(youtubeImportFields("query_summary", { workId: id, url, identity: { channelId } }).canImport, false);
 });
@@ -46,25 +46,25 @@ test("only received identity DTO supplies ownership; handle, name and raw channe
 test("complete received video and channel fields never become user overrides", () => {
   const fields = youtubeImportFields("youtube_work", { workId: id, url, identity: { channelId } });
   assert.equal(fields.canImport, true);
-  assert.deepEqual(youtubeImportSupplement(fields, { url: "https://example.com/replace", channelId: "other-channel", evidence: "changed" }), {});
+  assert.deepEqual(youtubeImportSupplement(fields, { url: "https://example.com/replace", evidence: "changed" }), {});
 });
 
 test("missing original needs one matching watch ID and evidence; correction leaves received channel intact", () => {
   const fields = youtubeImportFields("youtube_work", { workId: id, identity: { channelId } });
-  assert.equal(fields.needsIdentity, false);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.ok(youtubeImportSupplement(fields, { ...draft, url: url.replace(id, "dQw4w9WgXcQ") }).error);
   assert.ok(youtubeImportSupplement(fields, { ...draft, url: `${url}&v=${id}` }).error);
   assert.ok(youtubeImportSupplement(fields, { ...draft, evidence: " " }).error);
   assert.deepEqual(youtubeImportSupplement(fields, draft), { supplement: { url, evidence: draft.evidence } });
 });
 
-test("missing channel requires opaque identity plus evidence and does not accept a handle or URL", () => {
-  const fields = youtubeImportFields("youtube_work", { workId: id, url, identity: {} });
-  for (const value of ["", "@handle", "channel name", "https://youtube.com/channel/UC123"]) assert.ok(youtubeImportSupplement(fields, { ...draft, channelId: value }).error);
-  assert.ok(youtubeImportSupplement(fields, { ...draft, evidence: "" }).error);
-  assert.deepEqual(youtubeImportSupplement(fields, draft), { supplement: { channelId, evidence: draft.evidence } });
-  const noReceivedId = youtubeImportFields("youtube_work", { workId: null, url: null, identity: {} });
-  assert.deepEqual(youtubeImportSupplement(noReceivedId, draft), { supplement: { channelId, url, evidence: draft.evidence } });
+test("work import without author ID needs no author supplement or evidence; only missing original is supplemented", () => {
+  const fields = youtubeImportFields("youtube_work", { identity: {}, workId: id, url });
+  assert.equal(fields.canImport, true); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+  assert.deepEqual(youtubeImportSupplement(fields, { url: "", evidence: "" }), {});
+  const noOriginal = youtubeImportFields("youtube_work", { identity: {}, workId: id });
+  assert.ok(youtubeImportSupplement(noOriginal, { url, evidence: "" }).error);
+  assert.deepEqual(youtubeImportSupplement(noOriginal, { url, evidence: draft.evidence }), { supplement: { url, evidence: draft.evidence } });
 });
 
 test("same-video detail payload contains only operation, received ID and actual result PK, even without a channel", () => {

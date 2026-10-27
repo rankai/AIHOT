@@ -25,7 +25,7 @@ async function imported(mediaFormat='video'){
  const run=await createSynchronousQuery({operationId:'Z9M88QI8',parameters:{codeOrUrl:code}},'video-history',tag());
  await executeOperationStep(run.id,run.step_version,randomUUID());
  const [result]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`;
- const article=await importInstagramResult(result!.id,{reason:'Local historical fixture'},'video-history',tag());
+ const article=await importInstagramResult(result!.id,{sourceId:await selectedSource(),reason:'Local historical fixture'},'video-history',tag());
  await sql`UPDATE articles SET media='[{"kind":"image","url":"https://example.test/private-image"}]'::jsonb WHERE id=${article!.articleId}`;
  return {...article!,resultId:result!.id};
 }
@@ -36,6 +36,12 @@ test('retained receipt dry-run/apply/restore changes only one fact; evidence and
  const hits=server.hits(),receipts=(await sql`SELECT count(*)::int AS n FROM receipts`)[0]!.n;
  const manifest=await scan(),entry=manifest.entries.find(e=>e.articleId===good.articleId)!;
  assert.ok(entry);assert.equal(entry.evidence.kind,'result');
+ assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${good.sourceId}`).length,0);
+ const other=tag();await sql`INSERT INTO sources(id,name,kind) VALUES (${other},'Different historical owner','rss')`;
+ await sql`UPDATE operation_results SET source_id=${other} WHERE id=${good.resultId}`;
+ await assert.rejects(sql.begin(tx=>applyVideoHistoryEntry(tx,entry)),/result-association-mismatch/);
+ await sql`UPDATE operation_results SET source_id=${good.sourceId} WHERE id=${good.resultId}`;
+
  assert.equal(manifest.entries.some(e=>e.articleId===conflict.articleId),false);
  assert.equal(JSON.stringify(manifest).includes('private-image'),false);
  assert.deepEqual((await sql`SELECT media FROM articles WHERE id=${good.articleId}`)[0]!.media,before.media);
@@ -117,3 +123,6 @@ test('Shipinhao retained manual evidence accepts absent IDs and rejects a differ
   if(withId){await sql`UPDATE operation_results SET provenance=jsonb_set(provenance,'{manualWorkImport,receivedWorkId}',to_jsonb('different-id'::text)) WHERE id=${result!.id}`;await assert.rejects(sql.begin(tx=>applyVideoHistoryEntry(tx,entry)),/manual-original-evidence-missing/);}
  }
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Chosen work source','rss','isolated',false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

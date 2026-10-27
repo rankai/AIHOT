@@ -22,7 +22,7 @@ function work(operation:TiktokOperation,raw:unknown,index:number,parameters:Reco
   if(operation==="6SE9WIHJ"&&record.workId!==parameters.awemeId)throw new RedfoxResponseError("TikTok work differs from requested awemeId");
   if(operation==="R473NUE9"&&author.secUserId&&author.secUserId!==parameters.secUserId)throw new RedfoxResponseError("TikTok homepage author differs from requested secUserId");
   const missing:string[]=[];
-  if(!Object.keys(author).length)missing.push("缺少收到的作者 userId / secUserId；展示昵称和 handle 不证明身份");
+
   if(!urlId)missing.push("缺少已确认的原生 video 原文链接；不解析短链或 photo 地址");
   return {kind:"tiktok_work",itemKey:`work:${index}`,data:{platform:"tiktok",operationId:operation,title:record.content||"TikTok 作品",workId:record.workId??urlId,url,identity:author,missing,record}};
 }

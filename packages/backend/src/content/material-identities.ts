@@ -46,8 +46,6 @@ export async function resolveMaterialIdentity(db: Db, input: { url: string; iden
       const shortUrl=new URL(requested),longUrl=new URL(long);
       if(shortUrl.hostname!=='mp.weixin.qq.com'||!/^\/s\/[A-Za-z0-9_-]+$/.test(shortUrl.pathname)||longUrl.hostname!=='mp.weixin.qq.com'||longUrl.pathname!=='/s'||longUrl.searchParams.get('__biz')!==confirmed.bizInfo||longUrl.searchParams.get('mid')!==confirmed.mid||longUrl.searchParams.get('idx')!==confirmed.idx)throw new MaterialIdentityConflict('WeChat article tuple proof disagrees');
       keys.push(identityKeyForUrl(requested)!);
-      const [binding]=await db`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind='bizInfo' AND id_value=${confirmed.bizInfo}`;
-      if(binding?.source_id!==confirmed.sourceId)throw new MaterialIdentityConflict('WeChat alias lacks confirmed author binding');
     }
     for(const k of [...new Set(keys)].sort())await db`SELECT pg_advisory_xact_lock(hashtextextended(${`material:${k}`},0))`;
     const rows=await db<{id:string;identity_key:string}[]>`SELECT id,identity_key FROM articles WHERE identity_key IN ${db(keys)} OR id IN (SELECT article_id FROM article_identity_aliases WHERE alias_key IN ${db(keys)}) ORDER BY id FOR UPDATE`;

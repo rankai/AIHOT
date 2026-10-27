@@ -60,7 +60,7 @@ export async function agentKeyBilibiliEvidence(db:Db,s:any){
  if(!op||![bilibiliDetailRoute,bilibiliProfileRoute].some(r=>r===op.route))throw new UnsupportedReplacement('Only Bilibili detail/profile evidence is importable');
  const verified=await bilibiliResultEvidence(db,s),{parsed}=verified;
  const mid=(parsed.data.identity as {mid?:string}).mid;
- if(!mid)throw new UnsupportedReplacement('A received author MID is required for Bilibili import');
+ if(op.route===bilibiliProfileRoute&&!mid)throw new UnsupportedReplacement('A received author MID is required for Bilibili import');
  if(op.route===bilibiliDetailRoute&&(parsed.kind!=='bilibili_work'||typeof parsed.data.url!=='string'||!parsed.data.workId||bilibiliVideoId(parsed.data.url)!==parsed.data.workId))throw new UnsupportedReplacement('A received BV and matching native Bilibili URL are required');
  if(op.route===bilibiliProfileRoute&&parsed.kind!=='bilibili_account')throw new UnsupportedReplacement('Bilibili profile does not prove an account');
  return verified;

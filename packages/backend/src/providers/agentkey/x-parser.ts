@@ -37,10 +37,10 @@ export function parseAgentKeyX(response:unknown,route:AgentKeyXRoute,raw:unknown
   const author=variant==='search'?w.user_info:w.author;
   handleMatch(w.screen_name,author?.screen_name);
   if(context&&author?.rest_id!=null)mismatch(author.rest_id,context.rest_id??context.id);
-  const contextHandle=context&&author?.rest_id!=null&&author.rest_id===(context.rest_id??context.id)&&typeof context.profile==='string'?context.profile:undefined;
+  const contextHandle=context&&(author?.rest_id==null||(context.rest_id??context.id)==null||author.rest_id===(context.rest_id??context.id))&&typeof context.profile==='string'?context.profile:undefined;
   const handle=author?.screen_name??contextHandle;
   const url=typeof tweetId==='string'&&typeof handle==='string'&&/^[A-Za-z0-9_]{1,15}$/.test(handle)?`https://x.com/${handle}/status/${tweetId}`:undefined;
-  const record:Record<string,unknown>={...w,...(tweetId?{tweetId}:{}),...(contextHandle?{authorContext:{rest_id:author!.rest_id,screen_name:contextHandle,source:'received-account-context'}}:{}),...(url?{url,urlSource:'derived-canonical-permalink'}:{})};
+  const record:Record<string,unknown>={...w,...(tweetId?{tweetId}:{}),...(contextHandle?{authorContext:{rest_id:context?.rest_id??context?.id,screen_name:contextHandle,source:'received-account-context'}}:{}),...(url?{url,urlSource:'derived-canonical-permalink'}:{})};
   // Only witnessed variants are decoded. Unknown nested roles remain visibly limited research.
   const limitations:string[]=[];
   if(depth===0&&(variant==='search'||route===xPostsRoute)&&source?.quoted!=null){

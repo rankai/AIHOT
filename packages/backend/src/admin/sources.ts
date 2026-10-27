@@ -142,7 +142,7 @@ export async function updateSource(id: string, input: { patch: unknown; version:
   const patch = EDITABLE.parse(input.patch);
   return sql.begin(async (tx) => {
     // Source invalidation follows the same subscription → source → run lock order as downloads.
-    await tx`SELECT id FROM collection_subscriptions WHERE control_source_id=${id} OR id IN
+    const lockedSubscriptions = await tx`SELECT id FROM collection_subscriptions WHERE control_source_id=${id} OR config->>'sourceId'=${id} OR id IN
       (SELECT subscription_id FROM operation_runs WHERE operation_key='subscription.video.download' AND status NOT IN ('completed','failed') AND input->'videoDownloadOwnership'->>'sourceId'=${id}) ORDER BY id FOR UPDATE`;
     const [subscription] = await tx`SELECT * FROM collection_subscriptions WHERE control_source_id = ${id}`;
     const [before] = await tx`SELECT * FROM sources WHERE id = ${id} FOR UPDATE`;
@@ -171,6 +171,15 @@ export async function updateSource(id: string, input: { patch: unknown; version:
     if(subscriptionChanged||executionChanged)await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription or author source execution configuration changed',next_attempt_at=NULL,job_id=NULL
       WHERE operation_key='subscription.video.download' AND status NOT IN ('completed','failed')
         AND ((subscription_id=${subscription?.id??null} AND ${subscriptionChanged}) OR (input->'videoDownloadOwnership'->>'sourceId'=${id} AND ${executionChanged}))`;
+    if (executionChanged) {
+      const associated = lockedSubscriptions.length ? await tx`SELECT id,active_run_id FROM collection_subscriptions WHERE id IN ${tx(lockedSubscriptions.map(row=>row.id))} AND control_source_id IS NULL AND config->>'sourceId'=${id} ORDER BY id` : [];
+      const ids = associated.map(row => row.id);
+      if (ids.length) {
+        await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Associated source execution configuration changed',next_attempt_at=NULL,job_id=NULL
+          WHERE (subscription_id IN ${tx(ids)} OR id IN (SELECT active_run_id FROM collection_subscriptions WHERE id IN ${tx(ids)})) AND status NOT IN ('completed','failed','stopped')`;
+        await tx`UPDATE collection_subscriptions SET active_run_id=NULL,updated_at=now() WHERE id IN ${tx(ids)}`;
+      }
+    }
     const sourceKeys = subscription ? keys.filter((k) => k !== "config" && k !== "interval_minutes") : keys;
     const values = { ...Object.fromEntries(sourceKeys.map((k) => [k, k === "config" ? tx.json(patch.config as never) : patch[k]])), updated_at: new Date() };
     const [after] = await tx`UPDATE sources SET ${tx(values as never, ...([...sourceKeys, "updated_at"] as string[]))}, execution_version = execution_version + ${executionChanged ? 1 : 0},

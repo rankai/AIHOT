@@ -23,7 +23,7 @@ export function parseAgentKeyXiaohongshu(response:unknown,route:AgentKeyXiaohong
   if(url&&xiaohongshuNoteId(url)!==n.id)throw new AgentKeyPayloadError('Received native URL differs from note identity');
   if(!n.title&&!n.desc)throw new AgentKeyPayloadError('Note has no meaningful written text');
   const rawTimes=Object.fromEntries(['create_time','last_update_time','time'].filter(k=>typeof n[k as keyof typeof n]==='number').map(k=>[k,n[k as keyof typeof n]]));
-  candidates.push({itemKey:`work:${candidates.length}`,kind:'xiaohongshu_work',data:{...common,title:n.title||n.desc,workId:n.id,url:url??null,identity:uid?{userId:uid}:{},role:'native_note',publishedAt:null,record:{workId:n.id,workTitle:n.title??'',description:n.desc??'',workType:n.type,...(uid?{userId:uid}:{}),...(u?.nickname?{authorName:u.nickname}:{}),...(url?{workUrl:url}:{}),rawTimes},timeUnits:Object.fromEntries(Object.keys(rawTimes).map(k=>[k,'unspecified'])),missing:[...(!uid?['缺稳定作者身份']:[]),...(!url?['缺供应商返回的原文链接']:[]),...(!n.desc?['缺笔记文字正文']:[]),'发布时间单位未证实'],importable:!!(uid&&url)}});
+  candidates.push({itemKey:`work:${candidates.length}`,kind:'xiaohongshu_work',data:{...common,title:n.title||n.desc,workId:n.id,url:url??null,identity:uid?{userId:uid}:{},role:'native_note',publishedAt:null,record:{workId:n.id,workTitle:n.title??'',description:n.desc??'',workType:n.type,...(uid?{userId:uid}:{}),...(u?.nickname?{authorName:u.nickname}:{}),...(url?{workUrl:url}:{}),rawTimes},timeUnits:Object.fromEntries(Object.keys(rawTimes).map(k=>[k,'unspecified'])),missing:[...(!url?['缺供应商返回的原文链接']:[]),...(!n.desc?['缺笔记文字正文']:[]),'发布时间单位未证实'],importable:!!url}});
  };
  const d=object(b.data);
  if(route===xiaohongshuDetailRoute){

@@ -16,7 +16,7 @@ export function singleXAccount(query: unknown) {
   return match ? {handle:match[1]!.toLowerCase(),excludeReplies:!!match[2]} : null;
 }
 export interface ReplacementCheck { key: string; source: string; conclusion: "supported" | "unsupported" | "unverified" | "unavailable"; evidence: string }
-export function logicalXConfig(config: Record<string,unknown>) {const {restId:_rest,...logical}=config;return logical;}
+export function logicalXConfig(config: Record<string,unknown>) {return {...config};}
 export async function preflightXReplacement(sourceId: string, target: "redfox" | "socialdata", db: Db = sql, proposed?: Record<string,unknown>) {
   const [source] = await db`SELECT s.*, c.id AS subscription_id,c.edit_version,c.provider,c.config AS effective_config,c.progress AS effective_progress
     FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id=s.id WHERE s.id=${sourceId}`;
@@ -31,16 +31,17 @@ export async function preflightXReplacement(sourceId: string, target: "redfox" |
   const hasSubscription=source.kind==="x_search" && !!source.subscription_id;
   check("subscription",hasSubscription,hasSubscription?"沿用现有 X 信源及其主订阅":"请先完成现有 X 信源的主订阅迁移","database");
   const unsupported=unsupportedConfig("x_search",logical);
-  check("configuration",validConfig && unsupported.length===0,!validConfig?"配置不是有效对象，请先修正":unsupported.length?`当前配置含不支持的字段：${unsupported.join("、")}`:"保留原查询及材料策略，Redfox 稳定账号 ID 单独绑定");
+  check("configuration",validConfig && unsupported.length===0,!validConfig?"配置不是有效对象，请先修正":unsupported.length?`当前配置含不支持的字段：${unsupported.join("、")}`:"保留原查询及材料策略，账号定位参数按目标接口配置");
   const hasCredential=!!credential("collectors",target==="redfox"?"REDFOX_API_KEY":"SOCIALDATA_API_KEY");
   check("credentials",hasCredential,hasCredential?"服务端已配置凭证；此检查不请求供应商":`请先在服务端配置 ${target} 凭证`,"server configuration","unavailable");
   if(target==="redfox") {
     check("execution",true,"已接通有界时间线与详情采集，每页处理完成后才推进位置","implementation");
-    const sameAccount=!!account && (!proposed || account.handle===singleXAccount(source.effective_config?.query)?.handle);
+    const explicitRestId=z.string().regex(/^\d{1,30}$/).safeParse(config.restId);
+    const sameAccount=!!account && (!proposed || explicitRestId.success || account.handle===singleXAccount(source.effective_config?.query)?.handle);
     check("query",sameAccount,sameAccount?"保留完整的单账号查询范围":account?"此次修改改变了已绑定账号范围，不能沿用原绑定":"当前仅能映射完整 from:账号 查询；关键词、多作者或其他条件须由对应能力承接");
     check("ordering",logical.searchType===undefined || logical.searchType==="Latest",logical.searchType===undefined || logical.searchType==="Latest"?"保留按时间倒序采集":"时间线不能承接当前 Top 搜索排序");
-    const hasBinding=bindings.length===1 && (config.restId===undefined || config.restId===bindings[0]?.id_value);
-    check("account",hasBinding,hasBinding?"已有唯一且一致的稳定账号 ID":"请先查询并绑定对应账号；提交的账号 ID 须与已有绑定一致","source_account_bindings");
+    const hasBinding=explicitRestId.success || config.restId===undefined&&bindings.length===1;
+    check("account",hasBinding,hasBinding?"已有有效账号定位 ID":"请配置数字字符串 restId；已有唯一账号绑定可作为定位 fallback","source_account_bindings");
     check("replyFilter",true,account?.excludeReplies?"按推文详情中的明确回复字段过滤，每项补全受次数上限约束":"当前任务不排除回复，无需增加回复详情请求","QCP75W33");
     const requiresArticle=needsXArticleExtraction(source.kind,source.participation_mode,false);
     check("article",!requiresArticle,requiresArticle?"当前参与方式需要补全 X Article，Redfox 暂无对应能力，不能切换":"当前任务不需要补全 X Article","jobs/content shared condition");
@@ -63,7 +64,7 @@ export async function preflightXReplacement(sourceId: string, target: "redfox" |
   check("videoDownload",true,videoDownloadCapability("x",target,""),"subscription.config");
   return {sourceId,target,mappingVersion:X_MAPPING_VERSION,sourceVersion:new Date(source.updated_at).toISOString(),subscriptionVersion:source.edit_version??null,
     supported:checks.every(c=>c.conclusion==="supported" || c.conclusion==="unverified"),checks,
-    mapping:target==="redfox"?{operation:"redfox.x.timeline",restId:bindings.length===1?bindings[0]!.id_value:null}: {operation:"x.search",query:logical.query,searchType:logical.searchType??"Latest"}};
+    mapping:target==="redfox"?{operation:"redfox.x.timeline",restId:typeof config.restId==="string"&&/^\d{1,30}$/.test(config.restId)?config.restId:bindings.length===1?bindings[0]!.id_value:null}: {operation:"x.search",query:logical.query,searchType:logical.searchType??"Latest"}};
 }
 
 const Switch = z.object({target:z.enum(["redfox","socialdata"]),sourceVersion:z.string().datetime(),subscriptionVersion:z.number().int(),mappingVersion:z.number().int(),reason:z.string().min(1).max(500)}).strict();

@@ -34,12 +34,12 @@ test('AgentKey valve independent of Redfox and collection valve only gates colle
  assert.equal(agentKeyOutboundAllowed(run,{AGENTKEY_CALLS_ENABLED:'true',COLLECT_ENABLED:'false'}),false);
  assert.equal(agentKeyOutboundAllowed({...run,input:{mode:'query'}},{AGENTKEY_CALLS_ENABLED:'true',COLLECT_ENABLED:'false'}),true);
 });
-test('normalized Douyin work preserves epoch seconds and stable identity with missing-author blockers',()=>{
+test('normalized Douyin work preserves epoch seconds and stable identity with optional author provenance',()=>{
  const aweme={AwemeId:'123',Desc:'标题',CreateTime:'1729400000000',Author:{Nickname:'作者',SecUid:'sec-456'},Video:{ItemID:'123',Title:'标题',CreateTime:'1729400000',Cover:{UrlList:['https://p3.douyinpic.com/test.jpeg']}}};
  const result=parseDouyinSearch({envelope:{provider:'TikHub',data:{code:200,data:{code:0,msg:'success',data:{hasMore:false,cursor:12,itemList:[{AwemeInfo:aweme}]}}}}},input).candidates[0];
  assert.equal(result.kind,'douyin_work');assert.equal(result.data.operationId,'OWIBYU1V');assert.deepEqual(result.data.identity,{secUserId:'sec-456'});assert.equal(result.data.publishedAt,new Date(1729400000*1000).toISOString());assert.equal(result.data.url,'https://www.douyin.com/video/123');assert.equal(result.data.record.coverUrl,'https://p3.douyinpic.com/test.jpeg');
  const unknown=parseDouyinSearch({envelope:{provider:'TikHub',data:{code:200,data:{code:0,msg:'success',data:{hasMore:false,cursor:12,itemList:[{AwemeInfo:{AwemeId:'123'}}]}}}}},input).candidates[0];
- assert.ok(unknown.data.importBlockers.includes('lossless_author_id_required'));assert.equal(unknown.data.publishedAt,null);
+ assert.deepEqual(unknown.data.importBlockers,[]);assert.equal(unknown.data.publishedAt,null);
 });
 test('Douyin V4 parser rejects conflicting evidence and records unparseable time',()=>{
  const envelope=(AwemeInfo:Record<string,unknown>)=>parseDouyinSearch({envelope:{provider:'TikHub',data:{code:200,data:{code:0,msg:'success',data:{hasMore:false,cursor:12,itemList:[{AwemeInfo}]}}}}},input).candidates[0]!;
@@ -68,7 +68,7 @@ test("APP list/detail contracts preserve only verified work fields, IDs and seco
   assert.throws(()=>parse({...work,author:{...work.author,sec_uid:"wrong"}}));
   const missing=parse({aweme_id:Number.MAX_SAFE_INTEGER+1}).candidates[0]!;
   assert.deepEqual(missing.data.identity,{});assert.equal(missing.data.workId,null);assert.equal(missing.data.publishedAt,null);
-  assert.deepEqual(missing.data.importBlockers,["lossless_work_id_required","lossless_author_id_required"]);
+  assert.deepEqual(missing.data.importBlockers,["lossless_work_id_required"]);
   for(const parameters of [{sec_user_id:"s",count:21},{sec_user_id:"s",channel:"lite"},{sec_user_id:"s",sort_type:2},{sec_user_id:"s",secUserId:"s"},{sec_user_id:"s",max_cursor:Number.MAX_SAFE_INTEGER+1}])assert.equal(douyinAccountPostsInput.safeParse(parameters).success,false);
 });
 

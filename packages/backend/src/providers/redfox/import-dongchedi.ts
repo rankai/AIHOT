@@ -1,3 +1,4 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
@@ -75,30 +76,41 @@ export async function importDongchediResult(resultId:number,raw:unknown,actor:st
     const url=original??supplement;
     if(!account&&!url)throw new UnsupportedReplacement("A documented original or manual original evidence is required");
     const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
+    const primary=Object.keys(identity).sort().map(k=>`${k}:${identity[k]}`).join("|");
+    let sourceId:string,source;
+    if(account){
     if(!ids.length)throw new UnsupportedReplacement("A verified typed author identity is required");
     for(const [kind,value] of ids)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`dongchedi:${kind}:${value}`},0))`;
     const owners:string[]=[];
     for(const [kind,value] of ids){const [b]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='dongchedi' AND id_kind=${kind} AND id_value=${value}`;if(b)owners.push(b.source_id);}
     if(new Set(owners).size>1)throw new StaleOperationError("Received account IDs belong to different sources");
-    const primary=Object.keys(identity).sort().map(k=>`${k}:${identity[k]}`).join("|");
-    const sourceId=input.sourceId??owners[0]??`dongchedi-${sha256(primary).slice(0,24)}`;
+    sourceId=input.sourceId??owners[0]??`dongchedi-${sha256(primary).slice(0,24)}`;
     if(owners.length&&owners[0]!==sourceId)throw new StaleOperationError("Account identity already belongs to another source");
 
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
+    [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
     if(!source&&input.sourceId)return null;
-    if(!account&&source&&input.sourceId&&!owners.length&&(source.participation_mode!=="isolated"||!input.supplement?.evidence))throw new UnsupportedReplacement("Unbound work target requires isolated source and manual evidence");
     if(source&&source.kind!=="external")throw new UnsupportedReplacement("Dongchedi accounts require an external source");
     if(source&&source.participation_mode!=="isolated"&&ids.some(([kind])=>!received[kind as keyof DongchediIdentity]))throw new UnsupportedReplacement("Manual identity cannot inherit publication permissions");
     const prior=await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='dongchedi' AND source_id=${sourceId}`;
     if(prior.some(b=>identity[b.id_kind as keyof DongchediIdentity]&&identity[b.id_kind as keyof DongchediIdentity]!==b.id_value))throw new StaleOperationError("Source already has another identity of this type");
+    }else{
+      if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.dongchediImport?.key===commandKey){
+        const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+        requireLiveResult(completed,snapshot.kind);
+        if(!completed!.article_id||!completed!.source_id||completed!.provenance?.dongchediImport?.key!==commandKey||stableJson(completed!.provenance.dongchediImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+        return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+      }
+      source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin&&"resultId" in origin?{resultId:Number(origin.resultId),provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+      if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+      sourceId=source.id;
+    }
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.dongchediImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){const name=String(record.authorName??record.displayName??`作者 ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"dongchedi"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!account&&!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"dongchedi",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
+    if(account&&!source){const name=String(record.authorName??record.displayName??`作者 ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"dongchedi"})},'isolated',false,false,true,NULL) RETURNING *`;}
+    if(account)for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"dongchedi",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
       const full=namespace==="article"&&(operation.data==="API_1791793668086"||operation.data==="QQ5E3EZ9"),body=record.description,publishedAt=publicationTime(record,["W86F8SSK","API_1791793668086"].includes(operation.data)?1000:undefined),discoveredAt=origin?new Date(origin.discoveredAt):sourceDiscoveredAt;

@@ -1,13 +1,13 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
 import { sql,type Tx } from "../../db.ts";
-import { sha256,stableJson } from "../../lib/ids.ts";
+import { stableJson } from "../../lib/ids.ts";
 import { youtubeVideoId } from "../../lib/url.ts";
 import { audit } from "../../admin/auth.ts";
-import { bindSourceAccount } from "../../sources/account-bindings.ts";
 import { decideTimeline,upsertMaterial,type MediaItem } from "../../content/materials.ts";
 import { queueProcessing } from "../../jobs/content.ts";
 import { StaleOperationError } from "../operations/store.ts";
@@ -48,30 +48,20 @@ export async function importYoutubeResult(resultId:number,raw:unknown,actor:stri
     const nativeId=url?youtubeVideoId(url):null;
     if((!nativeId||!url))throw new UnsupportedReplacement("A documented native Youtube video permalink is required; short links are not resolved");
     if(parsed.data.workId&&parsed.data.workId!==nativeId)throw new StaleOperationError("Received work ID differs from its native original URL");
-    const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
-    if(!ids.length)throw new UnsupportedReplacement("A verified author channel ID is required");
-    for(const [kind,value] of ids)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`youtube:${kind}:${value}`},0))`;
-    const owners:string[]=[];
-    for(const [kind,value] of ids){const [b]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='youtube' AND id_kind=${kind} AND id_value=${value}`;if(b)owners.push(b.source_id);}
-    if(new Set(owners).size>1)throw new StaleOperationError("Received account IDs belong to different sources");
-    const primary=`channelId:${identity.channelId}`;
-    const sourceId=input.sourceId??owners[0]??`youtube-${sha256(primary).slice(0,24)}`;
-    if(owners.length&&owners[0]!==sourceId)throw new StaleOperationError("Account identity already belongs to another source");
-    if(input.sourceId&&owners[0]!==input.sourceId)throw new UnsupportedReplacement("Work import follows the verified author, not an arbitrary source");
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
-    if(!source&&input.sourceId)return null;
-    if(source&&source.kind!=="external")throw new UnsupportedReplacement("Youtube accounts require an external source");
-    if(source&&source.participation_mode!=="isolated"&&ids.some(([kind])=>!received[kind as keyof YoutubeIdentity]))throw new UnsupportedReplacement("Manual identity cannot inherit publication permissions");
-    const prior=await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='youtube' AND source_id=${sourceId}`;
-    if(prior.some(b=>identity[b.id_kind as keyof YoutubeIdentity]&&identity[b.id_kind as keyof YoutubeIdentity]!==b.id_value))throw new StaleOperationError("Source already has another identity of this type");
+    if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.youtubeImport?.key===commandKey){
+      const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+      requireLiveResult(completed,snapshot.kind);
+      if(!completed!.article_id||!completed!.source_id||completed!.provenance?.youtubeImport?.key!==commandKey||stableJson(completed!.provenance.youtubeImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+      return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+    }
+    const source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin&&"resultId" in origin?{resultId:Number(origin.resultId),provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+    if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+    const sourceId=source.id;
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.youtubeImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){const name=String(record.name??record.author??`YouTube ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"youtube"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"youtube",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     {
       const body=record.description,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);

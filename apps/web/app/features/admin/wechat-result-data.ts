@@ -19,6 +19,6 @@ export function wechatImportFields(kind: string, data: Record<string, unknown>, 
   const original = wechatArticleLink(data.url);
   const hasIdentity = !!wxId || !!bizInfo;
   const urlIdentity = !account && wechatUrlIdentity(original ?? additionalUrl);
-  const canImport = account ? hasIdentity : kind === "wechat_work" && (data.provider !== "agentkey" || !!original && (hasIdentity || urlIdentity));
-  return { account, wxId, bizInfo, original, hasIdentity, urlIdentity, canImport, needsUrl: !account && !original, needsIdentity: !account && !hasIdentity && !urlIdentity };
+  const canImport = account ? hasIdentity : kind === "wechat_work" && (data.provider !== "agentkey" || !!original);
+  return { account, work: kind === "wechat_work", wxId, bizInfo, original, hasIdentity, urlIdentity, canImport, needsUrl: !account && !original};
 }

@@ -1,3 +1,4 @@
+import { WorkSourceProvider } from "../../features/admin/source-ownership";
 import { SubscriptionVideoProgress } from "../../features/admin/subscription-video-result";
 import { agentKeyXAccountUsername } from "../../features/admin/x-search-import-data";
 import { WorkResultSelection } from "../../features/admin/work-result-selection";
@@ -121,8 +122,9 @@ export default function Operation({ loaderData: r }: Route.ComponentProps) {
     </Card></div>
     <div id="results" className="scroll-mt-5"><Card title="结果" className="mb-5" right={<div className="flex flex-wrap items-center justify-end gap-3"><span>本页 {r.results.length} 项</span><a data-testid="operation-results-export" className="text-accent text-[13px]" href={`/api/admin/operations/runs/${r.id}/results/export?cursor=${encodeURIComponent(r.resultCursor)}`} download>下载本页结果 JSON</a></div>}>
       <p className="mb-3 text-[12px] text-ink-3">下载范围为当前页；其余结果请翻页后下载。</p>
-      <WorkResultSelection key={`${r.id}:${r.resultCursor}`} results={r.results} />
+      <WorkSourceProvider key={r.id} inputs={r.inputs} results={r.results}><WorkResultSelection key={`${r.id}:${r.resultCursor}`} results={r.results} />
       {primaryResults.length ? <div className="space-y-4">{primaryResults.map(result => <OperationResultItem key={result.id} result={result} bindingSources={r.bindingSources[String(result.id)]} imageOptions={r.imageOptions} />)}</div> : <Empty>{ended ? (r.status === "completed" ? "本轮已完成，本页没有已保存的内容结果。可查看处理记录、诊断或其他结果分页。" : "本轮已结束，本页没有已保存的内容结果。请查看当前进度与诊断核对原因，已有处理记录仍保留。") : r.status === "stopped" ? "本轮已停止，本页没有已保存的内容结果。可查看已有处理记录，核对后恢复或放弃本轮。" : r.status === "needs_review" ? "本轮需要核对，尚无已保存的内容结果。请查看当前进度与回执，按提示处理后继续。" : xhsCommentTask ? xhsCommentEmptyMessage(r.results) : videoTask ? "本页还没有已保存视频或末帧。可查看上方进度、展开历史记录，或继续查看结果分页。" : aiSearchTask ? "本页还没有已保存答案或引用。可查看上方当前进度、展开提交与轮询历史，或继续查看结果分页。" : transcriptionTask ? "还没有已保存的完整转写文本。可查看上方当前进度或展开转写历史记录，刷新后续看。" : imageTask ? "还没有已保存到本地的图片。可查看上方进度或展开处理记录，刷新后续看。" : "还没有已保存结果。本轮执行后可刷新续看。"}</Empty>}
+      </WorkSourceProvider>
       {records.length > 0 && <details className="mt-4 rounded-control bg-bg-sunk/50 p-3 ring-1 ring-line" onToggle={e => setShowRecords(e.currentTarget.open)}><summary className="cursor-pointer text-[13px] text-ink-3">{xhsCommentTask ? "小红书评论提交与轮询记录（历史事实）" : videoTask ? "视频参考上传、提交与轮询记录（历史事实）" : aiSearchTask ? "AI 搜索提交与轮询记录（历史事实）" : transcriptionTask ? "转写提交与轮询记录（历史事实）" : "参考上传与生成查询记录"}（本页 {records.length} 项）</summary>{showRecords && <div className="mt-4 space-y-4">{(transcriptionTask || aiSearchTask || videoTask || xhsCommentTask ? records.toReversed() : records).map(result => <OperationResultItem key={result.id} result={result} imageOptions={r.imageOptions} />)}</div>}</details>}
       <div className="mt-4 flex gap-3 text-[13px]"><Link className="text-accent" to={`/admin/operations/${r.id}#results`}>首批结果</Link>{r.nextResultCursor !== null && <Link className="text-accent" to={`?cursor=${r.nextResultCursor}#results`}>下一批结果</Link>}</div>
     </Card></div>

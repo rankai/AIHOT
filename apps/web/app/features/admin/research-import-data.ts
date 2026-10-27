@@ -6,11 +6,9 @@ import { isResearchPlatform, researchObject } from "./research-platform-data.ts"
 interface SupplementField { name: string; label: string; options?: readonly string[] }
 export function researchSupplementFields(platform: unknown): SupplementField[] {
   switch (platform) {
-    case "qichezhijia": return [{ name: "authorId", label: "作者 authorId" }, { name: "authorNamespace", label: "作者标识范围", options: ["original", "chejiahao", "club"] }];
-    case "dongchedi": return [{ name: "userId", label: "作者 userId" }, { name: "authorId", label: "作者 authorId" }, { name: "workType", label: "作品类型", options: ["article", "video"] }];
-    case "yiche": return [{ name: "userId", label: "作者 userId" }, { name: "authorId", label: "作者 authorId" }, { name: "workType", label: "作品类型", options: ["club", "article", "video"] }];
-    case "baijiahao": return [{ name: "uid", label: "作者 uid" }, { name: "secUid", label: "作者 secUid" }, { name: "uk", label: "作者 uk" }, { name: "workType", label: "作品类型", options: ["article", "video"] }];
-    case "zhihu": return [{ name: "uid", label: "作者 uid" }, { name: "vertical", label: "作品范围", options: ["answer", "article", "zvide"] }];
+    case "dongchedi": case "baijiahao": return [{ name: "workType", label: "作品类型", options: ["article", "video"] }];
+    case "yiche": return [{ name: "workType", label: "作品类型", options: ["club", "article", "video"] }];
+    case "zhihu": return [{ name: "vertical", label: "作品范围", options: ["answer", "article", "zvide"] }];
     default: return [];
   }
 }
@@ -34,9 +32,6 @@ export function researchImportState(result: Pick<OperationResult, "kind" | "data
   const receivedIdentity = Object.values(researchObject(result.data.identity)).some(present);
   return { account, work, linked, canImport: !linked && (work || account && receivedIdentity), fields: account ? [] : researchSupplementFields(platform).filter(field => !fieldReceived(result.data, field)) };
 }
-export function researchImportCandidates<T extends { participation_mode: string }>(rows: readonly T[], account: boolean): T[] {
-  return rows.filter(row => account || row.participation_mode === "isolated");
-}
 function nativeHost(platform: unknown, hostname: string): boolean {
   switch (platform) {
     case "qichezhijia": return hostname === "autohome.com.cn" || hostname.endsWith(".autohome.com.cn");
@@ -47,12 +42,13 @@ function nativeHost(platform: unknown, hostname: string): boolean {
     default: return false;
   }
 }
-export function researchImportBody(result: Pick<OperationResult, "kind" | "data" | "sourceId" | "articleId">, input: { reason: string; target: string; sourceId: string; requestState: string; rows: readonly { id: string; participation_mode: string }[]; values: Record<string, string>; evidence: string }) {
+export function researchImportBody(result: Pick<OperationResult, "kind" | "data" | "sourceId" | "articleId">, input: { reason: string; target: string; sourceId: string; requestState: string; rows: readonly { id: string; participation_mode: string }[]; values: Record<string, string>; evidence: string; ownedSource?: { id: string; inherited: boolean } }) {
   const state = researchImportState(result), reason = input.reason.trim();
   if (!state.canImport) throw new Error(state.linked ? "此结果已有真实关联，请查看文章或信源。" : "仅已收稳定身份的账号或作品可本地导入，不能人工补账号身份。");
   if (!reason || reason.length > 500) throw new Error("请填写 1–500 字符的操作原因。");
   const existing = input.target === "existing";
-  if (existing && !candidateSelectionValid(input.sourceId, input.requestState, "external", "external", researchImportCandidates(input.rows, state.account))) throw new Error("请等待搜索完成，并从当前候选页重新选择已核实的信源。");
+  if (state.account && existing && !candidateSelectionValid(input.sourceId, input.requestState, "external", "external", input.rows)) throw new Error("请等待搜索完成，并从当前候选页重新选择已核实的信源。");
+  if (state.work && !input.ownedSource?.id) throw new Error("请先在结果区确认所属信源。");
   const supplement: Record<string, string> = {};
   if (!state.account) {
     const fields = researchSupplementFields(result.data.platform);
@@ -81,11 +77,11 @@ export function researchImportBody(result: Pick<OperationResult, "kind" | "data"
       }
       supplement.url = url;
     }
-    if (Object.keys(supplement).length || existing) {
+    if (Object.keys(supplement).length) {
       const evidence = input.evidence.trim();
-      if (!evidence || evidence.length > 1000) throw new Error("补充字段或显式作品目标需要 1–1000 字符的核实依据。");
+      if (!evidence || evidence.length > 1000) throw new Error("补充必要作品字段需要 1–1000 字符的核实依据。");
       supplement.evidence = evidence;
     }
   }
-  return { reason, ...(existing ? { sourceId: input.sourceId } : {}), ...(!state.account && Object.keys(supplement).length ? { supplement } : {}) };
+  return { reason, ...(state.account ? existing ? { sourceId: input.sourceId } : {} : input.ownedSource?.inherited ? {} : { sourceId: input.ownedSource!.id }), ...(!state.account && Object.keys(supplement).length ? { supplement } : {}) };
 }

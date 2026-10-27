@@ -14,8 +14,9 @@ import {recoverOperations} from "@aihot/backend/providers/operations/recovery";
 const feeds=new Map<string,{handle:string;base:bigint}>();let seq=0,hits=0,failDetail:string|null=null,wrongAuthor=false,nullableUser=false,singlePage=false,missingTimelineText=false;
 const noiseIds=new Set<string>();
 let videoShape:unknown;
+let absentAuthorId=false,conflictingHandle=false;
 const base=BigInt(Date.now())*1000000n;
-function tweet(id:string,userId:string,handle:string|null=null){return {...(videoShape?{medias:videoShape}:{}),tweetId:id,createdAt:new Date().toISOString(),text:noiseIds.has(id)?"Synthetic noise marker":"Synthetic collection material",author:{userId,username:handle},replyToTweetId:null,replyToUserId:null,replyToUsername:null};}
+function tweet(id:string,userId:string,handle:string|null=null){return {...(videoShape?{medias:videoShape}:{}),tweetId:id,createdAt:new Date().toISOString(),text:noiseIds.has(id)?"Synthetic noise marker":"Synthetic collection material",author:{...(absentAuthorId?{}:{userId}),username:conflictingHandle?"other_handle":handle},replyToTweetId:null,replyToUserId:null,replyToUsername:null};}
 const server=http.createServer((req,res)=>{const chunks:Buffer[]=[];req.on("data",c=>chunks.push(c));req.on("end",()=>{
   hits++;const body=JSON.parse(Buffer.concat(chunks).toString());
   if(req.url?.endsWith("userTimeline")){
@@ -70,7 +71,7 @@ test("same source/subscription switches both ways; detail interruption retains p
   assert.equal((await sql`SELECT count(*)::int AS n FROM articles WHERE source_id=${s.id}`)[0]!.n,3);
   const [sub]=await sql`SELECT * FROM collection_subscriptions WHERE control_source_id=${s.id}`;assert.equal(sub!.id,original!.id);assert.equal(sub!.progress.lastTweetId,String(s.b+300n));assert.equal(sub!.progress.continuation,null);
   await switchTo(s.id,"socialdata");const [back]=await sql`SELECT * FROM collection_subscriptions WHERE control_source_id=${s.id}`;
-  assert.equal(back!.id,original!.id);assert.equal(back!.config.query,original!.config.query);assert.equal(back!.config.restId,undefined);assert.equal(back!.progress.lastTweetId,String(s.b+300n));
+  assert.equal(back!.id,original!.id);assert.equal(back!.config.query,original!.config.query);assert.equal(back!.config.restId,s.uid);assert.equal(back!.progress.lastTweetId,String(s.b+300n));
 });
 
 test("noise results consume detail receipts and let remaining items and the next collection finish",async()=>{
@@ -215,5 +216,15 @@ test("Redfox timeline and required detail both persist own video facts without i
   try{const run=await createCollection(s.id,{actor:"test",key:tag(),reason:"schedule"});await drain(run.id);assert.equal((await row(run.id)).status,"completed");
    const articles=await sql`SELECT media FROM articles WHERE source_id=${s.id}`;assert.equal(articles.length,2);assert.ok(articles.every(a=>a.media.some((m:{kind:string;confirmed?:boolean})=>m.kind==="video"&&m.confirmed===true)));
   }finally{singlePage=false;videoShape=undefined;}
+ }
+});
+
+test('explicit restId runs without bindings; missing author ID is allowed but received handle conflicts reject',async()=>{
+ for(const conflict of [false,true]){const s=await source();await sql`DELETE FROM source_account_bindings WHERE source_id=${s.id}`;await sql`UPDATE collection_subscriptions SET config=config||${sql.json({restId:s.uid})} WHERE control_source_id=${s.id}`;
+  const before=hits;assert.equal((await preflightXReplacement(s.id,'redfox'))!.supported,true);assert.equal(hits,before);await switchTo(s.id,'redfox');absentAuthorId=true;conflictingHandle=conflict;
+  try{const run=await createCollection(s.id,{actor:'test',key:tag(),reason:'manual'});for(let n=0;n<15&&(await row(run.id)).status==='active';n++)await step(run.id);assert.equal((await row(run.id)).status,conflict?'needs_review':'completed');
+   assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${s.id}`).length,0);
+   if(conflict)assert.equal((await sql`SELECT 1 FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`).length,0);
+  }finally{absentAuthorId=false;conflictingHandle=false;}
  }
 });

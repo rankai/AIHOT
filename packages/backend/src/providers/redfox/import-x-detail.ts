@@ -19,7 +19,7 @@ export async function importXDetailResult(resultId:number,raw:unknown,actor:stri
   if(s.kind==="x_detail_work"&&(s.data.platform!=="x"||s.data.operationId!=="QCP75W33"))throw new UnsupportedReplacement("Invalid X detail result platform");
   const tweet=parseTweet(s.kind==="article"?s.data:s.data.record,p.tweetId),origin=checkedXDetailOrigin(s.input.origin,p.tweetId,tweet),context=xDetailContext(tweet,origin);
   if(s.kind==="x_detail_work"&&(s.data.workId!==tweet.tweetId||s.data.identity?.userId!==tweet.author.userId))throw new UnsupportedReplacement("Stored detail identity differs from received Tweet");
-  return importReceivedXWork(tx,resultId,raw,actor,key,{...tweet,user:{...tweet.author,username:context.username}},new Date(origin?.discoveredAt??s.created_at));
+  return importReceivedXWork(tx,resultId,raw,actor,key,{...tweet,user:{...tweet.author,username:context.username}},new Date(origin?.discoveredAt??s.created_at),"redfox",origin?.sourceResultId);
  };
  return db?execute(db):sql.begin(execute);
 }

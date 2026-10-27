@@ -37,19 +37,19 @@ const stableId=z.string().regex(/^\d+$/).max(30),handle=z.string().regex(/^[A-Za
 /** A recurring account snapshot must prove its actual scope, independently of each post author. */
 export function requireXCollectionAccountScope(summary:Record<string,unknown>,query:Record<string,unknown>,candidate:XCandidate){
  const scope=object(summary.receivedScope),uid=stableId.safeParse(scope?.rest_id),actualHandle=handle.safeParse(scope?.screen_name);
- if(!uid.success||query.screen_name!==undefined&&!actualHandle.success)throw new UnsupportedReplacement('X account snapshot lacks actual received account scope');
- if(query.screen_name!==undefined&&actualHandle.success&&actualHandle.data.toLowerCase()!==String(query.screen_name).toLowerCase()||query.rest_id!==undefined&&uid.data!==String(query.rest_id))throw new AgentKeyPayloadError('X received account scope contradicts frozen account');
+ if(query.screen_name!==undefined&&actualHandle.success&&actualHandle.data.toLowerCase()!==String(query.screen_name).toLowerCase()||query.rest_id!==undefined&&uid.success&&uid.data!==String(query.rest_id))throw new AgentKeyPayloadError('X received account scope contradicts frozen account');
  const record=object(candidate.data.record),author=object(record?.author),authorId=stableId.safeParse(author?.rest_id);
- if(!authorId.success)throw new UnsupportedReplacement('X account snapshot lacks received author identity');
- if(authorId.data!==uid.data)throw new AgentKeyPayloadError('X post author contradicts received account scope');
+ const authorHandle=handle.safeParse(author?.screen_name);
+ if(authorHandle.success&&((query.screen_name!==undefined&&authorHandle.data.toLowerCase()!==String(query.screen_name).toLowerCase())||(actualHandle.success&&authorHandle.data.toLowerCase()!==actualHandle.data.toLowerCase())))throw new AgentKeyPayloadError('X post handle contradicts frozen account scope');
+ if(authorId.success&&((uid.success&&authorId.data!==uid.data)||(query.rest_id!==undefined&&authorId.data!==String(query.rest_id))))throw new AgentKeyPayloadError('X post author contradicts received account scope');
 }
 
 function postFacts(value:unknown){
  const r=object(value);if(!r||r.role!=='post'||r.roleLimitations!==undefined||r.retweeted!==undefined||r.retweeted_tweet!==undefined)throw new UnsupportedReplacement('X role is research only');
- const author=object(r.user_info)??object(r.author),context=object(r.authorContext),ids=z.object({tweetId:stableId,userId:stableId}).safeParse({tweetId:r.tweetId,userId:author?.rest_id});
- if(!ids.success)throw new UnsupportedReplacement('X work lacks received stable post or author identity');
+ const author=object(r.user_info)??object(r.author),context=object(r.authorContext),ids=z.object({tweetId:stableId,userId:stableId.optional()}).safeParse({tweetId:r.tweetId,userId:author?.rest_id});
+ if(!ids.success)throw new UnsupportedReplacement('X work lacks received stable post identity');
  const {tweetId,userId}=ids.data;
- const actualHandle=author?.screen_name??(context?.source==='received-account-context'&&context.rest_id===userId?context.screen_name:undefined),checkedHandle=handle.safeParse(actualHandle);
+ const actualHandle=author?.screen_name??(context?.source==='received-account-context'&&(userId===undefined||context.rest_id===undefined||context.rest_id===userId)?context.screen_name:undefined),checkedHandle=handle.safeParse(actualHandle);
  if(!checkedHandle.success)throw new UnsupportedReplacement('X work lacks received legal author handle');
  const username=checkedHandle.data;
  if(r.url!==`https://x.com/${username}/status/${tweetId}`||r.urlSource!=='derived-canonical-permalink'||typeof r.text!=='string'||!r.text.trim())throw new UnsupportedReplacement('X work lacks received text or a consistent native URL');

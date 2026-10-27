@@ -96,7 +96,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
   for(const index of [0,1,3,5,6,7])await withStub(fixtures[index],async calls=>{
    process.env.COLLECT_ENABLED='true';const op=agentKeyWeiboOperations[index]!;
    const config={name:'Weibo homepage synthetic',provider:'agentkey',operationId:op.operationId,parameters:parameters[index],enabled:true,limits:{pages:1,items:1,details:9}};
-   const sub=await createPlatformSubscription(config,'test',tag());
+   const sub=await createPlatformSubscription({...config,sourceId:await selectedSource()},'test',tag());
    try{
     const run=await startPlatformSubscription(sub.id,'test',tag());assert.equal(run.limits.details,0);const state=await step(run.id);assert.equal(state.status,'completed',JSON.stringify({status:state.status,reason:state.wait_reason}));assert.equal(calls.length,1);
     const [saved]=await sql`SELECT active_run_id,progress,next_run_at>now() AS scheduled FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(saved!.active_run_id,null);assert.equal(saved!.scheduled,true);assert.equal(saved!.progress.pages,1);assert.equal(saved!.progress.details,0);
@@ -104,18 +104,18 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
     if([0,1].includes(index)){assert.ok(item.article_id);assert.ok(item.source_id);}else assert.ok(results.every(r=>r.article_id===null&&r.source_id===null));
    }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });
-  await assert.rejects(createPlatformSubscription({name:'unsupported pages',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},limits:{pages:2,items:1,details:0}},'test',tag()));
+  await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'unsupported pages',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},limits:{pages:2,items:1,details:0}},'test',tag()));
  });
  await t.test('collection received resume is local and edited subscriptions cannot write stale material',async()=>{
   await withStub(fixtures[0],async calls=>{
-   process.env.COLLECT_ENABLED='true';const config={name:'Weibo local resume',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,limits:{pages:1,items:1,details:0}},sub=await createPlatformSubscription(config,'test',tag());
+   process.env.COLLECT_ENABLED='true';const config={name:'Weibo local resume',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,limits:{pages:1,items:1,details:0}},sub=await createPlatformSubscription({...config,sourceId:await selectedSource()},'test',tag());
    try{
     const run=await startPlatformSubscription(sub.id,'test',tag()),execution=await sql.begin(tx=>claimRun(tx,{runId:run.id,stepVersion:run.step_version,generation:run.generation},randomUUID()));await requestAgentKey(execution,run,weiboSearchRoute,agentKeyWeiboOperations[0].schema.parse(config.parameters));
     process.env.AGENTKEY_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';assert.equal((await step(run.id)).status,'completed');assert.equal(calls.length,1);
    }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });
   await withStub(fixtures[0],async calls=>{
-   process.env.COLLECT_ENABLED='true';const config={name:'Weibo edit guard',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'old'},enabled:true,limits:{pages:1,items:1,details:0}},sub=await createPlatformSubscription(config,'test',tag());
+   process.env.COLLECT_ENABLED='true';const config={name:'Weibo edit guard',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'old'},enabled:true,limits:{pages:1,items:1,details:0}},sub=await createPlatformSubscription({...config,sourceId:await selectedSource()},'test',tag());
    try{const run=await startPlatformSubscription(sub.id,'test',tag());await updatePlatformSubscription(sub.id,{editVersion:1,config:{...config,parameters:{query:'new'}}},'test');assert.equal((await step(run.id)).status,'stopped');assert.equal(calls.length,0);assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`).length,0);}finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });
  });
@@ -123,7 +123,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
   const u=`87${Date.now()}`,id=`88${Date.now()}`,other=String(BigInt(id)+1n),short=`Detail${randomUUID().replaceAll('-','')}`;
   const list={items:[{category:'feed',data:{...work(),id,idstr:id,mid:id,mblogid:short,user:{id:u},isLongText:false,text:'原始完整短文'}},{category:'feed',data:{...work(),id:other,idstr:other,mid:other,mblogid:`${short}B`,user:{id:u}}}]};
   await withStub((q:any)=>q.name===weiboDetailRoute.tool?{detailInfo:{status:{...work(),id,idstr:id,mid:id,mblogid:short,user:{id:u},isLongText:false,text:'详情另一短文'}}}:list,async calls=>{
-   process.env.COLLECT_ENABLED='true';const config={name:'Weibo bounded details',provider:'agentkey',operationId:'weibo.account_posts',parameters:{uid:u},enabled:true,enrichDetails:true,detailOperationId:'API_1789098514899',limits:{pages:1,items:2,details:1}},sub=await createPlatformSubscription(config,'test',tag());
+   process.env.COLLECT_ENABLED='true';const config={name:'Weibo bounded details',provider:'agentkey',operationId:'weibo.account_posts',parameters:{uid:u},enabled:true,enrichDetails:true,detailOperationId:'API_1789098514899',limits:{pages:1,items:2,details:1}},sub=await createPlatformSubscription({...config,sourceId:await selectedSource()},'test',tag());
    try{
     const run=await startPlatformSubscription(sub.id,'test',tag()),first=await step(run.id);assert.equal(first.step_key,weiboDetailRoute.stepKey);assert.equal(first.status,'active');assert.equal(calls.length,1);
     const [parent]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work' ORDER BY id LIMIT 1`;assert.ok(parent!.article_id);
@@ -136,14 +136,14 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
    }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });
  });
- await t.test('detail author/link contradictions preserve received for review; missing detail author stays pending',async()=>{
+ await t.test('detail identity contradictions preserve received for review; missing original URL stays pending',async()=>{
   for(const kind of ['uid','mblogid','missing'] as const){
    const u=`89${Date.now()}`,id=`90${Date.now()}`,short=`Conflict${randomUUID().replaceAll('-','')}`,w={...work(),id,idstr:id,mid:id,mblogid:short,user:{id:u}};
    const detail={...w,...(kind==='uid'?{user:{id:'1'}}:kind==='mblogid'?{mblogid:'Different'}:{user:undefined})};
    await withStub((q:any)=>q.name===weiboDetailRoute.tool?{detailInfo:{status:detail}}:{items:[{category:'feed',data:w}]},async calls=>{
-    process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({name:'Weibo detail identity',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,enrichDetails:true,limits:{pages:1,items:1,details:1}},'test',tag());
+    process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'Weibo detail identity',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,enrichDetails:true,limits:{pages:1,items:1,details:1}},'test',tag());
     try{const run=await startPlatformSubscription(sub.id,'test',tag());await step(run.id);const state=await step(run.id);assert.equal(state.status,kind==='missing'?'completed':'needs_review',state.wait_reason);assert.equal(calls.length,2);
-     const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND step_version=2`;if(kind==='missing'){const item=rows.find(r=>r.kind==='weibo_work')!;assert.equal(item.article_id,null);assert.match(item.data.pendingReason,/UID/);}else{assert.equal(rows.length,0);assert.equal((await sql`SELECT status FROM receipts WHERE id=${state.current_receipt_id}`)[0]!.status,'received');}
+     const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND step_version=2`;if(kind==='missing'){const item=rows.find(r=>r.kind==='weibo_work')!;assert.equal(item.article_id,null);assert.match(item.data.pendingReason,/original URL/);}else{assert.equal(rows.length,0);assert.equal((await sql`SELECT status FROM receipts WHERE id=${state.current_receipt_id}`)[0]!.status,'received');}
     }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
    });
   }
@@ -155,7 +155,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
    const detail={...w,isLongText:false,user:identity==='missing'?undefined:{id:identity==='matching'?u:'1'}};
    await withStub((q:any)=>q.name===weiboDetailRoute.tool?{detailInfo:{status:detail}}:{items:[{category:'feed',data:w}]},async calls=>{
     process.env.COLLECT_ENABLED='true';
-    const sub=await createPlatformSubscription({name:'Weibo frozen account scope',provider:'agentkey',operationId:'weibo.account_posts',parameters:{uid:u},enabled:true,enrichDetails:true,detailOperationId:'API_1789098514899',limits:{pages:1,items:1,details:1}},'test',tag());
+    const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'Weibo frozen account scope',provider:'agentkey',operationId:'weibo.account_posts',parameters:{uid:u},enabled:true,enrichDetails:true,detailOperationId:'API_1789098514899',limits:{pages:1,items:1,details:1}},'test',tag());
     try{
      const run=await startPlatformSubscription(sub.id,'test',tag()),first=await step(run.id);assert.equal(first.status,'active');
      const [parent]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;assert.equal(parent!.article_id,null);assert.equal(parent!.data.uid,undefined);
@@ -166,7 +166,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
       assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`).length,0);
      }else{
       const child=children.find(r=>r.kind==='weibo_work')!;assert.ok(child);
-      if(identity==='missing'){assert.equal(child.article_id,null);assert.match(child.data.pendingReason,/UID/);}
+      if(identity==='missing'){assert.equal(child.article_id,null);assert.match(child.data.pendingReason,/original URL/);}
       else{assert.ok(child.article_id);assert.equal(child.data.uid,u);}
      }
     }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
@@ -177,7 +177,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
   for(const change of [false,true]){
    const u=`91${Date.now()}`,id=`92${Date.now()}`,short=`Resume${randomUUID().replaceAll('-','')}`,w={...work(),id,idstr:id,mid:id,mblogid:short,user:{id:u}},entered=gate(),release=gate();
    await withStub(async(q:any)=>{if(q.name!==weiboDetailRoute.tool)return {items:[{category:'feed',data:w}]};if(change){entered.open();await release.promise;}return {detailInfo:{status:{...w,isLongText:false}}};},async calls=>{
-    process.env.COLLECT_ENABLED='true';const config={name:'Weibo detail recovery',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,enrichDetails:true,limits:{pages:1,items:1,details:1}},sub=await createPlatformSubscription(config,'test',tag());
+    process.env.COLLECT_ENABLED='true';const config={name:'Weibo detail recovery',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,enrichDetails:true,limits:{pages:1,items:1,details:1}},sub=await createPlatformSubscription({...config,sourceId:await selectedSource()},'test',tag());
     try{const run=await startPlatformSubscription(sub.id,'test',tag()),first=await step(run.id);
      if(change){const executing=step(run.id);await entered.promise;await updatePlatformSubscription(sub.id,{editVersion:1,config:{...config,enabled:false}},'test');release.open();const state=await executing;assert.equal(state.status,'stopped');assert.equal((await sql`SELECT status FROM receipts WHERE id=${state.current_receipt_id}`)[0]!.status,'received');assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND step_version=2`).length,0);}
      else{const execution=await sql.begin(tx=>claimRun(tx,{runId:run.id,stepVersion:first.step_version,generation:first.generation},randomUUID()));await requestAgentKey(execution,first as any,weiboDetailRoute,{status_id:id});process.env.AGENTKEY_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';assert.equal((await step(run.id)).status,'completed');}
@@ -189,13 +189,13 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
  await t.test('X preserves basic search both directions and refuses actual unsupported recipes without changes',async()=>{
   const previous={...process.env};Object.assign(process.env,{AGENTKEY_API_KEY:'fake-weibo-switch',REDFOX_API_KEY:'fake-weibo-switch'});
   try{
-   const sub=await createPlatformSubscription({name:'Weibo switch',provider:'redfox',operationId:'TXQPVGJG',parameters:{keyword:'offline',searchType:'61',page:'1'},enabled:false,limits:{pages:1,items:3,details:0}},'test',tag());
+   const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'Weibo switch',provider:'redfox',operationId:'TXQPVGJG',parameters:{keyword:'offline',searchType:'61',page:'1'},enabled:false,limits:{pages:1,items:3,details:0}},'test',tag());
    const first=await preflightPlatformSubscriptionProvider(sub.id,{editVersion:1,targetProvider:'agentkey'});assert.equal(first!.supported,true,JSON.stringify(first));
    const switched=await switchPlatformSubscriptionProvider(sub.id,{editVersion:1,targetProvider:'agentkey',reason:'explicit switch'},'test');assert.deepEqual(switched!.config.parameters,{query:'offline',search_type:61,page:1});
    const back=await preflightPlatformSubscriptionProvider(sub.id,{editVersion:2,targetProvider:'redfox'});assert.equal(back!.supported,true,JSON.stringify(back));await switchPlatformSubscriptionProvider(sub.id,{editVersion:2,targetProvider:'redfox',reason:'explicit reverse'},'test');
    const [saved]=await sql`SELECT provider,config,progress,execution_version,edit_version FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(saved!.provider,'redfox');assert.deepEqual(saved!.config.parameters,{keyword:'offline',searchType:'61',page:'1'});assert.deepEqual(saved!.progress,{});assert.equal(saved!.edit_version,3);
    for(const extra of [{parameters:{keyword:'offline',searchType:'1',page:'1',extParam:'2'}},{limits:{pages:2,items:3,details:0}},{enrichDetails:true,limits:{pages:1,items:3,details:1}},{operationId:'UAQ90A1F',parameters:{}}]){
-    const unsupported=await createPlatformSubscription({name:'Unsupported Weibo switch',provider:'redfox',operationId:'TXQPVGJG',parameters:{keyword:'offline',searchType:'1',page:'1'},enabled:false,limits:{pages:1,items:3,details:0},...extra},'test',tag());const [before]=await sql`SELECT * FROM collection_subscriptions WHERE id=${unsupported.id}`;
+    const unsupported=await createPlatformSubscription({sourceId:await selectedSource(),name:'Unsupported Weibo switch',provider:'redfox',operationId:'TXQPVGJG',parameters:{keyword:'offline',searchType:'1',page:'1'},enabled:false,limits:{pages:1,items:3,details:0},...extra},'test',tag());const [before]=await sql`SELECT * FROM collection_subscriptions WHERE id=${unsupported.id}`;
     assert.equal((await preflightPlatformSubscriptionProvider(unsupported.id,{editVersion:1,targetProvider:'agentkey'}))!.supported,false);await assert.rejects(switchPlatformSubscriptionProvider(unsupported.id,{editVersion:1,targetProvider:'agentkey',reason:'unsupported'},'test'));assert.deepEqual((await sql`SELECT * FROM collection_subscriptions WHERE id=${unsupported.id}`)[0],before);
    }
   }finally{for(const k of Object.keys(process.env))if(!(k in previous))delete process.env[k];Object.assign(process.env,previous);}
@@ -203,7 +203,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
  await t.test('late old-provider response after X remains received and cannot write',async()=>{
   const entered=gate(),release=gate(),previousKey=process.env.REDFOX_API_KEY;process.env.REDFOX_API_KEY='fake-weibo-switch';
   try{await withStub(async()=>{entered.open();await release.promise;return fixtures[0];},async calls=>{
-   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({name:'Weibo late switch',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
+   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'Weibo late switch',provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'},enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
    try{const run=await startPlatformSubscription(sub.id,'test',tag()),executing=step(run.id);await entered.promise;await switchPlatformSubscriptionProvider(sub.id,{editVersion:1,targetProvider:'redfox',reason:'switch during request'},'test');release.open();const done=await executing;assert.equal(done.status,'stopped');assert.equal(calls.length,1);assert.equal((await sql`SELECT status FROM receipts WHERE id=${done.current_receipt_id}`)[0]!.status,'received');assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`).length,0);const [saved]=await sql`SELECT active_run_id,progress FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(saved!.active_run_id,null);assert.deepEqual(saved!.progress,{});}finally{release.open();await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });}finally{if(previousKey===undefined)delete process.env.REDFOX_API_KEY;else process.env.REDFOX_API_KEY=previousKey;}
  });
@@ -220,11 +220,11 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
     process.env.AGENTKEY_CALLS_ENABLED='false';
     await assert.rejects(importWeiboResult(item!.id,{reason:'manual forbidden',supplement:{uid:u,evidence:'manual'}},'test',tag()));
     await assert.rejects(importWeiboResult(item!.id,{reason:'arbitrary forbidden',sourceId:'arbitrary-source'},'test',tag()));
-    const key=tag(),result=await importWeiboResult(item!.id,{reason:'verified local I'},'test',key);assert.ok(result?.articleId);assert.deepEqual(await importWeiboResult(item!.id,{reason:'repeat'},'test',key),result);assert.equal(calls.length,1);
+    const key=tag(),result=await importWeiboResult(item!.id,{sourceId:await selectedSource(),reason:'verified local I'},'test',key);assert.ok(result?.articleId);assert.deepEqual(await importWeiboResult(item!.id,{sourceId:await selectedSource(),reason:'repeat'},'test',key),result);assert.equal(calls.length,1);
     const [source]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${result!.sourceId}`;assert.deepEqual({...source},{participation_mode:'isolated',site_fulltext:false,syndicate_fulltext:false});
     const [article]=await sql`SELECT body_status,body_text,published_at,backfill,raw FROM articles WHERE id=${result!.articleId}`;
     assert.equal(article!.body_status,longText===false?'ok':'pending');assert.equal(article!.body_text,longText===false?'离线微博':null);assert.equal(article!.published_at,null);assert.equal(article!.backfill,true);assert.equal(article!.raw.provider,'agentkey');assert.equal(article!.raw.receivedText,'离线微博');
-    assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${result!.sourceId} AND platform='weibo' AND id_value=${u}`).length,1);
+    assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${result!.sourceId} AND platform='weibo' AND id_value=${u}`).length,0);
    });
   }
  });
@@ -243,8 +243,8 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
    for(const disabled of [false,true]){
     await sql`UPDATE sources SET enabled=${!disabled} WHERE id=${sourceId}`;
     const run=await createAgentKeyQuery({provider:'agentkey',operationId:'API_1789098514899',parameters:{status_id:id}},'test',tag());await step(run.id);const [item]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;
-    if(disabled)await assert.rejects(importWeiboResult(item!.id,{reason:'disabled author'},'test',tag()),/disabled/);
-    else {const imported=await importWeiboResult(item!.id,{reason:'dedup short permalink'},'test',tag());assert.equal(imported!.articleId,existing.articleId);assert.equal((await sql`SELECT url FROM articles WHERE id=${existing.articleId}`)[0]!.url,`https://weibo.com/${u}/${short}`);}
+    if(disabled)await assert.rejects(importWeiboResult(item!.id,{sourceId,reason:'disabled author'},'test',tag()),/disabled/);
+    else {const imported=await importWeiboResult(item!.id,{sourceId,reason:'dedup short permalink'},'test',tag());assert.equal(imported!.articleId,existing.articleId);assert.equal((await sql`SELECT url FROM articles WHERE id=${existing.articleId}`)[0]!.url,`https://weibo.com/${u}/${short}`);}
    }
    assert.equal(calls.length,2);
   });
@@ -254,17 +254,17 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
   let firstArticle:string|undefined;
   await withStub({items:[{category:'feed',data:{...work(),id,idstr:id,mid:id,mblogid:short,isLongText:false,user:{id:u,idstr:u}}}]},async calls=>{
    const run=await createAgentKeyQuery({provider:'agentkey',operationId:'TXQPVGJG',parameters:{query:'offline'}},'test',tag());await step(run.id);const [item]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;
-   firstArticle=(await importWeiboResult(item!.id,{reason:'first provider'},'test',tag()))!.articleId!;assert.equal(calls.length,1);
+   firstArticle=(await importWeiboResult(item!.id,{sourceId:await selectedSource(),reason:'first provider'},'test',tag()))!.articleId!;assert.equal(calls.length,1);
   });
   let calls=0;const server=await stub(async()=>{calls++;return {code:2000,data:{opusId:id,mblogid:short,uid:u,text:'Redfox full body',opusUrl:`https://weibo.com/${u}/${short}`}};});
   const previous={...process.env},privateNetwork=backendConfig.allowPrivateNetworkFetch;
   Object.assign(process.env,{REDFOX_CALLS_ENABLED:'true',REDFOX_API_KEY:'fake-weibo-cross',REDFOX_TEST_BASE_URL:server.url});backendConfig.allowPrivateNetworkFetch=true;
   try{
    const run=await createSynchronousQuery({operationId:'API_1789098514899',parameters:{opusId:id}},'test',tag());const state=await step(run.id);assert.equal(state.status,'completed',JSON.stringify({status:state.status,wait_reason:state.wait_reason}));const [item]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;
-   const imported=await importWeiboResult(item!.id,{reason:'second provider'},'test',tag());assert.equal(imported!.articleId,firstArticle);assert.equal(calls,1);assert.equal((await sql`SELECT body_status,body_text FROM articles WHERE id=${firstArticle!}`)[0]!.body_text,'Redfox full body');
+   const imported=await importWeiboResult(item!.id,{sourceId:await selectedSource(),reason:'second provider'},'test',tag());assert.equal(imported!.articleId,firstArticle);assert.equal(calls,1);assert.equal((await sql`SELECT body_status,body_text FROM articles WHERE id=${firstArticle!}`)[0]!.body_text,'Redfox full body');
   }finally{await server.close();backendConfig.allowPrivateNetworkFetch=privateNetwork;for(const k of Object.keys(process.env))if(!(k in previous))delete process.env[k];Object.assign(process.env,previous);}
  });
- await t.test('missing identity and unsupported retweet remain queryable but cannot import',async()=>{
+ await t.test('missing work/original evidence and unsupported retweet remain queryable but cannot import',async()=>{
   for(const w of [{text:'Only text'},{id:status,idstr:status,text:'No author'},{...work(),retweeted_status:{user:{id:'1'}}}])await withStub({detailInfo:{status:w}},async calls=>{
    const run=await createAgentKeyQuery({provider:'agentkey',operationId:'API_1789098514899',parameters:{status_id:status}},'test',tag());assert.equal((await step(run.id)).status,'completed');const [item]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;
    await sql`UPDATE operation_results SET data=data||'{"importable":true}'::jsonb WHERE id=${item!.id}`;
@@ -300,6 +300,18 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
    await sql`UPDATE receipts SET request=jsonb_set(request,'{params,status_id}','"1"') WHERE id=${receipt.receiptId}`;process.env.AGENTKEY_CALLS_ENABLED='false';assert.equal((await step(run.id)).status,'needs_review');assert.equal(calls.length,1);
   });
  });
+ await t.test('authorless received native scheme imports even from the old URL projection',async()=>{
+  const id=`987${Date.now()}`,u=`986${Date.now()}`,w={...work(),id,idstr:id,mid:id,user:undefined,scheme:`https://weibo.com/${u}/${id}`};
+  await withStub({detailInfo:{status:w}},async calls=>{
+   const run=await createAgentKeyQuery({provider:'agentkey',operationId:'API_1789098514899',parameters:{status_id:id}},'test',tag());assert.equal((await step(run.id)).status,'completed');
+   const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;
+   assert.equal(r!.data.uid,undefined);const record={...r!.data.record};delete record.opusUrl;
+   const legacy={...r!.data,record,urlSource:null};delete legacy.opusUrl;
+   await sql`UPDATE operation_results SET data=${sql.json(legacy)} WHERE id=${r!.id}`;
+   const saved=await importWeiboResult(r!.id,{sourceId:await selectedSource(),reason:'Retained exact native original'},'test',tag());assert.ok(saved!.articleId);assert.equal(calls.length,1);
+   assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='weibo' AND id_value=${u}`).length,0);
+  });
+ });
  await t.test('API merges semantic catalog IDs and validates exact query input',async()=>{
   const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp(),previous=backendConfig.devAdmin;backendConfig.devAdmin={displayName:'Weibo synthetic API'};
   try{
@@ -313,3 +325,6 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
  });
  }finally{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();}
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext,syndicate_fulltext) VALUES (${chosenWorkSource},'Chosen Weibo source','rss','isolated',false,false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

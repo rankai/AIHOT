@@ -113,8 +113,8 @@ export function agentKeyXRecordRows(value: unknown, type: keyof typeof xRecordKe
 }
 export function agentKeyXContextRows(value: unknown): Array<[string, string]> {
   const record = researchObject(value), author = researchObject(record.author), context = researchObject(record.authorContext);
-  // A requested handle or another author's context cannot fill a nullable received author.
-  return typeof author.rest_id === "string" && author.rest_id === context.rest_id && context.source === "received-account-context" ? serviceRecordRows(context, ["rest_id", "screen_name", "source"]) : [];
+  // Only received account context is displayed; actual conflicting author IDs still exclude it.
+  return context.source === "received-account-context" && (author.rest_id == null || context.rest_id == null || author.rest_id === context.rest_id) ? serviceRecordRows(context, ["rest_id", "screen_name", "source"]) : [];
 }
 export function agentKeyXScopeRows(value: unknown): Array<[string, string]> {
   return serviceRecordRows(value, ["keyword", "search_type", "screen_name", "rest_id", "tweet_id", "list_id", "community_id", "ranking", "country"]);

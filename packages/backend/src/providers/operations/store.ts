@@ -1,7 +1,7 @@
 import { lockAssetInputs } from "../../operations/assets.ts";
 import type { Tx } from "../../db.ts";
 import { sha256, stableJson } from "../../lib/ids.ts";
-import { eligibleMembers, lockSubscription, releaseSubscriptions, type SubscriptionMember } from "../../sources/subscriptions.ts";
+import { eligibleMembers, contentSubscription, subscriptionSourceId, lockSubscription, releaseSubscriptions, type SubscriptionMember } from "../../sources/subscriptions.ts";
 import { completeReceipt, type PaidRequestOptions } from "../receipts.ts";
 import { SUBSCRIPTION_VIDEO_DOWNLOAD, lockVideoDownloadOwners, eligibleVideoDownloadMembers, type VideoDownloadOwnership } from "../../sources/subscription-video-ownership.ts";
 
@@ -47,7 +47,7 @@ export async function createRun(tx: Tx, command: {
   const subscriptions = [];
   for (const id of download ? [] : ids) subscriptions.push(await lockSubscription(tx, id));
   const sources = new Map<string, { enabled: boolean; execution_version: number }>();
-  for (const id of [...new Set(subscriptions.flatMap((sub) => sub.control_source_id ? [sub.control_source_id as string] : []))].sort()) {
+  for (const id of [...new Set(subscriptions.flatMap((sub) => subscriptionSourceId(sub) ? [subscriptionSourceId(sub)!] : []))].sort()) {
     const [source] = await tx<{ enabled: boolean; execution_version: number }[]>`SELECT enabled, execution_version FROM sources WHERE id = ${id} FOR SHARE`;
     if (source) sources.set(id, source);
   }
@@ -56,9 +56,11 @@ export async function createRun(tx: Tx, command: {
     const forced = ids.length === 1 && sub.control_source_id === command.forceSourceId;
     if ((!sub.enabled && !forced) || sub.active_run_id !== null) throw new StaleOperationError("Subscription disabled or occupied");
     if (sub.provider !== command.provider || sub.operation_key !== command.operationKey || sub.contract_version !== command.contractVersion) throw new StaleOperationError("Subscription contract changed");
-    const source = sources.get(sub.control_source_id);
-    if (sub.control_source_id && !source?.enabled && !forced) throw new StaleOperationError("Source disabled");
-    members.push({ subscriptionId: id, executionVersion: sub.execution_version, sourceId: sub.control_source_id,
+    const sourceId = subscriptionSourceId(sub);
+    if (contentSubscription(sub) && !sourceId) throw new StaleOperationError("Subscription requires an associated source");
+    const source = sourceId ? sources.get(sourceId) : undefined;
+    if (sourceId && !source?.enabled && !forced) throw new StaleOperationError("Source disabled");
+    members.push({ subscriptionId: id, executionVersion: sub.execution_version, sourceId,
       sourceExecutionVersion: source?.execution_version ?? null });
   }
   const [run] = await tx<RunRow[]>`INSERT INTO operation_runs(actor, command_key, subscription_id, provider, operation_key,

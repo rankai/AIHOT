@@ -9,7 +9,7 @@ const Account=z.object({kwaiId:Text,nickname:Text,signature:Text,headUrl:Text,co
 export interface KuaishouResult{kind:"kuaishou_work"|"kuaishou_account"|"query_summary";itemKey:string;data:Record<string,unknown>}
 function work(op:KuaishouOperation,raw:unknown,index:number,parameters:Record<string,unknown>):KuaishouResult{
  const record=Work.parse(raw);if(op==="UOM99OQI"&&record.photoId&&record.photoId!==parameters.photoId)throw new RedfoxResponseError("Kuaishou response differs from requested photo ID");
- const missing=["缺少稳定作者 ID；昵称及账号定位参数不证明作者归属","缺少已收到的原文链接；视频 CDN 地址不是原文"];if(!record.photoId)missing.push("缺少响应已收到的 photoId；请求参数不冒充已收身份");
+ const missing=["缺少已收到的原文链接；视频 CDN 地址不是原文"];if(!record.photoId)missing.push("缺少响应已收到的 photoId；请求参数不冒充已收身份");
  return {kind:"kuaishou_work",itemKey:`work:${index}`,data:{platform:"kuaishou",operationId:op,title:record.caption?.slice(0,200)||"快手作品",workId:record.photoId??null,workIdKind:record.photoId?"photoId":null,url:null,identity:{},missing,record,...(record.duration!==undefined&&record.duration!==null?{duration:record.duration,durationUnit:"milliseconds"}:{}),...(op==="UOM99OQI"?{requestedWorkId:parameters.photoId}:{})}};
 }
 export function parseKuaishou(op:KuaishouOperation,raw:unknown,parameters:Record<string,unknown>,originInput?:unknown):KuaishouResult[]{

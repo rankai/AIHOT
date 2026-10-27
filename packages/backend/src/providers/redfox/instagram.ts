@@ -22,7 +22,7 @@ function work(op:InstagramOperation,raw:unknown,index:number,parameters:Record<s
  const inputUrl=typeof parameters.codeOrUrl==="string"&&instagramCode(parameters.codeOrUrl)?parameters.codeOrUrl:null;
  const url=originals[0]??inputUrl??(record.code?`https://www.instagram.com/${record.productType==="clips"?"reel":"p"}/${record.code}/`:null);
  const userId=record.user?.id??origin?.userId,missing:string[]=[];
- if(!record.code)missing.push("缺少已收到的帖子短码及可核实原文");if(!userId)missing.push("缺少已确认用户 ID；用户名不能证明作者归属");
+ if(!record.code)missing.push("缺少已收到的帖子短码及可核实原文");
  return {kind:"instagram_work",itemKey:`work:${index}`,data:{platform:"instagram",operationId:op,title:record.captionText?.slice(0,200)||"Instagram 帖子",workId:record.code??null,url,identity:userId?{userId}:{},missing,record,...(origin?{originResultId:origin.resultId}:{})}};
 }
 export function parseInstagram(op:InstagramOperation,raw:unknown,parameters:Record<string,unknown>,context?:unknown):InstagramResult[]{

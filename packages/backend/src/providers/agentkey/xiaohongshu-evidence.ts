@@ -24,7 +24,7 @@ export async function agentKeyXiaohongshuEvidence(db:Db,s:any):Promise<{parsed:X
  const logicalKey=logicalKeyFor({service,purpose:route.operationKey,model:route.tool,identity:{runId:s.run_id,stepVersion:s.step_version,endpoint:s.receipt_request?.endpoint,contractVersion:1,tool:route.tool,params:query}});
  if(s.receipt_logical_key!==logicalKey||s.receipt_service!==service||s.receipt_purpose!==route.operationKey||s.receipt_subject!==`operation:${s.run_id}`||s.receipt_request?.tool!==route.tool||stableJson(s.receipt_request?.params)!==stableJson(query))throw new UnsupportedReplacement('Receipt does not prove original Xiaohongshu query');
  const page=parseAgentKeyXiaohongshu(s.receipt_response,route,query),parsed=page.candidates.find(c=>c.itemKey===s.item_key);
- const projection=(data:Record<string,unknown>)=>({...data,querySummaryId:undefined,pendingReason:undefined,importable:undefined});
+ const projection=(data:Record<string,unknown>)=>({...data,querySummaryId:undefined,pendingReason:undefined,importable:undefined,missing:undefined});
  if(!parsed||parsed.kind!==s.kind||stableJson(projection(s.data))!==stableJson(projection(parsed.data))||summary.data.count!==page.summary.count)throw new UnsupportedReplacement('Xiaohongshu result differs from received response');
  if(parsed.data.role==='provider_recommendation')throw new UnsupportedReplacement('Recommendations are research only');
  let origin:{discoveredAt:string}|undefined;

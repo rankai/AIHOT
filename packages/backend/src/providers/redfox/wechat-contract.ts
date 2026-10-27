@@ -37,4 +37,4 @@ export const wechatOperations={
 } as const;
 export type WechatOperation=keyof typeof wechatOperations;
 export const WechatOperationId=z.enum(Object.keys(wechatOperations) as [WechatOperation,...WechatOperation[]]);
-export function wechatDescriptors():PlatformOperationDescriptor[]{return Object.entries(wechatOperations).map(([id,d])=>({id,platform:"wechat",label:d.label,fields:d.fields,purpose:["account_rank","headline_rank","growth_rank"].includes(d.shape)?"账号榜单；只有明确的代表作品可作为材料候选":"只读查询与本地导入；缺稳定身份需显式补全",schedulableType:["PW97QFBS", "FVQ8D4W5", "IE0887SO", "ZIGAGYYT", "OFFSPQ0U", "DL4YNCTQ"].includes(id)?(["ZIGAGYYT", "OFFSPQ0U", "DL4YNCTQ"].includes(id)?"trend":"search"):null}));}
+export function wechatDescriptors():PlatformOperationDescriptor[]{return Object.entries(wechatOperations).map(([id,d])=>({id,platform:"wechat",label:d.label,fields:d.fields,purpose:["account_rank","headline_rank","growth_rank"].includes(d.shape)?"账号榜单；只有明确的代表作品可作为材料候选":"作品按所属信源本地导入；缺少原文证据时需显式补全",schedulableType:["PW97QFBS", "FVQ8D4W5", "IE0887SO", "ZIGAGYYT", "OFFSPQ0U", "DL4YNCTQ"].includes(id)?(["ZIGAGYYT", "OFFSPQ0U", "DL4YNCTQ"].includes(id)?"trend":"search"):null}));}

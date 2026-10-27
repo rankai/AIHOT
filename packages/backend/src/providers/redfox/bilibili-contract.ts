@@ -18,4 +18,4 @@ export const bilibiliOperations={
 } as const;
 export type BilibiliOperation=keyof typeof bilibiliOperations;
 export const BilibiliOperationId=z.enum(Object.keys(bilibiliOperations) as [BilibiliOperation,...BilibiliOperation[]]);
-export function bilibiliDescriptors():PlatformOperationDescriptor[]{return Object.entries(bilibiliOperations).map(([id,d])=>({id,platform:"bilibili",label:d.label,fields:d.fields,purpose:"只读查询；缺少稳定作者或BV的结果保留待处理",schedulableType:["LEN9QXR3", "VPA67I98"].includes(id)?(["VPA67I98"].includes(id)?"list":"search"):null}));}
+export function bilibiliDescriptors():PlatformOperationDescriptor[]{return Object.entries(bilibiliOperations).map(([id,d])=>({id,platform:"bilibili",label:d.label,fields:d.fields,purpose:"作品按所属信源导入；缺少 BV 作品证据的结果保留待处理",schedulableType:["LEN9QXR3", "VPA67I98"].includes(id)?(["VPA67I98"].includes(id)?"list":"search"):null}));}

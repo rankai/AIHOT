@@ -23,5 +23,5 @@ export function shipinhaoDescriptors():PlatformOperationDescriptor[]{
  OVUTOTCV:[{name:"nickname",label:"账号昵称（精准匹配）",type:"string",required:true,hint:"昵称不是稳定作者身份"},...paging],
  MH5YA9DL:[{name:"url",label:"视频号分享链接",type:"string",required:true,hint:"仅支持 weixin.qq.com/sph/，不在本地解析短链"}],
  };
- return (Object.keys(shipinhaoOperations) as ShipinhaoOperation[]).map(id=>({id,platform:"shipinhao",label:shipinhaoOperations[id].label,fields:fields[id],purpose:"只读查询与结果查看；缺少稳定作者和原文证据，不能自动材料入库",schedulableType:["E7G00COY", "OVUTOTCV"].includes(id)?(["OVUTOTCV"].includes(id)?"list":"search"):null}));
+ return (Object.keys(shipinhaoOperations) as ShipinhaoOperation[]).map(id=>({id,platform:"shipinhao",label:shipinhaoOperations[id].label,fields:fields[id],purpose:"作品按所属信源导入；缺少作品或原文证据时保留待处理",schedulableType:["E7G00COY", "OVUTOTCV"].includes(id)?(["OVUTOTCV"].includes(id)?"list":"search"):null}));
 }

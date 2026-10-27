@@ -18,8 +18,8 @@ interface Progress extends OperationProgress {cursor?:string;stopId:string|null;
 function initial(input:Input):Progress{return {cursor:input.continuation?.cursor,stopId:input.continuation?.stopId??input.source.cursor.lastTweetId??null,headId:input.continuation?.headId??null,pages:0,seen:[],items:0,details:0};}
 function items(page:RedfoxTimeline){return [...(page.pinned?[page.pinned]:[]),...page.timeline];}
 function candidate(tweet:RedfoxTweet,page:RedfoxTimeline,restId:string,fallback?:RedfoxAccount) {
-  if(tweet.author.userId!==restId)throw new RedfoxResponseError("Timeline item author does not match the bound stable account");
-  const user=tweet.author.username?tweet.author:page.user.userId===tweet.author.userId && page.user.username?page.user:fallback;
+  if(tweet.author.userId!==undefined&&tweet.author.userId!==restId)throw new RedfoxResponseError("Timeline item author does not match the bound stable account");
+  const user=tweet.author.username?tweet.author:(tweet.author.userId===undefined||page.user.userId===undefined||page.user.userId===tweet.author.userId) && page.user.username?page.user:fallback;
   if(!user?.username || !/^[A-Za-z0-9_]{1,15}$/.test(user.username))throw new RedfoxResponseError("Timeline item lacks a verified author handle");
   const text=tweet.text??tweet.content;
   if(typeof text!=="string" || !Number.isFinite(Date.parse(tweet.createdAt)))throw new RedfoxResponseError("Tweet content or source time is invalid");
@@ -38,11 +38,14 @@ async function boundAccount(tx:Tx,input:Input) {
       AND b.evidence->>'kind'='result' AND z.kind='account' AND z.source_id=${input.source.id}
       AND r.provider='redfox' AND r.operation_key='redfox.x.account'`;
   const account=XAccount.safeParse(result?.data);
-  if(!result || !account.success || account.data.userId!==input.restId)throw new RedfoxResponseError("Timeline item lacks consistent bound account result evidence");
+  if(!result || !account.success || account.data.userId!==input.restId)return null;
   return {account:account.data,resultId:result.id as number};
 }
 async function saveTweet(tx:Tx,e:Execution,input:Input,page:RedfoxTimeline,tweet:RedfoxTweet,receiptId:number) {
-  const reused=!tweet.author.username && !(page.user.userId===tweet.author.userId && page.user.username)?await boundAccount(tx,input):null;
+  const expectedHandle=singleXAccount(input.source.config.query)?.handle;
+  const handles=[tweet.author.username,page.user.username].filter((value):value is string=>typeof value==="string"&&/^[A-Za-z0-9_]{1,15}$/.test(value)).map(value=>value.toLowerCase());
+  if(new Set(handles).size>1||expectedHandle&&handles.some(handle=>handle!==expectedHandle))throw new RedfoxResponseError("Timeline received handle conflicts with the configured account scope");
+  const reused=!tweet.author.username && !((tweet.author.userId===undefined||page.user.userId===undefined||page.user.userId===tweet.author.userId) && page.user.username)?await boundAccount(tx,input):null;
   let value=candidate(tweet,page,input.restId,reused?.account);
   value=rewriteUrl(value,input.source);
   if(noiseFiltered(value,input.source)){
@@ -109,7 +112,7 @@ export async function executeRedfoxCollectionStep(e:Execution,snapshot:RunRow) {
   await sql.begin(async(tx)=>{
     const run=await requireExecution(tx,e);
     // Even a filtered reply must identify the actual bound author.
-    if(tweet.author.userId!==input.restId)throw new RedfoxResponseError("Detail author does not match bound account");
+    if(tweet.author.userId!==undefined&&tweet.author.userId!==input.restId)throw new RedfoxResponseError("Detail author does not match bound account");
     if(excludeReplies && !["replyToTweetId","replyToUserId","replyToUsername"].every(k=>Object.hasOwn(tweet,k)))throw new RedfoxResponseError("Detail lacks explicit reply classification");
     const reply=excludeReplies && !!(tweet.replyToTweetId || tweet.replyToUserId || tweet.replyToUsername);
     if(!reply)await saveTweet(tx,e,input,page,tweet,receiptId);

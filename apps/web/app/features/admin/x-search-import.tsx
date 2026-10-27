@@ -1,3 +1,4 @@
+import { useWorkSource, WorkSourceNotice } from "./source-ownership";
 import { useCallback, useState } from "react";
 import { Link } from "react-router";
 import { useAdminAction } from "./action";
@@ -9,20 +10,21 @@ import type { BindingSource } from "./operation-result";
 
 export function XSearchImport({ result: r }: { result: OperationResult }) {
   const { run, pending } = useAdminAction();
+  const ownership = useWorkSource();
   const [open, setOpen] = useState(false), [error, setError] = useState<string | null>(null);
   const close = useCallback(() => setOpen(false), []), state = xSearchImportState(r);
   if (!state.supported) return null;
   return <div className="space-y-3">
-    <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>查看作者绑定信源</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!state.linked && <Button size="sm" disabled={!state.canImport || !!pending} onClick={() => setOpen(true)}>本地导入作品</Button>}</div>
+    <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>查看所属信源</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!state.linked && <Button size="sm" disabled={!state.canImport || !!pending || !ownership.ready} onClick={() => setOpen(true)}>本地导入作品</Button>}</div>
     {!state.linked && state.issues.length > 0 && <p className="whitespace-pre-wrap break-words text-[12px] text-amber">{state.issues.join("；")}。请先核实上游结果，本入口不补造身份、正文或时间；后台仍会重新校验。</p>}
-    {!state.linked && Object.hasOwn(r.data, "pendingReason") && <div className="text-[12px] text-amber"><p>本地处理待核实原因</p><p className="whitespace-pre-wrap break-all">{typeof r.data.pendingReason === "string" ? r.data.pendingReason : JSON.stringify(r.data.pendingReason)}</p></div>}
+    {!state.linked && Object.hasOwn(r.data, "pendingReason") && <details className="text-[12px] text-ink-4"><summary className="cursor-pointer">历史处理提示（当前资格以作品与原文为准）</summary><p className="whitespace-pre-wrap break-all">{typeof r.data.pendingReason === "string" ? r.data.pendingReason : JSON.stringify(r.data.pendingReason)}</p></details>}
     {state.agentkey && <p className="text-[12px] text-ink-3">实收文本保留为摘要与溯源，正文保持待确认，不表示完整长文或 Article。{state.unknownTime ? "发表时间未核实，按历史回填处理，不使用发现时间冒充发表时间。" : "发表时间由后台按实收值复核。"}后台核验原始响应与回执后才允许本地导入。</p>}
-    <ReasonDialog open={open} title="本地导入 X 作品" description="仅按实收稳定作者 userId 的既有绑定归属；新作者新建隔离 external 信源并关闭全文，已有作者权限保留。详情缺少 handle 时，仅可由后台核实的同 userId 上下文补足；原始作者字段仍保留。此操作不请求供应商，不按 handle 猜身份，也不提高参与或全文权限。身份冲突、需全文的 X Article 等情况由后台阻断，旧文章去重保留原归属。" busy={!!pending} onClose={close} onSubmit={async reason => {
+    <ReasonDialog open={open} title="本地导入 X 作品" description="作品沿用已确认的所属信源及其当前参与方式，作者 userId 仅作可选溯源。后台复核帖子 ID、原文、账号范围与作品角色，实际矛盾或需全文的 X Article 仍会阻断。文章去重保留原归属，此命令不请求供应商。" busy={!!pending} onClose={close} onSubmit={async reason => {
       setError(null);
       let body: ReturnType<typeof xSearchImportBody>;
-      try { body = xSearchImportBody(r, reason); } catch (error) { setError((error as Error).message); return false; }
+      try { body = { ...xSearchImportBody(r, reason), ...ownership.body() }; } catch (error) { setError((error as Error).message); return false; }
       return await run("POST", `/api/admin/operations/results/${r.id}/import`, body, { label: `x-search-import:${r.id}`, success: "作品已本地导入" }) !== null;
-    }}>{error && <p role="alert" className="text-[13px] text-hot">{error}</p>}</ReasonDialog>
+    }}><WorkSourceNotice />{error && <p role="alert" className="text-[13px] text-hot">{error}</p>}</ReasonDialog>
   </div>;
 }
 

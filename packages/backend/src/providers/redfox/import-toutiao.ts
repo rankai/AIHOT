@@ -1,3 +1,4 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {redfoxToutiaoHasVideo} from "./video-media.ts";
@@ -83,6 +84,9 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
     if (!account && parsed.data.workId && parsed.data.workId !== nativeId) throw new StaleOperationError("Received work ID differs from its native original URL");
     if (!account && op === "PAB6Z75Y" && nativeId !== (agentkey?snapshot.input.parameters.group_id:snapshot.input.parameters.opusId)) throw new StaleOperationError("Original URL differs from requested Toutiao work ID");
     const ids = Object.entries(identity).sort(([a], [b]) => a.localeCompare(b));
+    const primary=identity.uid ? `uid:${identity.uid}` : `secUid:${identity.secUid}`;
+    let sourceId:string,source;
+    if(account){
     if (!ids.length) throw new UnsupportedReplacement("A verified uid or secUid is required; display names and request tokens are not author evidence");
     for (const [kind, value] of ids) await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`toutiao:${kind}:${value}`},0))`;
     const owners: string[] = [];
@@ -91,18 +95,25 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
       if (binding) owners.push(binding.source_id);
     }
     if (new Set(owners).size > 1) throw new StaleOperationError("Account IDs belong to different sources");
-    const primary = identity.uid ? `uid:${identity.uid}` : `secUid:${identity.secUid}`;
-    const sourceId = input.sourceId ?? owners[0] ?? `toutiao-${sha256(primary).slice(0,24)}`;
+    sourceId = input.sourceId ?? owners[0] ?? `toutiao-${sha256(primary).slice(0,24)}`;
     if (owners.length && owners[0] !== sourceId) throw new StaleOperationError("Account identity already belongs to another source");
-    let [source] = await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
+    [source] = await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
     if (!source && input.sourceId) return null;
     if (source && source.kind !== "external") throw new UnsupportedReplacement("Toutiao accounts require an external source");
-    // An explicit new cross-kind association requires human evidence and an isolated target.
-    const manualTarget = !account && !!input.sourceId && owners[0] !== input.sourceId;
-    if (manualTarget && (source!.participation_mode !== "isolated" || !input.supplement?.evidence)) throw new UnsupportedReplacement("An unbound author can only be confirmed against an isolated source with evidence");
     if (source && source.participation_mode !== "isolated" && ids.some(([kind]) => !received[kind as keyof ToutiaoIdentity])) throw new UnsupportedReplacement("Manual identity cannot inherit publication permissions");
     const prior = await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='toutiao' AND source_id=${sourceId}`;
     if (prior.some(b => identity[b.id_kind as keyof ToutiaoIdentity] && identity[b.id_kind as keyof ToutiaoIdentity] !== b.id_value)) throw new StaleOperationError("Source already has another identity of this type");
+    }else{
+      if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.toutiaoImport?.key===commandKey){
+        const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+        requireLiveResult(completed,snapshot.kind);
+        if(!completed!.article_id||!completed!.source_id||completed!.provenance?.toutiaoImport?.key!==commandKey||stableJson(completed!.provenance.toutiaoImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+        return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+      }
+      source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin?{resultId:origin.resultId,provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+      if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+      sourceId=source.id;
+    }
     const [result] = await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent = { sourceId: input.sourceId ?? null, supplement: input.supplement ?? null }, previous = result!.provenance?.toutiaoImport;
@@ -111,13 +122,12 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
       if (result!.source_id !== sourceId || (previous && stableJson(previous.intent) !== stableJson(intent))) throw new StaleOperationError("Result already imported with different target or evidence");
       return { resultId, sourceId, articleId: result!.article_id };
     }
-    if (!source) {
+    if (account && !source) {
       const name = String(record.nickname ?? record.authorName ?? `Toutiao ${primary}`).slice(0,200);
       [source] = await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at)
         VALUES (${sourceId},${name},'external',${tx.json({ platform: "toutiao" })},'isolated',false,false,true,NULL) RETURNING *`;
     }
-    if (!account && !source!.enabled) throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for (const [idKind, idValue] of ids) await bindSourceAccount(tx, { platform: "toutiao", idKind, idValue, sourceId, evidence: { kind: "result", reference: String(resultId) } });
+    if(account)for (const [idKind, idValue] of ids) await bindSourceAccount(tx, { platform: "toutiao", idKind, idValue, sourceId, evidence: { kind: "result", reference: String(resultId) } });
     let articleId: string | null = null;
     if (!account) {
       const bodyMedia=op==="PAB6Z75Y"&&typeof record.content==="string"?videoMediaFromHtml(record.content,url!):[];

@@ -13,7 +13,7 @@ export interface BilibiliResult{kind:"bilibili_account"|"bilibili_work"|"query_s
 function account(op:BilibiliOperation,raw:unknown,index:number):BilibiliResult{const record=Account.parse(raw);return {kind:"bilibili_account",itemKey:`account:${index}`,data:{platform:"bilibili",operationId:op,title:record.name||"B站账号",identity:record.mid?{mid:record.mid}:{},missing:record.mid?[]:["缺少收到的稳定 MID"],record}};}
 function work(op:BilibiliOperation,raw:unknown,index:number,outerMid?:string|null):BilibiliResult{
  const record=Work.parse(raw);if(outerMid&&record.authorId&&outerMid!==record.authorId)throw new RedfoxResponseError("Bilibili work author differs from returned account MID");
- const mid=record.authorId??outerMid,missing:string[]=[];if(!mid)missing.push("缺少已确认作者 MID");if(!record.bvId)missing.push("缺少已确认 BV 号，不能生成原文地址");
+ const mid=record.authorId??outerMid,missing:string[]=[];if(!record.bvId)missing.push("缺少已确认 BV 号，不能生成原文地址");
  return {kind:"bilibili_work",itemKey:`work:${index}`,data:{platform:"bilibili",operationId:op,title:record.title||"B站作品",workId:record.bvId??null,url:record.bvId?`https://www.bilibili.com/video/${record.bvId}`:null,identity:mid?{mid}:{},missing,record,...(op==="VPA67I98"?{accountMid:outerMid??null}:{})}};
 }
 export function parseBilibili(op:BilibiliOperation,raw:unknown,parameters:Record<string,unknown>):BilibiliResult[]{

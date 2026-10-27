@@ -18,7 +18,7 @@ const KEYS: Record<SourceRow["kind"], string[]> = {
     "urlTemplate", "urlTemplateFallback", "rawDropKeys", "requireBoolean", "minNumeric",
   ],
   // X accounts are mostly read in shards, which apply only these.
-  x_search: ["_aihot", "ingestNoiseFilter", "itemUrlPrefixRewrite", "query", "searchType", "autoDownloadVideo"],
+  x_search: ["_aihot", "ingestNoiseFilter", "itemUrlPrefixRewrite", "query", "searchType", "restId", "autoDownloadVideo"],
   mp_account: ["wxid", "ghid", "nickname", "autoDownloadVideo"],
   external: [],
 };
@@ -47,6 +47,7 @@ export function unsupportedConfig(kind: SourceRow["kind"], config: Record<string
   const out: string[] = [];
   for (const [key, value] of Object.entries(config ?? {})) {
     if (!allowed.has(key)) out.push(key);
+    else if(key==="restId"&&(typeof value!=="string"||!/^\d{1,30}$/.test(value)))out.push("restId must be a numeric string");
     else if(key==="autoDownloadVideo"&&typeof value!=="boolean")out.push("autoDownloadVideo must be boolean");
     else if (VALUES[key] && !VALUES[key]!.includes(String(value))) out.push(`${key}=${String(value)}`);
     else if (NESTED[key] && value && typeof value === "object") {

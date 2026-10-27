@@ -22,7 +22,7 @@ export async function createRedfoxCollection(sourceId:string,command:{actor:stri
     const run=await createRun(tx,{actor:command.actor,commandKey:command.key,provider:"redfox",operationKey:"redfox.x.timeline",contractVersion:1,
       subscriptionIds:command.preview?[]:[sub.id],...(command.force && !command.preview && command.reason==="manual"?{forceSourceId:sourceId}:{}),
       stepKey:"redfox.x.page",input:{commandIntent:intent,mode:command.preview?"preview":"collection",source:{id:sourceId,config:sub.config,cursor:sub.progress},
-        restId:sub.config.restId,window,startedAt:continuation?.startedAt??new Date().toISOString(),continuation},limits:{steps:120,retries:3,pages:10,items:100,details:100}});
+        restId:check!.mapping.restId,window,startedAt:continuation?.startedAt??new Date().toISOString(),continuation},limits:{steps:120,retries:3,pages:10,items:100,details:100}});
     await queueOperationStep(tx,run.id);return run;
   });
 }

@@ -62,7 +62,7 @@ test('MP Q persists receipt/summary, explicit import re-verifies evidence and ke
   await executeOperationStep(run.id,1,randomUUID());
   const [state]=await sql`SELECT status,wait_reason FROM operation_runs WHERE id=${run.id}`;assert.equal(state!.status,'completed',JSON.stringify(state));
   const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='wechat_work'`;
-  const imported=await importWechatResult(result!.id,{reason:'test'},'mp-test',tag());assert.ok(imported?.articleId);sourceId=imported.sourceId;
+  const imported=await importWechatResult(result!.id,{sourceId:await selectedSource(),reason:'test'},'mp-test',tag());assert.ok(imported?.articleId);sourceId=imported.sourceId;
   const [source]=await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${sourceId}`;assert.equal(source!.participation_mode,'isolated');assert.equal(source!.site_fulltext,false);
   const [receipt]=await sql`SELECT usage FROM receipts WHERE id=${result!.receipt_id}`;assert.ok(receipt);
   await sql`UPDATE operation_results SET data=jsonb_set(data,'{title}','"tampered"') WHERE id=${result!.id}`;
@@ -178,7 +178,9 @@ test('H5 article source video is confirmed before sanitization and historical re
  try{
   const run=await createAgentKeyQuery({provider:'agentkey',operationId:'I3CIBRI2',parameters:{url}},'mp-video',tag());await executeOperationStep(run.id,1,randomUUID());
   const [result]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND kind='wechat_work'`;
-  const imported=await importWechatResult(result!.id,{reason:'Verified body video'},'mp-video',tag());
+  const foreign=await selectedSource();await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('wechat','bizInfo',${marker},${foreign},'{}')`;
+  const imported=await importWechatResult(result!.id,{sourceId:await selectedSource(),reason:'Verified body video'},'mp-video',tag());
+  assert.notEqual(imported!.sourceId,foreign);assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind='bizInfo' AND id_value=${marker}`)[0]!.source_id,foreign);
   const [article]=await sql`SELECT media,body_html FROM articles WHERE id=${imported!.articleId}`;
   assert.equal(article!.media.some((m:any)=>m.confirmed===true),true);assert.equal(article!.body_html.includes('<source'),false);
   await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${imported!.articleId}`;
@@ -188,3 +190,5 @@ test('H5 article source video is confirmed before sanitization and historical re
   const applied=await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));await sql.begin(tx=>restoreVideoHistoryEntry(tx,applied));assert.equal(server.hits(),before);
  }finally{await server.close();for(const key of Object.keys(process.env))if(!(key in previous))delete process.env[key];Object.assign(process.env,previous);}
 });
+
+async function selectedSource(){const id=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${id},'Selected MP work source','rss','isolated',false)`;return id;}

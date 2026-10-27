@@ -20,8 +20,8 @@ export function douyinImportFields(kind: string, data: Record<string, unknown>, 
   const native = douyinNativeVideo(receivedUrl ?? additionalUrl);
   const receivedNative = douyinNativeVideo(receivedUrl);
   const hasIdentity = !!uid || !!secUserId;
-  const blockedReason = work && data.provider === "agentkey" && (!hasIdentity || !workId) ? "AgentKey 结果缺少稳定作者 ID 或作品 ID，暂不能导入；必须由上游结果提供可靠身份，不能人工补齐。"
+  const blockedReason = work && data.provider === "agentkey" && !workId ? "AgentKey 结果缺少作品 ID，暂不能导入；必须由上游结果提供可靠作品身份，不能人工补齐。"
     : work && receivedUrl && !receivedNative ? "已收到的地址不是受支持的抖音原生作品链接，不能直接替换。请显式查询作品详情或解析结果后再导入；短链、主页和占位地址不会自动解析。"
     : work && receivedNative && workId && receivedNative.id !== workId ? "已收到作品 ID 与原生链接中的 ID 不一致，不能导入或替换；请显式查询详情核实。" : null;
-  return { account, work, uid, secUserId, hasIdentity, receivedUrl, workId, native, receivedNative, blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !hasIdentity, canImport: account ? hasIdentity : work && !blockedReason };
+  return { account, work, uid, secUserId, hasIdentity, receivedUrl, workId, native, receivedNative, blockedReason, needsUrl: work && !receivedUrl, canImport: account ? hasIdentity : work && !blockedReason };
 }

@@ -10,7 +10,7 @@ export interface ShipinhaoResult{kind:"shipinhao_work"|"shipinhao_account"|"quer
 function work(op:ShipinhaoOperation,raw:unknown,index:number,parameters:Record<string,unknown>):ShipinhaoResult{
  const record=Work.parse(raw),workId=op==="MH5YA9DL"?record.exportId:record.videoId,workIdKind=workId?(op==="MH5YA9DL"?"exportId":"videoId"):null;
  if(op==="OE4KUEUO"&&record.videoId&&record.videoId!==parameters.videoId)throw new RedfoxResponseError("Video-channel response differs from requested video ID");
- const missing=["缺少稳定作者 ID；昵称不证明作者归属","缺少已收到的原文链接；视频 CDN 地址不是原文"];
+ const missing=["缺少已收到的原文链接；视频 CDN 地址不是原文"];
  if(!workId)missing.push("缺少响应已收到的作品 ID；请求参数不冒充已收身份");
  return {kind:"shipinhao_work",itemKey:`work:${index}`,data:{platform:"shipinhao",operationId:op,title:record.title||record.description?.slice(0,200)||"视频号作品",workId:workId??null,workIdKind,url:null,identity:{},missing,record,...(op==="OE4KUEUO"?{requestedWorkId:parameters.videoId}:{}),...(op==="MH5YA9DL"?{inputUrl:parameters.url}:{})}};
 }

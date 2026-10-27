@@ -1,3 +1,4 @@
+import {contentSubscription} from "@aihot/backend/sources/subscriptions";
 import {xCollectionIds,xProviderVariants,xResearchDescriptors as agentKeyXDescriptors} from '@aihot/backend/providers/agentkey/x-contract';
 import {weiboProviderVariants,weiboResearchDescriptors} from "@aihot/backend/providers/agentkey/weibo-contract";
 import {bilibiliProviderVariants,bilibiliResearchDescriptors} from "@aihot/backend/providers/agentkey/bilibili-contract";
@@ -94,11 +95,13 @@ export function registerAdminRedfox(app: FastifyInstance) {
     const operations:PlatformOperationDescriptor[]=[...agentKeyXDescriptors,...weiboResearchDescriptors,...bilibiliResearchDescriptors,...xiaohongshuResearchDescriptors,...toutiaoResearchDescriptors,douyinSuggestDescriptor,...douyinSnapshotDescriptors,...mediaToolDescriptors(),...synchronousOperations(),...wechatDescriptors(),...wechatResearchDescriptors,...douyinDescriptors(),...xiaohongshuDescriptors(),...tiktokDescriptors(),...bilibiliDescriptors(),...youtubeDescriptors(),...instagramDescriptors(),...shipinhaoDescriptors(),...kuaishouDescriptors(),...toutiaoDescriptors(),...qichezhijiaDescriptors(),...dongchediDescriptors(),...yicheDescriptors(),...baijiahaoDescriptors(),...xResearchDescriptors(),...hotResearchDescriptors(),...redfoxAccountDescriptors(),...zhihuDescriptors(),...socialResearchDescriptors()];
     const prices=await sql`SELECT model,currency,per_request FROM service_prices WHERE service='redfox.collect' AND model IN ${sql([...collectionOperationIds,...CollectionDetailTarget.options])}`;
     return operations.map(operation=>{
+      const sourceRequired=contentSubscription({platform:operation.platform,config:{operationId:operation.id}});
+      if((collectionOperationIds as readonly string[]).includes(operation.id))operation={...operation,collectionCapabilities:{detailEnrichment:false,...operation.collectionCapabilities,sourceRequired}};
       if(operation.collectionProviders?.length&&operation.collectionProviders.every(provider=>provider.id==="agentkey"))return operation;
       if((collectionOperationIds as readonly string[]).includes(operation.id)){
         const price=prices.find(p=>p.model===operation.id);
         const detailOperations=collectionDetailTargets(operation.id).map(operationId=>{const definition=operations.find(o=>o.id===operationId),p=prices.find(x=>x.model===operationId);return {operationId,label:definition?.label??operationId,fields:operationId==="LLCI8QTE"?(definition?.fields??[]).filter(f=>f.name==="page"):[],price:p?{amount:p.per_request==null?null:Number(p.per_request),currency:p.currency,basis:"estimated" as const}:null};});
-        operation={...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionProviders:collectionProviderOptions(operation.id),collectionCapabilities:{detailEnrichment:detailOperations.length>0,detailOperations}};
+        operation={...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionProviders:collectionProviderOptions(operation.id),collectionCapabilities:{sourceRequired,detailEnrichment:detailOperations.length>0,detailOperations}};
       }
       const xVariant=xProviderVariants.find(v=>v.operationId===operation.id);
       if(xVariant)return operation.id.startsWith('x.')?operation:{...operation,schedulableType:(xCollectionIds as readonly string[]).includes(operation.id)?(operation.id==='5K5EG87P'?'search' as const:'list' as const):operation.schedulableType,queryProviders:[{id:'redfox',label:'Redfox'},xVariant],collectionProviders:collectionProviderOptions(operation.id)};

@@ -49,7 +49,7 @@ test("all 17 fixed operations use their documented method and parameter location
   const beforeHits=hits;
   for(const c of cases){fixture=c;const result=await query();assert.equal(result.run.status,"completed",`${c.id}: ${result.run.wait_reason}`);assert.equal(result.results[0]!.kind,c.kind);assert.equal(result.results[0]!.data.platform,"wechat");
     if(c.id==="DL4YNCTQ"){assert.deepEqual(result.results.map(r=>r.kind),["wechat_account_rank","wechat_work"]);assert.equal(result.results[0]!.data.record.maxWork,undefined);}
-    if(c.id==="IE0887SO"){assert.deepEqual(result.results[0]!.data.identity,{});assert.equal(result.results[0]!.data.url,null);assert.equal(result.results[0]!.data.missing.length,2);}
+    if(c.id==="IE0887SO"){assert.deepEqual(result.results[0]!.data.identity,{});assert.equal(result.results[0]!.data.url,null);assert.equal(result.results[0]!.data.missing.length,1);}
     if(c.id==="6C4A77XR")assert.equal(result.results[0]!.data.missing.length,1);
   }assert.equal(hits,beforeHits+17);
 });
@@ -126,18 +126,18 @@ test("work import preserves canonical article ownership, sanitizes media/body, a
   await importWechatResult(accountResult.id,{sourceId:owner,reason:"Synthetic verified owner"},"wechat-test",tag());
   const original=`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=987654321&idx=1`,old=await upsertMaterial({sourceId:owner,url:original,title:"Original title",bodyText:"Original body",via:"import"});
   const r=await workQuery({articleUrl:original+"&scene=1",wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Synthetic fresh title",articleContent:"<p>Verified body</p><script>bad()</script>",publishDate:"2026-10-19 12:00:00",imageUrls:["https://example.com/synthetic.png","javascript:bad"],videoLink:"https://example.com/synthetic.mp4"});
-  const result=await importWechatResult(r.id,{reason:"Synthetic work import"},"wechat-test",tag());assert.equal(result!.articleId,old.articleId);
+  const result=await importWechatResult(r.id,{sourceId:owner,reason:"Synthetic work import"},"wechat-test",tag());assert.equal(result!.articleId,old.articleId);
   const [article]=await sql`SELECT * FROM articles WHERE id=${old.articleId}`;assert.equal(article!.source_id,owner);assert.equal(article!.published_at_claim,null);assert.equal(article!.media.length,2);assert.equal(article!.media.find((m:{kind:string;confirmed?:boolean})=>m.kind==="video")?.confirmed,true);assert.doesNotMatch(article!.body_html,/script|bad/);assert.equal(article!.body_text,"Verified body");
   const foreign=await source(),foreignUrl=`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=987654322&idx=1`,foreignArticle=await upsertMaterial({sourceId:foreign,url:foreignUrl,title:"Foreign original",bodyText:"Do not replace",via:"import"});
-  const f=await workQuery({articleUrl:foreignUrl,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Fresh",articleContent:"Never overwrite"});assert.equal((await importWechatResult(f.id,{reason:"Synthetic discovery"},"wechat-test",tag()))!.articleId,foreignArticle.articleId);
+  const f=await workQuery({articleUrl:foreignUrl,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Fresh",articleContent:"Never overwrite"});assert.equal((await importWechatResult(f.id,{sourceId:owner,reason:"Synthetic discovery"},"wechat-test",tag()))!.articleId,foreignArticle.articleId);
   assert.equal((await sql`SELECT body_text FROM articles WHERE id=${foreignArticle.articleId}`)[0]!.body_text,"Do not replace");
-  await sql`UPDATE sources SET enabled=false WHERE id=${owner}`;const paused=await workQuery({articleUrl:original,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Paused"});await assert.rejects(importWechatResult(paused.id,{reason:"Synthetic paused"},"wechat-test",tag()),/disabled/);
+  await sql`UPDATE sources SET enabled=false WHERE id=${owner}`;const paused=await workQuery({articleUrl:original,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Paused"});await assert.rejects(importWechatResult(paused.id,{sourceId:owner,reason:"Synthetic paused"},"wechat-test",tag()),/disabled/);
 });
 
 test("manual missing evidence cannot claim publication permissions; API local import uses the common command boundary",async()=>{
   const {importWechatResult}=await import("@aihot/backend/providers/redfox/import-wechat");const i=uniqueIdentity(),a=await accountQuery(i),owner=await source();await importWechatResult(a.id,{sourceId:owner,reason:"Synthetic binding"},"wechat-test",tag());
   const r=await workQuery({articleUrl:"https://mp.weixin.qq.com/s/SyntheticUnidentified",articleTitle:"Synthetic missing author"});
-  await assert.rejects(importWechatResult(r.id,{reason:"Synthetic manual evidence",supplement:{wxId:i.wxId,evidence:"Synthetic source evidence"}},"wechat-test",tag()),/cannot inherit/);
+  await assert.rejects(importWechatResult(r.id,{reason:"Synthetic manual evidence",supplement:{wxId:i.wxId,evidence:"Synthetic source evidence"}},"wechat-test",tag()),/associated source/);
   const {buildApp}=await import("../apps/api/src/app.ts"),app=await buildApp();config.devAdmin={displayName:"Wechat fixture"};const j=uniqueIdentity(),q=await accountQuery(j),beforeHits=hits;process.env.REDFOX_CALLS_ENABLED="false";
   try{const response=await app.inject({method:"POST",url:`/api/admin/operations/results/${q.id}/import`,headers:{"x-csrf-token":"dev","idempotency-key":tag(),origin:"http://localhost:5173"},payload:{reason:"Synthetic local import"}});assert.equal(response.statusCode,200,response.body);assert.equal(hits,beforeHits);}finally{config.devAdmin=null;process.env.REDFOX_CALLS_ENABLED="true";await app.close();}
 });
@@ -146,9 +146,9 @@ test("growth work reuses only its actual account evidence; manual unknown work r
   const {importWechatResult}=await import("@aihot/backend/providers/redfox/import-wechat");const i=uniqueIdentity(),articleUrl=`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=777&idx=1`;
   fixture={...cases.find(c=>c.id==="DL4YNCTQ")!,data:[{accountId:i.wxId,userName:"Synthetic growth",maxWork:{title:"Synthetic growth work",oriUrl:articleUrl,content:"Synthetic body"}}]};
   const q=await query(),rank=q.results[0]!,workResult=q.results[1]!;
-  const a=await importWechatResult(rank.id,{reason:"Synthetic rank account"},"wechat-test",tag()),w=await importWechatResult(workResult.id,{reason:"Synthetic ranked work"},"wechat-test",tag());assert.equal(a!.sourceId,w!.sourceId);assert.ok(w!.articleId);
+  const a=await importWechatResult(rank.id,{reason:"Synthetic rank account"},"wechat-test",tag()),w=await importWechatResult(workResult.id,{sourceId:a!.sourceId,reason:"Synthetic ranked work"},"wechat-test",tag());assert.equal(a!.sourceId,w!.sourceId);assert.ok(w!.articleId);
   const missing=await workQuery({articleUrl:"https://mp.weixin.qq.com/s/SyntheticManual"+randomUUID().replaceAll("-",""),articleTitle:"Synthetic manual author"}),j=uniqueIdentity();
-  const imported=await importWechatResult(missing.id,{reason:"Synthetic verified supplement",supplement:{wxId:j.wxId,evidence:"Synthetic original record verification"}},"wechat-test",tag());
+  const imported=await importWechatResult(missing.id,{sourceId:await selectedSource(),reason:"Synthetic verified supplement",supplement:{wxId:j.wxId,evidence:"Synthetic original record verification"}},"wechat-test",tag());
   const [s]=await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${imported!.sourceId}`;assert.equal(s!.participation_mode,"isolated");assert.equal(s!.site_fulltext,false);
 });
 
@@ -157,23 +157,26 @@ test("import timing archives unknown and old candidates, keeps fresh news, and p
   const i=uniqueIdentity(),fresh=new Date(Date.now()-3600_000).toISOString(),old=new Date(Date.now()-7*86400_000).toISOString();
   for(const [index,date] of [undefined,"2001-01-01 12:00:00",old,fresh].entries()){
     const r=await workQuery({articleUrl:`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=${Date.now()}${index}&idx=1`,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Synthetic timing",articleContent:"Synthetic body",publishDate:date});
-    const imported=await importWechatResult(r.id,{reason:"Synthetic timing"},"test",tag());
+    const imported=await importWechatResult(r.id,{sourceId:await selectedSource(),reason:"Synthetic timing"},"test",tag());
     const [a]=await sql`SELECT backfill,backfill_reason,published_at,discovered_at,timeline_at FROM articles WHERE id=${imported!.articleId!}`;
     assert.equal(a!.backfill,index!==3);assert.equal(isHistorical(a as never),index!==3);
     if(index<2)assert.equal(a!.backfill_reason,"redfox-import-unknown-time");
     if(index===2)assert.equal(a!.backfill_reason,"stale-on-discovery");
     if(index===3)assert.equal(a!.timeline_at.getTime(),a!.discovered_at.getTime());
   }
-  const owner=(await sql`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind='wxId' AND id_value=${i.wxId}`)[0]!.source_id as string,address=`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=${Date.now()}9&idx=1`;
+  const owner=await selectedSource(),address=`https://mp.weixin.qq.com/s?__biz=${i.bizInfo}&mid=${Date.now()}9&idx=1`;
   const existing=await upsertMaterial({sourceId:owner,url:address,title:"Synthetic RSS",bodyText:"Original",publishedAt:null,via:"fetch"});
   const [before]=await sql`SELECT source_id,published_at,discovered_at,timeline_at,backfill,backfill_reason FROM articles WHERE id=${existing.articleId}`;assert.equal(before!.backfill,false);
-  const r=await workQuery({articleUrl:address,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Synthetic changed",publishDate:old});await importWechatResult(r.id,{reason:"Synthetic existing"},"test",tag());
+  const r=await workQuery({articleUrl:address,wechatId:i.wxId,bizKey:i.bizInfo,articleTitle:"Synthetic changed",publishDate:old});await importWechatResult(r.id,{sourceId:owner,reason:"Synthetic existing"},"test",tag());
   assert.deepEqual((await sql`SELECT source_id,published_at,discovered_at,timeline_at,backfill,backfill_reason FROM articles WHERE id=${existing.articleId}`)[0],before);
 });
 
 test("verified realtime raw body source survives as a video fact without publishing source HTML",async()=>{
  const {importWechatResult}=await import("@aihot/backend/providers/redfox/import-wechat"),identity=uniqueIdentity();
  const r=await workQuery({articleUrl:`https://mp.weixin.qq.com/s/${tag()}`,articleTitle:"Video body",articleContent:'<p>Body</p><video><source type="video/mp4" src="/v.mp4"></video>',wechatId:identity.wxId,bizKey:identity.bizInfo});
- const imported=await importWechatResult(r.id,{reason:"Verified raw body"},"test",tag());const [a]=await sql`SELECT media,body_html FROM articles WHERE id=${imported!.articleId}`;
+ const imported=await importWechatResult(r.id,{sourceId:await selectedSource(),reason:"Verified raw body"},"test",tag());const [a]=await sql`SELECT media,body_html FROM articles WHERE id=${imported!.articleId}`;
  assert.equal(a!.media.some((m:any)=>m.confirmed===true),true);assert.equal(a!.body_html.includes('<source'),false);
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Selected WeChat source','rss','isolated',false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

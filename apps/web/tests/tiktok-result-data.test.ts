@@ -37,40 +37,40 @@ test("account binding needs received typed identity while topic and summary reco
   for (const identity of [{ userId: id }, { secUserId: "opaque-sec-id" }, { userId: id, secUserId: "opaque-sec-id" }]) {
     const fields = tiktokImportFields("tiktok_account", { identity });
     assert.equal(fields.canImport, true);
-    assert.equal(fields.needsIdentity, false);
+    assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
     assert.deepEqual(tiktokImportSupplement(fields, draft), {}, "account imports never send a manual supplement");
   }
   const displayOnly = tiktokImportFields("tiktok_account", { identity: {}, record: { userHandle: "name", userId: "raw-not-confirmed" } });
   assert.equal(displayOnly.canImport, false);
-  assert.equal(displayOnly.needsIdentity, false);
+  assert.equal(Object.hasOwn(displayOnly, "needsIdentity"), false);
   for (const kind of ["tiktok_topic", "query_summary"]) assert.equal(tiktokImportFields(kind, { identity: { userId: id }, url }).canImport, false);
 });
 
 test("work identity follows the received author DTO, never a requested collector or handle", () => {
   const unconfirmed = tiktokImportFields("tiktok_work", { identity: {}, workId: id, url, parameters: { sec_user_id: "collector" }, record: { authorData: { userHandle: "display", userId: "raw-only" } } });
-  assert.equal(unconfirmed.needsIdentity, true);
+  assert.equal(Object.hasOwn(unconfirmed, "needsIdentity"), false);
   const received = tiktokImportFields("tiktok_work", { identity: { userId: "actual-author" }, workId: id, url });
   assert.equal(received.userId, "actual-author");
-  assert.equal(received.needsIdentity, false);
-  assert.deepEqual(tiktokImportSupplement(received, { ...draft, identityValue: "different-author", url: "https://example.com/replace" }), {}, "received identity and original are not emitted as overrides");
+  assert.equal(Object.hasOwn(received, "needsIdentity"), false);
+  assert.deepEqual(tiktokImportSupplement(received, { ...draft, url: "https://example.com/replace" }), {}, "received identity and original are not emitted as overrides");
 });
 
 test("missing original requires matching native ID and evidence, then allows correction without changing received author", () => {
   const fields = tiktokImportFields("tiktok_work", { identity: { userId: "actual-author" }, workId: id });
-  assert.equal(fields.needsIdentity, false);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.equal(fields.needsUrl, true);
   assert.ok(tiktokImportSupplement(fields, { ...draft, url: url.replace(id, "123") }).error);
   assert.ok(tiktokImportSupplement(fields, { ...draft, evidence: " " }).error);
   assert.deepEqual(tiktokImportSupplement(fields, draft), { supplement: { url, evidence: draft.evidence } });
 });
 
-test("missing author accepts only the explicitly chosen identity type with evidence", () => {
+test("work import without author ID needs no author supplement or evidence; only missing original is supplemented", () => {
   const fields = tiktokImportFields("tiktok_work", { identity: {}, workId: id, url });
-  assert.ok(tiktokImportSupplement(fields, { ...draft, identityValue: " " }).error);
-  assert.ok(tiktokImportSupplement(fields, { ...draft, evidence: "" }).error);
-  assert.deepEqual(tiktokImportSupplement(fields, { ...draft, identityType: "secUserId", identityValue: " secure-author " }), { supplement: { secUserId: "secure-author", evidence: draft.evidence } });
-  const bothMissing = tiktokImportFields("tiktok_work", { identity: {}, workId: id });
-  assert.deepEqual(tiktokImportSupplement(bothMissing, draft), { supplement: { userId: "confirmed-author", url, evidence: draft.evidence } });
+  assert.equal(fields.canImport, true); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+  assert.deepEqual(tiktokImportSupplement(fields, { url: "", evidence: "" }), {});
+  const noOriginal = tiktokImportFields("tiktok_work", { identity: {}, workId: id });
+  assert.ok(tiktokImportSupplement(noOriginal, { url, evidence: "" }).error);
+  assert.deepEqual(tiktokImportSupplement(noOriginal, { url, evidence: draft.evidence }), { supplement: { url, evidence: draft.evidence } });
 });
 
 test("publication display treats safe integers as Unix seconds and does not guess invalid times", () => {

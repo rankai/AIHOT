@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { manualWorkCandidates, manualWorkDefaultUrl, manualWorkDetailRequest, manualWorkImportRequest, manualWorkNativeUrl, manualWorkPlatform } from "../app/features/admin/manual-work-data.ts";
+import { manualWorkDefaultUrl, manualWorkDetailRequest, manualWorkImportRequest, manualWorkNativeUrl, manualWorkPlatform } from "../app/features/admin/manual-work-data.ts";
 import { sourceNewPreset } from "../app/features/admin/source-new-preset.ts";
 
 const sph = { platform: "shipinhao", operationId: "E7G00COY", record: { videoId: "opaque-video-1", exportId: "different-export-id" } };
@@ -14,7 +14,7 @@ test("manual import is limited to the two supported work kinds, never account ro
   assert.equal(manualWorkPlatform("kuaishou_work", ks), "kuaishou");
   for (const [kind, data] of [["shipinhao_account", sph], ["kuaishou_account", ks], ["query_summary", sph], ["shipinhao_work", { ...sph, operationId: "NL4I3533" }], ["kuaishou_work", { ...ks, operationId: "GU17EVLV" }], ["shipinhao_work", ks]] as const) {
     assert.equal(manualWorkPlatform(kind, data), null);
-    assert.ok(manualWorkImportRequest(kind, data, draft, "idle", rows).error);
+    assert.ok(manualWorkImportRequest(kind, data, draft).error);
   }
 });
 
@@ -29,27 +29,26 @@ test("native links accept only documented platform paths and retain the human-ve
 });
 
 test("explicit source, native original, per-item evidence and reason are mandatory in the minimal import DTO", () => {
-  assert.deepEqual(manualWorkImportRequest("shipinhao_work", sph, draft, "idle", rows), { body: { sourceId: draft.sourceId, reason: draft.reason, supplement: { url: sphUrl, evidence: draft.evidence } } });
-  assert.deepEqual(manualWorkImportRequest("kuaishou_work", ks, { ...draft, url: ksUrl }, "idle", rows), { body: { sourceId: draft.sourceId, reason: draft.reason, supplement: { url: ksUrl, evidence: draft.evidence } } });
-  for (const change of [{ sourceId: "" }, { url: "" }, { evidence: " " }, { reason: " " }, { evidence: "x".repeat(1001) }, { reason: "x".repeat(501) }]) assert.ok(manualWorkImportRequest("shipinhao_work", sph, { ...draft, ...change }, "idle", rows).error);
+  assert.deepEqual(manualWorkImportRequest("shipinhao_work", sph, draft), { body: { sourceId: draft.sourceId, reason: draft.reason, supplement: { url: sphUrl, evidence: draft.evidence } } });
+  assert.deepEqual(manualWorkImportRequest("kuaishou_work", ks, { ...draft, url: ksUrl }), { body: { sourceId: draft.sourceId, reason: draft.reason, supplement: { url: ksUrl, evidence: draft.evidence } } });
+  for (const change of [{ url: "" }, { evidence: " " }, { reason: " " }, { evidence: "x".repeat(1001) }, { reason: "x".repeat(501) }]) assert.ok(manualWorkImportRequest("shipinhao_work", sph, { ...draft, ...change }).error);
   // Supplier IDs are not native path IDs, and neither is submitted as author identity.
   assert.notEqual(ks.record.photoId, new URL(ksUrl).pathname.split("/")[2]);
-  assert.ok(manualWorkImportRequest("kuaishou_work", ks, { ...draft, url: ksUrl }, "idle", rows).body);
+  assert.ok(manualWorkImportRequest("kuaishou_work", ks, { ...draft, url: ksUrl }).body);
 });
 
-test("current idle isolated candidate is required; loading, old pages and editorial selections are rejected", () => {
-  assert.deepEqual(manualWorkCandidates(rows), [rows[0]]);
-  assert.deepEqual(manualWorkCandidates(undefined), []);
-  for (const state of ["loading", "submitting"]) assert.ok(manualWorkImportRequest("shipinhao_work", sph, draft, state, rows).error);
-  assert.ok(manualWorkImportRequest("shipinhao_work", sph, draft, "idle", []).error);
-  assert.ok(manualWorkImportRequest("shipinhao_work", sph, { ...draft, sourceId: "source-old-page" }, "idle", rows).error);
-  assert.ok(manualWorkImportRequest("shipinhao_work", sph, { ...draft, sourceId: "editorial" }, "idle", rows).error);
+test("received native originals and native share-query input need no evidence or author relation", () => {
+  for (const data of [{ ...sph, url: sphUrl }, { platform: "shipinhao", operationId: "MH5YA9DL", inputUrl: sphUrl }]) {
+    assert.deepEqual(manualWorkImportRequest("shipinhao_work", data, { sourceId: "editorial", url: "", evidence: "", reason: "导入" }), { body: { sourceId: "editorial", reason: "导入" } });
+    assert.ok(manualWorkImportRequest("shipinhao_work", data, { url: "https://weixin.qq.com/sph/other", evidence: "", reason: "导入" }).error);
+  }
+  assert.deepEqual(manualWorkImportRequest("kuaishou_work", { ...ks, url: ksUrl }, { url: "", evidence: "", reason: "导入" }), { body: { reason: "导入" } });
 });
 
 test("only MH share input prefills a native original; received IDs and media URLs never synthesize it", () => {
   assert.equal(manualWorkDefaultUrl({ platform: "shipinhao", operationId: "MH5YA9DL", inputUrl: sphUrl, record: { exportId: "not-videoId" } }), sphUrl);
   assert.equal(manualWorkDefaultUrl({ ...sph, inputUrl: sphUrl }), "");
-  assert.equal(manualWorkDefaultUrl({ ...ks, inputUrl: ksUrl, url: ksUrl }), "");
+  assert.equal(manualWorkDefaultUrl({ ...ks, inputUrl: ksUrl, url: ksUrl }), ksUrl);
   assert.equal(manualWorkDefaultUrl({ platform: "shipinhao", operationId: "MH5YA9DL", inputUrl: "https://finder.video.qq.com/video.mp4" }), "");
 });
 

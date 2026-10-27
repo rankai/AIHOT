@@ -24,7 +24,7 @@ test("received non-native URLs and mismatched work IDs block replacement while m
 test("AI placeholder IDs and display names never provide author identity; native URLs may provide only the work ID", () => {
   const fields = douyinImportFields("douyin_work", { identity: {}, workId: null, url: address, record: { photoId: id, authorId: "looks-like-uid", userName: "display" } });
   assert.equal(fields.native?.id, id);
-  assert.equal(fields.needsIdentity, true);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.equal(fields.needsUrl, false);
   assert.equal(douyinImportFields("douyin_account", { identity: {}, record: { accountId: "display", uid: "unconfirmed" } }).canImport, false);
   assert.equal(douyinImportFields("douyin_account", { identity: { secUserId: "opaque-secure-id" } }).canImport, true);
@@ -41,12 +41,9 @@ test("Douyin inputs retain string IDs, literal false and numeric step-based offs
 });
 
 
-test("AgentKey missing stable identities block import while Redfox still allows explicit supplements", () => {
-  for (const data of [{identity: {}, workId: id, url: address}, {identity: {uid: "123"}, workId: null, url: address}]) {
-    const fields = douyinImportFields("douyin_work", {...data, provider: "agentkey"});
-    assert.equal(fields.canImport, false);
-    assert.match(fields.blockedReason!, /AgentKey.*稳定/);
-    assert.equal(douyinImportFields("douyin_work", {...data, provider: "redfox"}).canImport, true);
-  }
-  assert.equal(douyinImportFields("douyin_work", {provider: "agentkey", identity: {uid: "123"}, workId: id, url: address}).canImport, true);
+test("AgentKey work requires received work ID but author ID is optional; account binding still requires identity", () => {
+  assert.equal(douyinImportFields("douyin_work", { provider: "agentkey", identity: {}, workId: id, url: address }).canImport, true);
+  const missingWork = douyinImportFields("douyin_work", { provider: "agentkey", identity: { uid: "123" }, workId: null, url: address });
+  assert.equal(missingWork.canImport, false); assert.match(missingWork.blockedReason!, /作品 ID/);
+  assert.equal(douyinImportFields("douyin_account", { provider: "agentkey", identity: {} }).canImport, false);
 });

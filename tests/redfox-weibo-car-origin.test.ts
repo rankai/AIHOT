@@ -14,16 +14,18 @@ import {importQichezhijiaResult} from '@aihot/backend/providers/redfox/import-qi
 import {importDongchediResult} from '@aihot/backend/providers/redfox/import-dongchedi';
 import {importYicheResult} from '@aihot/backend/providers/redfox/import-yiche';
 import {resumeRun} from '@aihot/backend/providers/operations/store';
+const selectedSource=tag();
 let data:unknown={},hits=0,code=2000;
 const wire:{path:string,body:unknown}[]=[];
 const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{hits++;wire.push({path:req.url!,body:body?JSON.parse(body):null});res.end(JSON.stringify({code,data}));});});
 let budgets:Record<string,unknown>[]=[];
 before(async()=>{
+ await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSource},'Chosen origin source','rss','isolated')`;
  const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);
  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;on();config.allowPrivateNetworkFetch=true;
  budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.query','redfox.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('redfox.query','redfox.collect')`;
 });
-after(async()=>{try{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute as number},per_hour=${b.per_hour as number},per_day=${b.per_day as number} WHERE service=${b.service as string}`;}finally{off();if(server.listening)await new Promise<void>(r=>server.close(()=>r()));try{await stopBoss();}finally{await closeDb();}}});
+after(async()=>{try{await sql`UPDATE collection_subscriptions SET enabled=false WHERE config->>'sourceId'=${selectedSource}`;for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute as number},per_hour=${b.per_hour as number},per_day=${b.per_day as number} WHERE service=${b.service as string}`;}finally{off();if(server.listening)await new Promise<void>(r=>server.close(()=>r()));try{await stopBoss();}finally{await closeDb();}}});
 function on(){process.env.REDFOX_CALLS_ENABLED='true';process.env.COLLECT_ENABLED='true';process.env.REDFOX_API_KEY='fake-origin';}
 function off(){process.env.REDFOX_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';delete process.env.REDFOX_API_KEY;}
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
@@ -40,7 +42,7 @@ function fixture(platform:string):Fixture{
 }
 async function source(f:ReturnType<typeof fixture>,collection=false){
  data=f.page;code=f.sourceCode;on();let run;
- if(collection){const sub=await createPlatformSubscription({name:tag(),operationId:f.source,parameters:f.parameters,enabled:true,limits:{pages:1,items:10,details:0}},'origin-b',tag());run=await startPlatformSubscription(sub.id,'origin-b',tag());await step(run.id);await sql`UPDATE operation_results SET created_at='2020-02-03T04:05:06Z' WHERE run_id=${run.id} AND kind='query_summary'`;await finish(run.id);await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
+ if(collection){const sub=await createPlatformSubscription({sourceId:selectedSource,name:tag(),operationId:f.source,parameters:f.parameters,enabled:true,limits:{pages:1,items:10,details:0}},'origin-b',tag());run=await startPlatformSubscription(sub.id,'origin-b',tag());await step(run.id);await sql`UPDATE operation_results SET created_at='2020-02-03T04:05:06Z' WHERE run_id=${run.id} AND kind='query_summary'`;await finish(run.id);}
  else{run=await createSynchronousQuery({operationId:f.source,parameters:f.parameters},'origin-b',tag());await finish(run.id);await sql`UPDATE operation_results SET created_at='2020-02-03T04:05:06Z' WHERE run_id=${run.id}`;}
  assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind=${f.platform+'_work'} ORDER BY id`;assert.ok(result);return {run,result:result!};
 }
@@ -50,7 +52,7 @@ for(const platform of ['weibo','qichezhijia','dongchedi','yiche'])for(const coll
  const body={operationId:f.target,parameters:f.request,sourceResultId:s.result.id},key=tag(),run=await createSynchronousQuery(body,'origin-b',key);
  assert.equal(hits,before);assert.equal((run.input.origin as {discoveredAt:string}).discoveredAt,'2020-02-03T04:05:06.000Z');data=f.detail;code=f.targetCode;await step(run.id);
  assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`;assert.deepEqual(result!.data.originIdentity,f.identity);
- const calls=hits;off();try{const imported=await f.importer(result!.id,{reason:'Same verified work'},'origin-b',tag());assert.ok(imported?.articleId);const [article]=await sql`SELECT discovered_at,body_text,body_html FROM articles WHERE id=${imported.articleId}`;assert.equal(article!.discovered_at.toISOString(),'2020-02-03T04:05:06.000Z');if(prior){assert.equal(imported.articleId,s.result.article_id);assert.equal(article!.body_text,prior.body_text);assert.equal(article!.body_html,prior.body_html);}assert.equal(hits,calls);}finally{on();}
+ const calls=hits;off();try{const imported=await f.importer(result!.id,{sourceId:selectedSource,reason:'Same verified work'},'origin-b',tag());assert.ok(imported?.articleId);const [article]=await sql`SELECT discovered_at,body_text,body_html FROM articles WHERE id=${imported.articleId}`;assert.equal(article!.discovered_at.toISOString(),'2020-02-03T04:05:06.000Z');if(prior){assert.equal(imported.articleId,s.result.article_id);assert.equal(article!.body_text,prior.body_text);assert.equal(article!.body_html,prior.body_html);}assert.equal(hits,calls);}finally{on();}
  assert.equal((await row(s.run.id)).step_version,parent.step_version);assert.equal((await row(s.run.id)).status,'completed');
  await sql`UPDATE operation_results SET data='{}' WHERE id=${s.result.id}`;assert.equal((await createSynchronousQuery(body,'origin-b',key)).id,run.id);
 });
@@ -88,18 +90,18 @@ test('fake page and changed ID reject before query; import revalidates typed ori
  await assert.rejects(createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:s.result.id},'origin-b',tag()),/page/);assert.equal(hits,n);
  const good=await source(f),run=await createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:good.result.id},'origin-b',tag());data=f.detail;await step(run.id);const [d]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;
  await sql`UPDATE operation_results SET data=jsonb_set(data,'{record,authorId}','"other"') WHERE id=${d!.id}`;
- await assert.rejects(importQichezhijiaResult(d!.id,{reason:'Reject forged author'},'origin-b',tag()),/author conflicts/);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${d!.id}`)[0]!.article_id,null);
+ await assert.rejects(importQichezhijiaResult(d!.id,{sourceId:selectedSource,reason:'Reject forged author'},'origin-b',tag()),/author conflicts/);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${d!.id}`)[0]!.article_id,null);
 });
 test('Weibo keeps missing response UID raw, rejects account/trend or mismatched author/ID and preserves old independent detail',async()=>{
  const f=fixture('weibo'),s=await source(f),run=await createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:s.result.id},'origin-b',tag());data=f.detail;await step(run.id);const [d]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;assert.equal(d!.data.uid,undefined);assert.equal(d!.data.originIdentity.uid,f.identity.uid);
- const calls=hits;off();await importWeiboResult(d!.id,{reason:'Verified author context'},'origin-b',tag());assert.equal(hits,calls);assert.equal((await sql`SELECT data FROM operation_results WHERE id=${d!.id}`)[0]!.data.uid,undefined);on();
+ const calls=hits;off();await importWeiboResult(d!.id,{sourceId:selectedSource,reason:'Verified author context'},'origin-b',tag());assert.equal(hits,calls);assert.equal((await sql`SELECT data FROM operation_results WHERE id=${d!.id}`)[0]!.data.uid,undefined);on();
  const bad=await createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:s.result.id},'origin-b',tag());data={...f.detail,uid:'1'};await step(bad.id);assert.equal((await row(bad.id)).status,'needs_review');
  const wrong=await createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:s.result.id},'origin-b',tag());data={...f.detail,opusId:'1'};await step(wrong.id);assert.equal((await row(wrong.id)).status,'needs_review');
  data=[{uid:digits(),nickname:'Account'}];const accountRun=await createSynchronousQuery({operationId:'TXQPVGJG',parameters:{...f.parameters,searchType:'3'}},'origin-b',tag());await step(accountRun.id);const [account]=await sql`SELECT * FROM operation_results WHERE run_id=${accountRun.id}`;assert.equal(account!.kind,'weibo_account');await assert.rejects(createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:account!.id},'origin-b',tag()),/single work/);
- const legacy=await createSynchronousQuery({operationId:f.target,parameters:f.request},'origin-b',tag());data={...f.detail,uid:f.identity.uid};await step(legacy.id);assert.equal((await row(legacy.id)).status,'completed');const [ld]=await sql`SELECT * FROM operation_results WHERE run_id=${legacy.id}`;assert.equal(ld!.data.originResultId,undefined);assert.ok((await importWeiboResult(ld!.id,{reason:'Independent received detail'},'origin-b',tag()))?.articleId);
+ const legacy=await createSynchronousQuery({operationId:f.target,parameters:f.request},'origin-b',tag());data={...f.detail,uid:f.identity.uid};await step(legacy.id);assert.equal((await row(legacy.id)).status,'completed');const [ld]=await sql`SELECT * FROM operation_results WHERE run_id=${legacy.id}`;assert.equal(ld!.data.originResultId,undefined);assert.ok((await importWeiboResult(ld!.id,{sourceId:selectedSource,reason:'Independent received detail'},'origin-b',tag()))?.articleId);
 });
 test('Yiche URL-only news origin does not invent a work ID and imports using original discovery',async()=>{
  const f=fixture('yiche'),record={...(f.page as Record<string,unknown>[])[0],workId:undefined},s=await source({...f,page:[record]});
  const run=await createSynchronousQuery({operationId:f.target,parameters:f.request,sourceResultId:s.result.id},'origin-b',tag());assert.equal((run.input.origin as {workId:unknown}).workId,null);
- data={...f.detail,workId:'actual-detail-id'};code=2000;await step(run.id);assert.equal((await row(run.id)).status,'completed');const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;off();try{const saved=await importYicheResult(result!.id,{reason:'Received news URL confirms scope'},'origin-b',tag());assert.ok(saved?.articleId);assert.equal((await sql`SELECT discovered_at FROM articles WHERE id=${saved.articleId}`)[0]!.discovered_at.toISOString(),'2020-02-03T04:05:06.000Z');}finally{on();}
+ data={...f.detail,workId:'actual-detail-id'};code=2000;await step(run.id);assert.equal((await row(run.id)).status,'completed');const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;off();try{const saved=await importYicheResult(result!.id,{sourceId:selectedSource,reason:'Received news URL confirms scope'},'origin-b',tag());assert.ok(saved?.articleId);assert.equal((await sql`SELECT discovered_at FROM articles WHERE id=${saved.articleId}`)[0]!.discovered_at.toISOString(),'2020-02-03T04:05:06.000Z');}finally{on();}
 });

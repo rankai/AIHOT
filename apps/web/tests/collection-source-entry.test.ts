@@ -85,6 +85,24 @@ test("source collection entry, legacy redirect, query draft and task return use 
       const missing = render(createElement(sources.default,{loaderData:{...data,requestedId:999}}),"/admin/sources?view=collections&subscription=999");
       assert(missing.includes("当前列表中没有此订阅"));assert(!missing.includes('aria-label="采集订阅配置"'));
     });
+    await t.test("source-context entry verifies source, inherits once, filters associated subscriptions and keeps global navigation", async () => {
+      const calls: string[] = [], source = { id: "owner-rss", name: "已确认所属信源", kind: "rss", enabled: true, participation_mode: "editorial" };
+      globalThis.fetch = async input => {
+        const path = new URL(String(input)).pathname; calls.push(path);
+        if (path === "/api/admin/redfox/collections") return Response.json([{ ...subscription, name: "该源关联订阅", sourceId: source.id }, { ...subscription, id: 13, name: "别的信源订阅", sourceId: "other" }, { ...subscription, id: 14, name: "旧无源订阅", sourceId: null }]);
+        if (path === "/api/admin/redfox/operations") return Response.json([{ ...operation, collectionCapabilities: { detailEnrichment: false, sourceRequired: true } }]);
+        if (path === `/api/admin/sources/${source.id}`) return Response.json({ source });
+        throw new Error(`unexpected ${path}`);
+      };
+      const data = await sources.loader({ request: new Request("http://local.test/admin/sources?view=collections&sourceId=owner-rss") });
+      assert.deepEqual(calls.sort(), ["/api/admin/redfox/collections", "/api/admin/redfox/operations", "/api/admin/sources/owner-rss"].sort());
+      const html = render(createElement(sources.default, { loaderData: data }), "/admin/sources?view=collections&sourceId=owner-rss");
+      assert(html.includes("该源关联订阅")); assert(!html.includes("别的信源订阅")); assert(!html.includes("旧无源订阅"));
+      assert(html.includes("已确认所属信源")); assert(html.includes("订阅保存后不能换归属")); assert(!html.includes('aria-label="搜索所属信源"'));
+      assert(html.includes('href="/admin/sources?view=collections"'));
+      const mismatched = render(createElement(sources.default, { loaderData: { ...data, requestedId: 13 } }), "/admin/sources?view=collections&sourceId=owner-rss&subscription=13");
+      assert(mismatched.includes("当前列表中没有此订阅")); assert(!mismatched.includes('value="别的信源订阅"'));
+    });
     await t.test("direct subscription and seeded entry focus the editor once while state refresh retains focus", async () => {
       const { parseHTML } = await import("linkedom"), { createRoot } = await import("react-dom/client");
       const { window } = parseHTML('<html><body><div id="root"></div></body></html>');

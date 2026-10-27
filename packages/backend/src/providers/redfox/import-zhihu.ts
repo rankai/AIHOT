@@ -1,10 +1,10 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
 import { sql,type Tx } from "../../db.ts";
-import { sha256,stableJson } from "../../lib/ids.ts";
+import { stableJson } from "../../lib/ids.ts";
 import { audit } from "../../admin/auth.ts";
-import { bindSourceAccount } from "../../sources/account-bindings.ts";
 import { upsertMaterial } from "../../content/materials.ts";
 import { queueProcessing } from "../../jobs/content.ts";
 import { StaleOperationError } from "../operations/store.ts";
@@ -33,31 +33,20 @@ export async function importZhihuResult(resultId:number,raw:unknown,actor:string
     const url=address(input.supplement?.url,true);
     if(!url)throw new UnsupportedReplacement("A verified original Zhihu URL and evidence are required");
     const namespace=vertical;
-    const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
-    if(!ids.length)throw new UnsupportedReplacement("A verified typed author identity is required");
-    for(const [kind,value] of ids)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`zhihu:${kind}:${value}`},0))`;
-    const owners:string[]=[];
-    for(const [kind,value] of ids){const [b]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='zhihu' AND id_kind=${kind} AND id_value=${value}`;if(b)owners.push(b.source_id);}
-    if(new Set(owners).size>1)throw new StaleOperationError("Received account IDs belong to different sources");
-    const primary=ids.map(([kind,value])=>`${kind}:${value}`).join("|");
-    const sourceId=input.sourceId??owners[0]??`zhihu-${sha256(primary).slice(0,24)}`;
-    if(owners.length&&owners[0]!==sourceId)throw new StaleOperationError("Account identity already belongs to another source");
-
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
-    if(!source&&input.sourceId)return null;
-    if(source&&input.sourceId&&!owners.length&&(source.participation_mode!=="isolated"||!input.supplement?.evidence))throw new UnsupportedReplacement("Unbound target requires isolated source and manual evidence");
-    if(source&&source.kind!=="external")throw new UnsupportedReplacement("Zhihu accounts require an external source");
-    if(source&&source.participation_mode!=="isolated"&&ids.some(([kind])=>!received[kind as keyof ZhihuIdentity]))throw new UnsupportedReplacement("Manual identity cannot inherit publication permissions");
-    const prior=await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='zhihu' AND source_id=${sourceId}`;
-    if(prior.some(b=>identity[b.id_kind as keyof ZhihuIdentity]&&identity[b.id_kind as keyof ZhihuIdentity]!==b.id_value))throw new StaleOperationError("Source already has another identity of this type");
+    if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.zhihuImport?.key===commandKey){
+      const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+      requireLiveResult(completed,snapshot.kind);
+      if(!completed!.article_id||!completed!.source_id||completed!.provenance?.zhihuImport?.key!==commandKey||stableJson(completed!.provenance.zhihuImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+      return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+    }
+    const source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,undefined);
+    if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+    const sourceId=source.id;
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.zhihuImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){const name=String(record.nickname??`作者 ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"zhihu"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"zhihu",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     {
       const discoveredAt=sourceDiscoveredAt;

@@ -1,3 +1,4 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {redfoxTiktokHasVideo} from "./video-media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
@@ -60,29 +61,40 @@ export async function importTiktokResult(resultId:number,raw:unknown,actor:strin
     if(!account&&(!nativeId||!url))throw new UnsupportedReplacement("A documented native Tiktok video permalink is required; short links are not resolved");
     if(!account&&parsed.data.workId&&parsed.data.workId!==nativeId)throw new StaleOperationError("Received work ID differs from its native original URL");
     const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
+    const primary=identity.userId?`userId:${identity.userId}`:`secUserId:${identity.secUserId}`;
+    let sourceId:string,source;
+    if(account){
     if(!ids.length)throw new UnsupportedReplacement("A verified author UID or secure ID is required");
     for(const [kind,value] of ids)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`tiktok:${kind}:${value}`},0))`;
     const owners:string[]=[];
     for(const [kind,value] of ids){const [b]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='tiktok' AND id_kind=${kind} AND id_value=${value}`;if(b)owners.push(b.source_id);}
     if(new Set(owners).size>1)throw new StaleOperationError("Received account IDs belong to different sources");
-    const primary=identity.userId?`userId:${identity.userId}`:`secUserId:${identity.secUserId}`;
-    const sourceId=input.sourceId??owners[0]??`tiktok-${sha256(primary).slice(0,24)}`;
+    sourceId=input.sourceId??owners[0]??`tiktok-${sha256(primary).slice(0,24)}`;
     if(owners.length&&owners[0]!==sourceId)throw new StaleOperationError("Account identity already belongs to another source");
-    if(!account&&input.sourceId&&owners[0]!==input.sourceId)throw new UnsupportedReplacement("Work import follows the verified author, not an arbitrary source");
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
+    [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
     if(!source&&input.sourceId)return null;
     if(source&&source.kind!=="external")throw new UnsupportedReplacement("Tiktok accounts require an external source");
     if(source&&source.participation_mode!=="isolated"&&ids.some(([kind])=>!received[kind as keyof TiktokIdentity]))throw new UnsupportedReplacement("Manual identity cannot inherit publication permissions");
     const prior=await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='tiktok' AND source_id=${sourceId}`;
     if(prior.some(b=>identity[b.id_kind as keyof TiktokIdentity]&&identity[b.id_kind as keyof TiktokIdentity]!==b.id_value))throw new StaleOperationError("Source already has another identity of this type");
+    }else{
+      if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.tiktokImport?.key===commandKey){
+        const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+        requireLiveResult(completed,snapshot.kind);
+        if(!completed!.article_id||!completed!.source_id||completed!.provenance?.tiktokImport?.key!==commandKey||stableJson(completed!.provenance.tiktokImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+        return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+      }
+      source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin&&"resultId" in origin?{resultId:Number(origin.resultId),provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+      if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+      sourceId=source.id;
+    }
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.tiktokImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){const authorRecord=(account?record:record.authorData??{}) as Record<string,unknown>;const name=String(authorRecord.userName??authorRecord.userHandle??`TikTok ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"tiktok"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!account&&!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"tiktok",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
+    if(account&&!source){const authorRecord=(account?record:record.authorData??{}) as Record<string,unknown>;const name=String(authorRecord.userName??authorRecord.userHandle??`TikTok ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"tiktok"})},'isolated',false,false,true,NULL) RETURNING *`;}
+    if(account)for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"tiktok",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
       const body=record.content,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);

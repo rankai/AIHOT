@@ -1,5 +1,7 @@
 # AgentKey 固定路由与输入输出矩阵（2026-10-22 第二阶段范围修订）
 
+> **2026-10-26 归属规则修订（尚未实施）：** 全平台内容继承创建订阅时所属信源，上游作者 ID 仅作可选溯源，不再作为导入/分析/展示统一门槛。按[主方案 §0](../agentkey-integration-plan.md#pre-phase3-source-ownership)先修已接入口再进入第三阶段；矩阵各行的接口字段、缺口与历史用途验收保持证据原义，不能据本规则宣布候选已开放。仅缺作者 ID 的导入阻断待新入口完成后重评，原文、作品身份、接口必需参数、分页及五条暂缓缺口仍分别保留。
+
 > **当前决定（2026-10-23）：抖音粉丝、头条视频详情、小红书二级回复、微博粉丝、公众号相关文章五条按用户要求暂缓、保持未开放。** 第二阶段仍为 60 条已验收 + 5 条暂缓，共 65 条。问题、排查方法、结果和恢复条件统一见[输出证据 §24](2026-10-21-agentkey-output-evidence.md#24-五条未开放路线暂缓清单2026-10-23)；后续补证和开发等待用户明确恢复。
 
 > 状态：截至2026-10-23，65条中60条已按用途完成本地验收（抖音11、公众号6、头条3、小红书9、B站11、微博8、X12）；X已接通12类Q、5类作品手动I及10类单页S，后端、Web和真实本地浏览器已验，最终状态/清理已通过，截图1–228每处均有原图和批注图共456PNG，最终批注图由Lead逐张回看；另5条尚未接入（抖音粉丝、头条视频、小红书回复、微博粉丝、公众号相关文章各1），仍保留在65条范围，未移入第三阶段。累计59次真实数据请求，57个响应报告扣费合计29.4 credits；抖音粉丝400和微博粉丝400两次缺credits_charged，保留未知，不按实测0或已完整对账表述。候选分类131 readOnly/81 needs_review不等于运行许可；保留233条静态业务路线（212 AgentKey、21直连Redfox），147条第三阶段候选不变。分批实际状态见主方案§12.8–12.16。
@@ -11,9 +13,9 @@
 依据：[完整方案](../agentkey-integration-plan.md)、[输出证据](2026-10-21-agentkey-output-evidence.md)、[方案复审](2026-10-21-agentkey-plan-review.md)、[目录快照](2026-10-21-agentkey-catalog.json)。表内 T1–T22、A1–A3、J1–J6、W1–W2 均指输出证据中同号条目。目录快照的 `selectedInputSchemas` 与 `outputEvidence` 是证据，不能扩充为 schema 注册中心。
 
 - `doc`：已有官方文字/schema（直连表单独标明仓库合同证据）；`sample`：已有官方公开样例的形态；`gap`：所需输入/字段/语义仍无现有证据。可以同一行并列，避免将“输入已知”推广成“输出已闭合”。目录存在只证明规范工具名，未知字段留 gap，不用标准平台 JSON 或其他上游 fixture 补造。
-- 表内 `P = E.data`，E 是解开 MCP content 后的 AgentKey envelope；E 的 `provider/category/took_ms/credits_charged/data` 有 doc 证据。TikHub 的 `P.data` 与 JustOneAPI/Serper/Jina 各自层级分别保留；不统一盲拆两层 data。ID 必须无损字符串/原始整数；只得到不安全 JS Number 时拒绝身份绑定和导入。
+- 表内 `P = E.data`，E 是解开 MCP content 后的 AgentKey envelope；E 的 `provider/category/took_ms/credits_charged/data` 有 doc 证据。TikHub 的 `P.data` 与 JustOneAPI/Serper/Jina 各自层级分别保留；不统一盲拆两层 data。使用的 ID 必须无损字符串/原始整数；仅得到不安全 JS Number 时，不拿它做作品身份、请求定位或账号绑定。若仅可选作者 ID 受影响，而本地归属与作品/原文仍足够，不据此阻断导入。
 - `Q`＝手工查询；`I`＝材料导入资格；`S`＝定时采集/研究快照；`X`＝已有订阅/主信源显式切换。`可设计` 只表示对应合同有据，尚未开发或实测；显式标注“本地已实现”的行除外。`条件` 指本行具体约束及共同权限/身份预检；`待补/阻断` 不可宣传为已支持；`—` 不属于该结果用途。详情只作为有界步骤，不单独伪造列表订阅。
-- Q 只要求合法输入、已核实只读行为及可理解的成功/合法空结果；单次查询不要求下一页、作者稳定 ID 或全文。I 需要平台作品/来源身份、权限、原文和回执溯源；作者可来自已验证的响应上下文，不能仅来自请求参数。正文待补、发布时间未知可沿既有 pending/历史回填规则处理；只有任务明确依赖全文或精确时间时才据此阻断。作品说明、摘要不冒充全文，昵称不继承来源权限。
+- Q 只要求合法输入、已核实只读行为及可理解的成功/合法空结果；单次查询不要求下一页、作者稳定 ID 或全文。I 需要管理员确定的本地信源、作品身份、权限、原文和回执溯源；作者信息可空，不能将请求参数伪装成已收到的作者，也不能用作者映射替换订阅所属信源。正文待补、发布时间未知可沿既有 pending/历史回填规则处理；只有任务明确依赖全文或精确时间时才据此阻断。作品说明、摘要不冒充全文，昵称不继承来源权限。
 - S 的持续分页必须有可回传的位置与可信终止规则；没有则只阻断持续分页，不连带阻断已有成功结构的单页查询/快照。单对象或明确单页快照可周期重复单次请求，不要求不存在的分页能力。最大页数只限成本，不证明有后页或完整历史覆盖；矛盾游标进入核对，接口明确的停止值按其合同解释。
 - X 只比较当前业务必需身份/过滤/正文/时间/分页覆盖。必需能力缺失拒绝；未使用过滤、单页限制、库名或延迟差异只展示影响。失败保留旧订阅；成功使旧轮失去提交资格。独立平台订阅与 X/公众号主订阅均走显式切换，无自动兜底。
 
@@ -114,11 +116,15 @@
 
 ### 视频号 WeChat Channels（T10）
 
+2026-10-27 独立性复审：以下三条是 AgentKey 自有列表、详情与原文补全路线，属于后续第三阶段候选，不为 Redfox 补作者或补原文。列表已足够时不强制购买详情/账号资料；仅缺必要作品信息或原文时使用同供应商的对应步骤。作者字段更完整是该路线优势，不是入库的普遍门槛。材料入库与可选视频保存分别验收，固定 Redfox 媒体解析不成为 AgentKey 采集前置条件。
+
+本轮仅免费重新 describe 下列三个精确工具，取得 AgentKey 提供的 TikHub 参数 schema 与上游说明，未 execute。同步修正旧行中笼统的“输入待补”和 `exportId+feedNonceId` 必填印象；TikHub 文档索引为[列表](https://docs.tikhub.io/472974841e0)、[详情](https://docs.tikhub.io/472974842e0)、[分享链接](https://docs.tikhub.io/472974844e0)。网页正文未能通过本轮网页读取工具打开，本轮直接证据来自 AgentKey describe，不将其记成新的官方网页样例或真实响应。字段声明仍不证明网关实际 envelope、空/错误结构、链接可达性或媒体下载成功。
+
 | 业务能力 / AIHOT结果 | provider/upstream | 精确工具 | 必需输入 / 固定条件 | 已证实输出 | 分页 / 末页 | recovery；operation；step | 查询 / 导入 / 定时 / 切换 | 证据状态与阻断 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 账号视频列表 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_user_videos_api_v1_wechat_channels_v2_fetch_user_videos_post` | finder username 等账号输入；raw=false；last_buffer 回传（精确 required 未保存） | P.data.videos[].id/username/title/create_time | up_continue/last_buffer；空结果形态缺失 | `readOnly`；`agentkey.wechat_channels.account_posts`；`agentkey.wechat_channels.account_posts.query` | Q=条件；I=阻断；S=阻断；X=阻断 | doc T10；稳定作者可绑定；gap：输入细则、时间单位、作品页 URL/有效性和末页空形态 |
-| 视频详情/明文身份 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_video_detail_api_v1_wechat_channels_v2_fetch_video_detail_post` | 搜索 exportId+feedNonceId 或明文 objectId 对应输入（精确 schema 待补）；raw=false | P.data.id/username/title；可得到 objectId 与 v2_…@finder | 单对象 | `readOnly`；`agentkey.wechat_channels.detail`；`agentkey.wechat_channels.detail.query` | Q=条件；I=阻断；S=仅补全步骤，阻断；X=阻断 | doc T10；gap：时间单位/作品页 URL；exportId 会过期，media.full_url 是 CDN |
-| 读取作品分享链接 / 原文补全 | agentkey / TikHub | `TikHub/fetch_video_share_url_api_v1_wechat_channels_v2_fetch_video_share_url_post` | 作品标识（精确字段/required 待补） | P.data.share_url | 单对象 | `readOnly`；`agentkey.wechat_channels.original_url`；`agentkey.wechat_channels.original_url.query` | Q=条件；I=辅助但仍阻断；S=仅确需时有界补全；X=仍阻断 | doc T10；gap：链接有效性与完整输入；这是作品链接读取辅助，不是媒体加工 |
+| 账号视频列表 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_user_videos_api_v1_wechat_channels_v2_fetch_user_videos_post` | schema 必填 username:string（finder）；last_buffer 默认空；raw:boolean 默认true，本路线固定false | 声明 P.data.videos[].id/object_nonce_id/username/nickname/title/create_time；media.full_url/decode_key 属加密媒体 | P.data.up_continue/last_buffer；首轮空 cursor，有后页才回传；合法末页/空结果实际结构待验 | `readOnly`；`agentkey.wechat_channels.account_posts`；`agentkey.wechat_channels.account_posts.query` | Q=条件；I=待自有原文补全与实现；S=未开放；X=未开放 | 2026-10-27 describe；作品 ID 无损读取，作者可空；缺作品页时用下列同商分享链接；gap：实际响应/空错误结构、时间单位与链接有效性；时间未知可沿既有回填 |
+| 视频详情 / 作品候选→材料 | agentkey / TikHub | `TikHub/fetch_video_detail_api_v1_wechat_channels_v2_fetch_video_detail_post` | schema 无 required；文字合同要求 object_id/export_id/share_url 至少一项，优先级按此顺序；UI 单选定位方式；object_nonce_id 可选；本路线 raw=false | 声明 P.data.id/username/nickname/title/create_time/object_type/media；媒体 full_url 加密且非原文；ID 按原始字符串保真 | 单对象，不要求分页 | `readOnly`；`agentkey.wechat_channels.detail`；`agentkey.wechat_channels.detail.query` | Q=条件；I=待原文证据与实现；S=仅确需时补全；X=未开放 | 2026-10-27 describe；不是每条作品必查的作者解析；export_id 有时效；gap：实际响应/空错误、时间/类型语义及原文有效性；不因媒体加密阻断内容用途 |
+| 读取作品分享链接 / 原文补全 | agentkey / TikHub | `TikHub/fetch_video_share_url_api_v1_wechat_channels_v2_fetch_video_share_url_post` | schema 必填 object_id:string（作品 id）；raw:boolean 默认true，本路线固定false | 声明 P.data.share_url；P.data.object_id 仅输入回显，不当独立身份佐证 | 单对象，不要求分页 | `readOnly`；`agentkey.wechat_channels.original_url`；`agentkey.wechat_channels.original_url.query` | Q=条件；I=原文辅助未开放；S=仅确需时有界补全；X=未开放 | 2026-10-27 describe；输入取本商列表/详情已收作品 id；gap：实际响应/空错误与分享链接有效性；不再列已知输入为缺口，不新增媒体或身份服务 |
 
 ### 今日头条 Toutiao：AgentKey 辅助查询（T9）
 
@@ -806,5 +812,5 @@ Threads 的 recent/top 是两个排序用途，本矩阵先固定 recent，不�
 - 212 个 AgentKey 工具与 21 个 Redfox operation ID 继续各自唯一，没有因首行实现而复制生命周期或重复登记同义路线。
 - 运行时白名单、恢复分类、供应商选择器、预检和切换资格都只开放上述一行；其余 211 条 AgentKey 路线不会因矩阵存在而被执行。
 - 异常分页会先保存已收结果和 received 回执，再进入 `needs_review`；关闭一个供应商不会在调度 SQL 的 `LIMIT` 前阻塞另一供应商。
-- AgentKey 缺少稳定作者或作品身份时禁用导入；不会根据昵称、请求参数或手工填写补造身份。
+- 当时实现对缺少稳定作者或作品身份均禁用导入；其中仅因缺作者 ID 的限制已在 2026-10-26 新方案中撤回，尚待局部改造。作品身份仍按实际用途校验，不根据昵称或请求参数补造已收身份。
 - 当前完成的是隔离数据库、本机桩和一次真实只读首页验证；真实第二页、定时多轮和失败恢复仍由桩覆盖，不额外消耗供应商额度。

@@ -43,27 +43,23 @@ export function toutiaoImportFields(kind: string, data: Record<string, unknown>)
     : work && native && workId && native.id !== workId ? "已确认作品 ID 与收到的原文不一致，不能导入或替换。"
     : work && data.operationId === "PAB6Z75Y" && requestedWorkId && (!/^[0-9]+$/.test(requestedWorkId) || native && native.id !== requestedWorkId) ? "原文不能对应本次请求的作品 ID，请核实输入后重新查询。" : null;
   return { account, work, uid, secUid, workId, requestedWorkId, receivedUrl, native, record, blockedReason,
-    canImport: data.provider === "agentkey" ? work && !blockedReason && !!uid && !!workId && !!native : account ? !!uid : work && !blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !uid && !secUid };
+    canImport: data.provider === "agentkey" ? work && !blockedReason && !!workId && !!native : account ? !!uid : work && !blockedReason, needsUrl: work && !receivedUrl};
 }
 
-export function toutiaoTargetCandidates<T extends { id: string; participation_mode: string }>(rows: readonly T[] | null | undefined, work: boolean): T[] {
-  return rows?.filter(source => !work || source.participation_mode === "isolated") ?? [];
-}
 
-type Supplement = { uid?: string; secUid?: string; url?: string; evidence: string };
-export function toutiaoImportSupplement(fields: ReturnType<typeof toutiaoImportFields>, draft: { uid: string; secUid: string; url: string; evidence: string; manualTarget: boolean }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
+type Supplement = { url?: string; evidence: string };
+export function toutiaoImportSupplement(fields: ReturnType<typeof toutiaoImportFields>, draft: { url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
   if (!fields.canImport) return { error: fields.blockedReason ?? "此结果缺少可绑定的已收 uid，不能人工补账号身份" };
-  if (fields.account || !fields.needsIdentity && !fields.needsUrl && !draft.manualTarget) return {};
-  const uid = draft.uid.trim(), secUid = draft.secUid.trim(), url = draft.url.trim(), evidence = draft.evidence.trim();
+  if (fields.account || !fields.needsUrl) return {};
+  const url = draft.url.trim(), evidence = draft.evidence.trim();
   if (fields.needsUrl) {
     const native = toutiaoNativeWork(url);
     if (!native) return { error: "请填写头条 /aID、/group/ID、/article/ID 或 /video/ID 原文，不接受短链、凭证、端口或片段" };
     if (fields.workId && fields.workId !== native.id) return { error: "补充原文须与已确认作品 ID 一致" };
     if (fields.requestedWorkId && fields.requestedWorkId !== native.id) return { error: "补充原文须与本次请求的作品 ID 一致" };
   }
-  if (fields.needsIdentity && (!uid && !secUid || uid && !/^[0-9]+$/.test(uid) || secUid.length > 500)) return { error: "请填写至少一种已核实作者身份：完整数字 uid 或安全 ID secUid（最多 500 字），不使用昵称或主页 token" };
-  if (!evidence || evidence.length > 1000) return { error: "请填写缺项或人工关联的核实依据（最多 1000 字）" };
-  return { supplement: { ...(fields.needsIdentity ? { ...(uid ? { uid } : {}), ...(secUid ? { secUid } : {}) } : {}), ...(fields.needsUrl ? { url } : {}), evidence } };
+  if (!evidence || evidence.length > 1000) return { error: "请填写缺失原文的核实依据（最多 1000 字）" };
+  return { supplement: { url, evidence } };
 }
 
 export function toutiaoWorkFacts(data: Record<string, unknown>) {

@@ -59,7 +59,6 @@ export function parseDouyinSearch(response: unknown, input: DouyinSearchInput) {
     if (seconds === undefined) missingFields.push("create_time");
     const importBlockers: string[] = [];
     if (!workId) importBlockers.push("lossless_work_id_required");
-    if (!uid && !secUid) importBlockers.push("lossless_author_id_required");
     const time = seconds === undefined ? null : new Date(seconds * 1000);
     const publishedAt = time && Number.isFinite(time.getTime()) ? time.toISOString() : null;
     return { itemKey: `item:${index}`, kind: "douyin_work", data: {
@@ -130,7 +129,7 @@ function projectAppWork(item:Record<string,unknown>,index:number,route:AgentKeyD
     const url=workId?`https://www.douyin.com/video/${workId}`:null;
     return {itemKey:`item:${index}`,kind:"douyin_work",data:{platform:"douyin",operationId:douyinOperationId(route),provider:"agentkey",upstream:"TikHub",tool:route.tool,
       title:description??"抖音作品",identity:{...(uid?{uid}:{}),...(secUid?{secUserId:secUid}:{})},workId:workId??null,url,
-      missing:missingFields,missingFields,importBlockers:[...(!workId?["lossless_work_id_required"]:[]),...(!uid&&!secUid?["lossless_author_id_required"]:[])],publishedAt,
+      missing:missingFields,missingFields,importBlockers:[...(!workId?["lossless_work_id_required"]:[])],publishedAt,
       record:{...(description!==undefined?{desc:description,aweme_desc:description}:{}),...(authorName!==undefined?{authorName}:{}),...(coverUrl?{coverUrl}:{}),...(seconds!==undefined?{create_time:seconds}:{}),...(!knownSeconds&&typeof item.create_time==="number"&&Number.isFinite(item.create_time)?{create_time:item.create_time}:{}),...(!knownSeconds&&typeof item.share_url==="string"?{share_url:item.share_url}:{})},
       ...(workId?{aweme_id:workId}:{}),...(description!==undefined?{desc:description}:{}),...(seconds!==undefined?{create_time:seconds}:{}),
       author:{...(uid?{uid}:{}),...(secUid?{sec_uid:secUid}:{}),...(authorName?{name:authorName}:{})},...(url?{share_url:url}:{}),...(!knownSeconds?{timeUnits:{create_time:"unspecified"}}:{})}};

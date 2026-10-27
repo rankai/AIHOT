@@ -46,11 +46,11 @@ test("account binding and detail import preserve a legacy short URL and source p
   const old=await upsertMaterial({sourceId:source,url:`https://weibo.com/${uid}/${mblogid}`,title:"Legacy body",via:"fetch"});
   const account=await query("API_1789098515117",{userId:uid});await importWeiboResult(account.results[0]!.id,{sourceId:source,reason:"Synthetic verified account"},"test",tag());
   const detail=await query("API_1789098514899",{opusId});const key=tag(),beforeHits=hits;
-  const result=await importWeiboResult(detail.results[0]!.id,{reason:"Synthetic verified work"},"test",key);assert.equal(result?.articleId,old.articleId);
-  assert.deepEqual(await importWeiboResult(detail.results[0]!.id,{reason:"Synthetic verified work"},"test",key),result);assert.equal(hits,beforeHits);
+  const result=await importWeiboResult(detail.results[0]!.id,{sourceId:source,reason:"Synthetic verified work"},"test",key);assert.equal(result?.articleId,old.articleId);
+  assert.deepEqual(await importWeiboResult(detail.results[0]!.id,{sourceId:source,reason:"Synthetic verified work"},"test",key),result);assert.equal(hits,beforeHits);
   assert.equal((await sql`SELECT site_fulltext FROM sources WHERE id=${source}`)[0]!.site_fulltext,true);
   assert.equal((await sql`SELECT url FROM articles WHERE id=${old.articleId}`)[0]!.url,`https://weibo.com/${uid}/${mblogid}`);
-  await sql`UPDATE sources SET enabled=false WHERE id=${source}`;const another=await query("API_1789098514899",{opusId});await assert.rejects(importWeiboResult(another.results[0]!.id,{reason:"Disabled must block"},"test",tag()),/disabled/);
+  await sql`UPDATE sources SET enabled=false WHERE id=${source}`;const another=await query("API_1789098514899",{opusId});await assert.rejects(importWeiboResult(another.results[0]!.id,{sourceId:source,reason:"Disabled must block"},"test",tag()),/disabled/);
 });
 test("first unknown waits and received malformed raw is locally recoverable without repurchase",async()=>{
   disconnect=true;let run;try{run=await createSynchronousQuery({operationId:"UAQ90A1F",parameters:{}},"test",tag());await step(run.id);}finally{disconnect=false;}
@@ -82,7 +82,7 @@ test("documented and ISO dates plus media survive import; unzoned or broken date
     responseOverride={opusId:id,uid:author,text:"Synthetic media work",opusUrl:`https://weibo.com/${author}/${id}`,publishTime,
       picUrl:["https://example.com/synthetic.png","javascript:bad","not a URL"],videoUrl:"https://example.com/synthetic.mp4",cover:"https://example.com/synthetic-cover.png"};
     const result=await query("API_1789098514899",{opusId:id});assert.equal(result.run.status,"completed");
-    const imported=await importWeiboResult(result.results[0]!.id,{reason:"Synthetic dated media"},"test",tag());
+    const imported=await importWeiboResult(result.results[0]!.id,{sourceId:await selectedSource(),reason:"Synthetic dated media"},"test",tag());
     const [article]=await sql`SELECT published_at,published_at_claim,media,raw FROM articles WHERE id=${imported!.articleId!}`;
     assert.equal(article!.published_at?.toISOString()??null,expected);assert.equal(article!.published_at_claim?.toISOString()??null,expected);
     assert.equal(article!.raw.publishTime,publishTime);
@@ -97,7 +97,7 @@ test("bounded collection retains its page through a budget stop, completes detai
   responseOverride=(url:string)=>{if(url.endsWith("searchWork")){pages++;return [0,1].map(i=>({opusId:String(BigInt(id)+BigInt(i)),uid:author,text:"Synthetic bounded item",url:`https://weibo.com/${author}/${BigInt(id)+BigInt(i)}`}));}details++;return {opusId:id,uid:author,mblogid:`Bound${tag().replace(/[^A-Za-z0-9]/g,"")}`,text:"Synthetic complete detail",opusUrl:`https://weibo.com/${author}/${id}`};};
   process.env.COLLECT_ENABLED="true";
   try{
-    const sub=await createWeiboSubscription({name:"Bounded fixture",operationId:"TXQPVGJG",parameters:{searchType:"61",page:"1",keyword:"fixture"},enabled:true,intervalMinutes:1,enrichDetails:true,limits:{pages:2,items:1,details:1}},"test",tag());
+    const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:"Bounded fixture",operationId:"TXQPVGJG",parameters:{searchType:"61",page:"1",keyword:"fixture"},enabled:true,intervalMinutes:1,enrichDetails:true,limits:{pages:2,items:1,details:1}},"test",tag());
     const run=await startWeiboSubscription(sub.id,"test",tag());await step(run.id);const pageState=await row(run.id);assert.equal(pageState.step_key,"redfox.weibo.item");assert.equal(pageState.progress.retainedReceiptIds.length,1);assert.equal(pageState.progress.items,undefined);assert.equal(pageState.progress.selectedCount,1);assert.equal(JSON.stringify(pageState.progress).includes("Synthetic bounded item"),false);
     await step(run.id);await sql`UPDATE budgets SET per_minute=0 WHERE service='redfox.collect'`;await step(run.id);const stopped=await row(run.id);assert.equal(stopped.status,"waiting");assert.equal(stopped.progress.index,0);assert.equal(details,0);
     await sql`UPDATE budgets SET per_minute=1000 WHERE service='redfox.collect'`;await sql.begin(tx=>resumeRun(tx,{runId:run.id,stepVersion:stopped.step_version,generation:stopped.generation}));await step(run.id);
@@ -131,7 +131,7 @@ test("lost item job recovers from retained page with outbound closed; next empty
   responseOverride=()=>++pages===1?[{uid:author,opusId:id,text:"Synthetic replay",url:`https://weibo.com/${author}/${id}`}]:[];
   process.env.COLLECT_ENABLED="true";
   try{
-    const sub=await createWeiboSubscription({name:"Replay fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"replay"},enabled:true,limits:{pages:2,items:5,details:0}},"test",tag());
+    const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:"Replay fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"replay"},enabled:true,limits:{pages:2,items:5,details:0}},"test",tag());
     const run=await startWeiboSubscription(sub.id,"test",tag());await step(run.id);const state=await row(run.id);await (await getBoss()).cancel(QUEUES.operation,state.job_id);await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${run.id}`;
     await sql`INSERT INTO settings(key,value,updated_by) VALUES ('operations.recovery-cursor',${sql.json(run.id-1)},'test') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
     process.env.REDFOX_CALLS_ENABLED="false";const recovered=await recoverOperations();assert.ok(recovered.requeued>=1);await step(run.id);assert.equal(pages,1);assert.equal((await row(run.id)).step_key,"redfox.weibo.page");
@@ -140,24 +140,24 @@ test("lost item job recovers from retained page with outbound closed; next empty
   }finally{responseOverride=undefined;process.env.REDFOX_CALLS_ENABLED="true";process.env.COLLECT_ENABLED="false";if(oldCursor)await sql`UPDATE settings SET value=${sql.json(oldCursor.value)} WHERE key='operations.recovery-cursor'`;}
 });
 
-test("scheduled trends remain snapshots and disabled authors leave pending results without material",async()=>{
+test("scheduled trends remain snapshots and foreign disabled author mappings do not override the selected source",async()=>{
   const {createWeiboSubscription,startWeiboSubscription,scheduleWeiboSubscriptions}=await import("@aihot/backend/sources/weibo-subscriptions");
   const author=`995${Date.now()}`,id=`994${Date.now()}`,source=`disabled-weibo-${tag()}`;
   await sql`INSERT INTO sources(id,name,kind,enabled) VALUES (${source},'Disabled author','external',false)`;
   await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('weibo','uid',${author},${source},'{"kind":"audit","reference":"synthetic"}')`;
   process.env.COLLECT_ENABLED="true";
   try{
-    const trend=await createWeiboSubscription({name:"Trend schedule",operationId:"UAQ90A1F",parameters:{},enabled:true},"test",tag());
+    const trend=await createWeiboSubscription({sourceId:await selectedSource(),name:"Trend schedule",operationId:"UAQ90A1F",parameters:{},enabled:true},"test",tag());
     // Shared task databases may contain older due subscriptions; make this fixture deterministically first.
     await sql`UPDATE collection_subscriptions SET next_run_at=(SELECT COALESCE(min(next_run_at),now())-interval '1 second' FROM collection_subscriptions WHERE operation_key IN ('redfox.weibo.collection','redfox.platform.collection') AND enabled AND active_run_id IS NULL AND next_run_at<=now()) WHERE id=${trend.id}`;
     await scheduleWeiboSubscriptions();const [scheduled]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${trend.id}`;assert.ok(scheduled!.active_run_id);
     await step(scheduled!.active_run_id);assert.equal((await row(scheduled!.active_run_id)).status,"completed");
     const trendResults=await sql`SELECT kind,article_id FROM operation_results WHERE run_id=${scheduled!.active_run_id}`;assert.ok(trendResults.some(r=>r.kind==='weibo_trend'));assert.ok(trendResults.every(r=>r.article_id===null));
     responseOverride=[{uid:author,opusId:id,text:"Disabled synthetic work",url:`https://weibo.com/${author}/${id}`}];
-    const sub=await createWeiboSubscription({name:"Disabled author fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"disabled"},enabled:true,limits:{pages:1,items:1,details:0}},"test",tag());
+    const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:"Disabled author fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"disabled"},enabled:true,limits:{pages:1,items:1,details:0}},"test",tag());
     const run=await startWeiboSubscription(sub.id,"test",tag());await step(run.id);await step(run.id);assert.equal((await row(run.id)).status,"completed");
-    const [result]=await sql`SELECT article_id,data FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;assert.equal(result!.article_id,null);assert.match(result!.data.pendingReason,/disabled/);
-    assert.equal((await sql`SELECT 1 FROM articles WHERE identity_key=${`weibo:opusId:${id}`}`).length,0);
+    const [result]=await sql`SELECT article_id,data FROM operation_results WHERE run_id=${run.id} AND kind='weibo_work'`;assert.ok(result!.article_id);assert.equal(result!.data.pendingReason,undefined);
+    assert.equal((await sql`SELECT source_id FROM articles WHERE identity_key=${`weibo:opusId:${id}`}`)[0]!.source_id,await selectedSource());
   }finally{responseOverride=undefined;process.env.COLLECT_ENABLED="false";}
 });
 
@@ -169,7 +169,7 @@ test("detail import refuses two legacy owners and rolls back result and new sour
   responseOverride={uid:author,opusId:id,mblogid:short,text:"Synthetic conflicting detail",opusUrl:`https://weibo.com/${author}/${id}`};
   try{
     const result=await query("API_1789098514899",{opusId:id});const beforeHits=hits;
-    await assert.rejects(importWeiboResult(result.results[0]!.id,{reason:"Do not merge legacy owners"},"test",tag()),/different articles/);assert.equal(hits,beforeHits);
+    await assert.rejects(importWeiboResult(result.results[0]!.id,{sourceId:await selectedSource(),reason:"Do not merge legacy owners"},"test",tag()),/different articles/);assert.equal(hits,beforeHits);
     const [stored]=await sql`SELECT article_id,source_id FROM operation_results WHERE id=${result.results[0]!.id}`;assert.equal(stored!.article_id,null);assert.equal(stored!.source_id,null);
     assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='weibo' AND id_value=${author}`).length,0);
     assert.equal((await sql`SELECT 1 FROM articles WHERE id IN (${a.articleId},${b.articleId})`).length,2);
@@ -195,7 +195,7 @@ test("a missing retained raw page pauses locally instead of fetching it again",a
   const {createWeiboSubscription,startWeiboSubscription}=await import("@aihot/backend/sources/weibo-subscriptions");
   const author=`971${Date.now()}`,id=`972${Date.now()}`;responseOverride=[{uid:author,opusId:id,text:"Retained only",url:`https://weibo.com/${author}/${id}`}];process.env.COLLECT_ENABLED="true";
   try{
-    const sub=await createWeiboSubscription({name:"Missing raw fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"missing"},enabled:true,limits:{pages:1,items:2,details:0}},"test",tag());
+    const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:"Missing raw fixture",operationId:"TXQPVGJG",parameters:{page:"1",searchType:"61",keyword:"missing"},enabled:true,limits:{pages:1,items:2,details:0}},"test",tag());
     const run=await startWeiboSubscription(sub.id,"test",tag());await step(run.id);const saved=await row(run.id);const beforeHits=hits;
     await sql`UPDATE receipts SET response=NULL WHERE id=${saved.progress.pageReceipt}`;await step(run.id);const result=await row(run.id);assert.equal(result.status,"needs_review");assert.match(result.wait_reason,/missing or expired/);assert.equal(hits,beforeHits);assert.equal(result.progress.index,0);
   }finally{responseOverride=undefined;process.env.COLLECT_ENABLED="false";}
@@ -209,7 +209,7 @@ test("safe positive starting pages cross 99 and 100 without imposing an undocume
       const author=`961${Date.now()}${start}`,id=`962${Date.now()}${start}`;let pages=0;
       responseOverride=()=>++pages===1?[{uid:author,opusId:id,text:"High-page fixture",url:`https://weibo.com/${author}/${id}`}]:[];
       const beforeRequests=requests.length;
-      const sub=await createWeiboSubscription({name:"High starting page",operationId:"TXQPVGJG",parameters:{page:String(start),searchType:"61",keyword:"high page"},enabled:true,limits:{pages:2,items:5,details:0}},"test",tag());
+      const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:"High starting page",operationId:"TXQPVGJG",parameters:{page:String(start),searchType:"61",keyword:"high page"},enabled:true,limits:{pages:2,items:5,details:0}},"test",tag());
       const run=await startWeiboSubscription(sub.id,"test",tag());await step(run.id);await step(run.id);await step(run.id);
       assert.equal((await row(run.id)).status,"completed");assert.deepEqual(requests.slice(beforeRequests).map(r=>r.body.page),[String(start),String(start+1)]);
     }
@@ -224,14 +224,14 @@ test("import timing marks only unknown or stale new material and preserves fresh
     for(const [index,publishTime] of [undefined,"2001-01-01 12:00:00",old,fresh].entries()){
       const id=`998${Date.now()}${index}`,url=`https://weibo.com/${author}/${id}`;
       responseOverride={opusId:id,uid:author,text:"Synthetic timing",opusUrl:url,publishTime};
-      const q=await query("API_1789098514899",{opusId:id}),imported=await importWeiboResult(q.results[0]!.id,{reason:"Synthetic timing"},"test",tag());
+      const q=await query("API_1789098514899",{opusId:id}),imported=await importWeiboResult(q.results[0]!.id,{sourceId:await selectedSource(),reason:"Synthetic timing"},"test",tag());
       const [a]=await sql`SELECT backfill,backfill_reason,published_at,discovered_at FROM articles WHERE id=${imported!.articleId!}`;
       assert.equal(a!.backfill,index!==3);assert.equal(isHistorical(a as never),index!==3);
       if(index<2)assert.equal(a!.backfill_reason,"redfox-import-unknown-time");
       if(index===3){
         const [before]=await sql`SELECT source_id,published_at,discovered_at,timeline_at,backfill,backfill_reason FROM articles WHERE id=${imported!.articleId!}`;
         responseOverride={opusId:id,uid:author,text:"Synthetic changed body",opusUrl:url};
-        const repeat=await query("API_1789098514899",{opusId:id});await importWeiboResult(repeat.results[0]!.id,{reason:"Synthetic repeat unknown time"},"test",tag());
+        const repeat=await query("API_1789098514899",{opusId:id});await importWeiboResult(repeat.results[0]!.id,{sourceId:await selectedSource(),reason:"Synthetic repeat unknown time"},"test",tag());
         assert.deepEqual((await sql`SELECT source_id,published_at,discovered_at,timeline_at,backfill,backfill_reason FROM articles WHERE id=${imported!.articleId!}`)[0],before);
       }
     }
@@ -244,7 +244,7 @@ test('each formal page retains its own discovery through detail delay and termin
  responseOverride=(url:string)=>{if(url.endsWith('searchWork')){const id=String(base+BigInt(pageCalls++));return [{opusId:id,uid:author,text:'Synthetic page item',url:`https://weibo.com/${author}/${id}`}];}const id=String(base);return {opusId:id,uid:author,text:'Synthetic detail',opusUrl:`https://weibo.com/${author}/${id}`};};
  process.env.COLLECT_ENABLED='true';
  try{
-  const sub=await createWeiboSubscription({name:'Page discovery fixture',operationId:'TXQPVGJG',parameters:{searchType:'61',page:'1',keyword:tag()},enabled:true,enrichDetails:true,limits:{pages:2,items:2,details:1}},'test',tag());
+  const sub=await createWeiboSubscription({sourceId:await selectedSource(),name:'Page discovery fixture',operationId:'TXQPVGJG',parameters:{searchType:'61',page:'1',keyword:tag()},enabled:true,enrichDetails:true,limits:{pages:2,items:2,details:1}},'test',tag());
   const run=await startWeiboSubscription(sub.id,'test',tag());await step(run.id);
   const firstTime=new Date(Date.now()-5*86400000),secondTime=new Date(Date.now()-3*86400000);
   await sql`UPDATE operation_results SET created_at=${firstTime} WHERE run_id=${run.id} AND kind='query_summary'`;
@@ -262,3 +262,6 @@ test('each formal page retains its own discovery through detail delay and termin
   assert.equal((await sql`SELECT discovered_at FROM articles WHERE id=${imported!.articleId!}`)[0]!.discovered_at.toISOString(),secondTime.toISOString());assert.equal(hits,before);
  }finally{process.env.COLLECT_ENABLED='false';process.env.REDFOX_CALLS_ENABLED='true';responseOverride=undefined;await sql`UPDATE budgets SET per_minute=1000 WHERE service='redfox.collect'`;}
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Selected Weibo source','rss','isolated',false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

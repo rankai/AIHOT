@@ -1,5 +1,5 @@
 import type { Tx } from "../db.ts";
-import { lockSubscription, type SubscriptionMember } from "./subscriptions.ts";
+import { subscriptionSourceId, lockSubscription, type SubscriptionMember } from "./subscriptions.ts";
 
 export const SUBSCRIPTION_VIDEO_DOWNLOAD = "subscription.video.download";
 export interface VideoDownloadOwnership {
@@ -17,10 +17,12 @@ export async function lockVideoDownloadOwners(tx: Tx, subscriptionId: number, ar
 } | null> {
   const sub = await lockSubscription(tx, subscriptionId);
   if (!sub.enabled || sub.config.autoDownloadVideo !== true) return null;
+  const sourceId = subscriptionSourceId(sub);
+  if (!sourceId) return null;
   const [snapshot] = await tx`SELECT source_id FROM articles WHERE id = ${articleId}`;
   if (!snapshot) return null;
   const sources = new Map<string, { enabled: boolean; execution_version: number }>();
-  for (const id of [...new Set([sub.control_source_id, snapshot.source_id].filter((id): id is string => typeof id === "string"))].sort()) {
+  for (const id of [...new Set([sourceId, snapshot.source_id].filter((id): id is string => typeof id === "string"))].sort()) {
     const [source] = await tx<{ enabled: boolean; execution_version: number }[]>`SELECT enabled, execution_version FROM sources WHERE id = ${id} FOR SHARE`;
     if (!source?.enabled) return null;
     sources.set(id, source);
@@ -28,8 +30,8 @@ export async function lockVideoDownloadOwners(tx: Tx, subscriptionId: number, ar
   const [article] = await tx`SELECT source_id, identity_key FROM articles WHERE id = ${articleId} FOR SHARE`;
   if (!article || article.source_id !== snapshot.source_id || !sources.has(article.source_id)) return null;
   return {
-    member: { subscriptionId, executionVersion: sub.execution_version, sourceId: sub.control_source_id,
-      sourceExecutionVersion: sources.get(sub.control_source_id)?.execution_version ?? null },
+    member: { subscriptionId, executionVersion: sub.execution_version, sourceId,
+      sourceExecutionVersion: sources.get(sourceId)?.execution_version ?? null },
     ownership: { articleId, identityKey: article.identity_key, sourceId: article.source_id,
       sourceExecutionVersion: sources.get(article.source_id)!.execution_version, collector: sub.provider },
   };

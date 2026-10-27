@@ -37,8 +37,8 @@ test('strict native watch and channel paths do not infer shorts, shortened URLs,
  assert.throws(()=>parseYoutube('609DF2IR',{...detail,videoId:'Other123456'},{videoId}));assert.throws(()=>parseYoutube('609DF2IR',{...detail,videoUrl:'https://youtube.com/watch?v=Other123456'},{videoId}));assert.throws(()=>parseYoutube('609DF2IR',{...detail,videoUrl:'https://example.com/video.mp4'},{videoId}));
 });
 test('missing author or video remains pending and channel handles never become stable identities',()=>{
- const a=parseYoutube('609DF2IR',{videoId,title:'No stable channel',channelHandle:'@synthetic',channelUrl:'https://youtube.com/@synthetic'},{videoId})[0]!;assert.deepEqual(a.data.identity,{});assert.ok((a.data.missing as string[]).some(s=>s.includes('channelId')));
- const b=parseYoutube('GC5SC5HS',{videos:[{title:'No video ID',author:'Name only'}]},{});assert.equal(b[0]!.data.url,null);assert.equal(b[0]!.data.workId,null);assert.equal((b[0]!.data.missing as string[]).length,2);
+ const a=parseYoutube('609DF2IR',{videoId,title:'No stable channel',channelHandle:'@synthetic',channelUrl:'https://youtube.com/@synthetic'},{videoId})[0]!;assert.deepEqual(a.data.identity,{});assert.equal((a.data.missing as string[]).some(s=>s.includes('channelId')),false);
+ const b=parseYoutube('GC5SC5HS',{videos:[{title:'No video ID',author:'Name only'}]},{});assert.equal(b[0]!.data.url,null);assert.equal(b[0]!.data.workId,null);assert.equal((b[0]!.data.missing as string[]).length,1);
  assert.throws(()=>parseYoutube('GC5SC5HS',{videos:[{videoId,channelId,channelUrl:'https://youtube.com/channel/OtherChannel'}]},{}));
 });
 test('empty pages commit summary, null continuation, and receipt consumption',async()=>{operation='GC5SC5HS';parameters={searchQuery:'empty',continuationToken:null};data={videos:[],continuationToken:null,videoCount:0};const q=await query();assert.equal(q.run.status,'completed');assert.equal(q.results.length,1);assert.equal(q.results[0]!.kind,'query_summary');assert.equal(q.results[0]!.data.count,0);assert.equal(q.results[0]!.data.continuationToken,null);assert.equal((await sql`SELECT status FROM receipts WHERE id=${q.results[0]!.receipt_id}`)[0]!.status,'completed');});
@@ -80,7 +80,7 @@ test('origin detail imports locally via HTTP with original discovery, descriptio
  const [detailResult]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`,before=hits;
  process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
  try{
-  const headers={'x-csrf-token':'dev','idempotency-key':tag()},payload={reason:'Confirmed synthetic import'},url=`/api/admin/operations/results/${detailResult!.id}/import`;
+  const headers={'x-csrf-token':'dev','idempotency-key':tag()},payload={sourceId:await makeWorkSource(),reason:'Confirmed synthetic import'},url=`/api/admin/operations/results/${detailResult!.id}/import`;
   const response=await app.inject({method:'POST',url,headers,payload});assert.equal(response.statusCode,200,response.body);const imported=response.json();
   assert.deepEqual((await app.inject({method:'POST',url,headers,payload})).json(),imported);
   assert.equal((await app.inject({method:'POST',url,headers,payload:{...payload,supplement:{channelId:channel,evidence:'different intent'}}})).statusCode,409);
@@ -89,14 +89,13 @@ test('origin detail imports locally via HTTP with original discovery, descriptio
   const [owner]=await sql`SELECT * FROM sources WHERE id=${imported.sourceId}`;assert.equal(owner!.participation_mode,'isolated');assert.equal(owner!.site_fulltext,false);assert.equal(hits,before);
  }finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='fake-youtube';config.devAdmin=null;await app.close();}
 });
-test('independent detail needs author evidence; manual author cannot inherit permissions and disabled authors reject',async()=>{
+test('independent detail requires explicit source; missing author is allowed and disabled source rejects',async()=>{
  const {importYoutubeResult}=await import('@aihot/backend/providers/redfox/import-youtube');
  const id=randomUUID().replaceAll('-','').slice(0,11),channel='UC_'+tag();operation='609DF2IR';parameters={videoId:id};data={videoId:id,title:'Independent',channelHandle:'@not-proof'};const q=await query(),resultId=Number(q.results[0]!.id),before=hits;
- await assert.rejects(importYoutubeResult(resultId,{reason:'No author'},'youtube-import',tag()),/channel ID/);
+ await assert.rejects(importYoutubeResult(resultId,{reason:'No author'},'youtube-import',tag()),/associated source/);
  const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${sourceId},'Synthetic channel','external','editorial',true)`;
  await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('youtube','channelId',${channel},${sourceId},'{"kind":"audit","reference":"synthetic"}')`;
- const input={reason:'Manual evidence',supplement:{channelId:channel,evidence:'Verified independently'}};
- await assert.rejects(importYoutubeResult(resultId,input,'youtube-import',tag()),/Manual identity/);
+ const input={sourceId,reason:'Explicit source'};
  await sql`UPDATE sources SET participation_mode='isolated',enabled=false WHERE id=${sourceId}`;
  await assert.rejects(importYoutubeResult(resultId,input,'youtube-import',tag()),/disabled/);
  await sql`UPDATE sources SET enabled=true WHERE id=${sourceId}`;
@@ -104,7 +103,7 @@ test('independent detail needs author evidence; manual author cannot inherit per
  // Search missing both video and channel accepts only explicit native original + evidence.
  operation='GC5SC5HS';parameters={searchQuery:'missing'};data={videos:[{title:'Missing identifiers'}]};const missing=await query();
  await assert.rejects(importYoutubeResult(Number(missing.results[0]!.id),{reason:'Bad original',supplement:{channelId:channel,url:'https://youtu.be/Abc123_-DEF',evidence:'x'}},'youtube-import',tag()));
- const otherId=randomUUID().replaceAll('-','').slice(0,11);const completed=await importYoutubeResult(Number(missing.results[0]!.id),{reason:'Verified missing original',supplement:{channelId:channel,url:`https://youtube.com/watch?v=${otherId}`,evidence:'Verified native original'}},'youtube-import',tag());assert.ok(completed!.articleId);
+ const otherId=randomUUID().replaceAll('-','').slice(0,11);const completed=await importYoutubeResult(Number(missing.results[0]!.id),{sourceId,reason:'Verified missing original',supplement:{channelId:channel,url:`https://youtube.com/watch?v=${otherId}`,evidence:'Verified native original'}},'youtube-import',tag());assert.ok(completed!.articleId);
  await assert.rejects(importYoutubeResult(Number(missing.results[1]!.id),{reason:'Summary'},'youtube-import',tag()),/summaries/);
 });
 test('legacy ownership conflicts roll back import source, binding and result relation',async()=>{
@@ -112,7 +111,9 @@ test('legacy ownership conflicts roll back import source, binding and result rel
  const id=randomUUID().replaceAll('-','').slice(0,11),channel='UC_'+tag(),owner=tag();await sql`INSERT INTO sources(id,name,kind) VALUES (${owner},'Synthetic legacy','external')`;
  for(const variant of ['a','b']){const address=`https://youtube.com/watch?v=${id}&token=${variant}`;await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES (${newArticleId()},${owner},${'url:'+address},${address},'Legacy conflict',now(),now())`;}
  operation='GC5SC5HS';parameters={searchQuery:'conflict'};data={videos:[{videoId:id,channelId:channel,title:'Conflict'}]};const q=await query();
- await assert.rejects(importYoutubeResult(Number(q.results[0]!.id),{reason:'Conflict proof'},'youtube-import',tag()),{code:'conflict'});
+ await assert.rejects(importYoutubeResult(Number(q.results[0]!.id),{sourceId:owner,reason:'Conflict proof'},'youtube-import',tag()),{code:'conflict'});
  assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='youtube' AND id_value=${channel}`).length,0);
  assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${q.results[0]!.id}`)[0]!.source_id,null);
 });
+
+async function makeWorkSource(){const id=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${id},'Synthetic work owner','rss','isolated',false)`;return id;}

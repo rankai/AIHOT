@@ -19,7 +19,7 @@ test("fixed work kinds reuse current per-item completeness and exclude anything 
   for (const result of nativeWorks) {
     assert.equal(selectableWorkResult(result), true, result.kind);
     assert.equal(selectableWorkResult({ ...result, articleId: "already" }), false, result.kind);
-    assert.equal(selectableWorkResult({ ...result, data: { ...result.data, identity: {} } }), false, `${result.kind} missing identity`);
+    assert.equal(selectableWorkResult({ ...result, data: { ...result.data, identity: {} } }), true, `${result.kind} optional author identity`);
     assert.equal(selectableWorkResult({ ...result, data: { ...result.data, url: null } }), false, `${result.kind} missing URL`);
   }
   for (const kind of ["shipinhao_work", "kuaishou_work", "qichezhijia_work", "dongchedi_work", "yiche_work", "baijiahao_work", "zhihu_work", "weibo_account", "weibo_trend", "query_summary", "result_expired", "result_attachment", "image", "video", "media_resource", "transcription", "x_account_rank"]) assert.equal(selectableWorkResult(work(20, kind)), false, kind);
@@ -28,7 +28,7 @@ test("fixed work kinds reuse current per-item completeness and exclude anything 
   const urlAuthor = { ...nativeWorks[2]!, data: { identity: {}, url: "https://mp.weixin.qq.com/s?__biz=received&mid=1&idx=1" } };
   assert.equal(selectableWorkResult(urlAuthor), true, "preserve existing WX URL identity evidence");
 });
-test("shared Weibo checks retain exact old inline semantics; X requires its existing full import gate", () => {
+test("shared Weibo and X checks preserve work evidence while author ID is optional", () => {
   assert.equal(selectableWorkResult(work(1)), true);
   assert.equal(workResultTitle(work(1, "weibo_work", { title: "已收标题", text: "正文" })), "已收标题");
   assert.equal(workResultTitle(work(1, "weibo_work", { title: "", record: { title: "记录标题", text: "记录正文" } })), "记录标题");
@@ -36,7 +36,7 @@ test("shared Weibo checks retain exact old inline semantics; X requires its exis
   assert.equal(workResultTitle(work(1, "weibo_work", { record: { text: "实收记录正文" } })), "实收记录正文");
   assert.equal(workResultTitle(work(1, "weibo_work", { text: " ", record: { content: "实收内容" } })), "实收内容");
   assert.equal(workResultTitle(work(1)), "作品");
-  for (const patch of [{ uid: null }, { opusUrl: null }, { opusId: null }]) assert.equal(selectableWorkResult(work(1, "weibo_work", patch)), false);
+  for (const patch of [{ opusUrl: null }, { opusId: null }]) assert.equal(selectableWorkResult(work(1, "weibo_work", patch)), false);
   assert.equal(weiboImportFields("weibo_work", { opusId: 1, uid: "received", url: "raw-original" }).canImport, true, "do not tighten existing per-item ID/URL rules in extraction");
   const record = { tweetId: "9007199254740993123", user: { userId: "123", username: "received" }, text: "正文", createdAt: "2026-10-21T00:00:00Z" };
   const search = work(2, "x_research_work", { platform: "x-research", operationId: "5K5EG87P", record });
@@ -73,11 +73,12 @@ test("navigation/unmount stops later commands while allowing the in-flight comma
 });
 
 const agentKeyWeibo = { provider: "agentkey", platform: "weibo", operationId: "TXQPVGJG", tool: "TikHub/fetch_search_all_api_v1_weibo_app_fetch_search_all_get", uid: "123", opusId: "900719925474099312345", opusUrl: "https://weibo.com/123/900719925474099312345", role: "status", urlSource: "derived-canonical-permalink" };
-test("AgentKey Weibo uses exact received identity and canonical numeric URL, without trusting old importable/missing hints", () => {
+test("AgentKey Weibo checks exact work and native URL evidence without requiring author ID or trusting old importable/missing hints", () => {
+  assert.equal(weiboImportFields("weibo_work", { ...agentKeyWeibo, uid: null }).canImport, true);
   const eligible = { ...agentKeyWeibo, importable: false, missing: ["old hint"] };
   assert.equal(weiboImportFields("weibo_work", eligible).canImport, true);
   assert.equal(selectableWorkResult(work(1, "weibo_work", eligible)), true);
-  for (const patch of [{ uid: null }, { uid: "requested-user" }, { opusId: 42 }, { opusId: "mBlogId" }, { opusUrl: "https://weibo.com/123/mBlogId" }, { opusUrl: "sinaweibo://detail?id=42" }, { role: "outer-status-unparsed-retweet" }, { tool: "other" }, { platform: "other" }, { operationId: "weibo.comments" }]) {
+  for (const patch of [{ uid: "requested-user" }, { opusId: 42 }, { opusId: "mBlogId" }, { opusUrl: "https://weibo.com/123/mBlogId" }, { opusUrl: "sinaweibo://detail?id=42" }, { role: "outer-status-unparsed-retweet" }, { tool: "other" }, { platform: "other" }, { operationId: "weibo.comments" }]) {
     const data = { ...agentKeyWeibo, ...patch, importable: true };
     assert.equal(weiboImportFields("weibo_work", data).canImport, false, JSON.stringify(patch));
     assert.equal(selectableWorkResult(work(1, "weibo_work", data)), false, JSON.stringify(patch));

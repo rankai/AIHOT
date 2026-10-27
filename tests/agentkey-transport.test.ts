@@ -101,7 +101,7 @@ test("unrecognized complete payload is returned for receipt storage and then fai
   assert.throws(() => parseDouyinSearch(outcome.response, { keyword: "x" }), /Unrecognized/);
   assert.ok(outcome.response);
   const noIdentity = parseDouyinSearch({ envelope: { provider: "TikHub", data: { code: 200, data: { code: 0, msg: "success", data: { hasMore: false, cursor: 12, itemList: [{ AwemeInfo: { AwemeId: Number(big) } }] } } } } }, { keyword: "x" });
-  assert.deepEqual(noIdentity.candidates[0].data.importBlockers, ["lossless_work_id_required", "lossless_author_id_required"]);
+  assert.deepEqual(noIdentity.candidates[0].data.importBlockers, ["lossless_work_id_required"]);
   const empty = parseDouyinSearch({ envelope: { provider: "TikHub", data: { code: 200, data: { code: 0, msg: "success", data: { hasMore: false, cursor: 0, itemList: [] } } } } }, { keyword: "x" });
   assert.equal(empty.summary.count, 0);
   assert.equal(empty.summary.stopReason, "upstream_no_more");

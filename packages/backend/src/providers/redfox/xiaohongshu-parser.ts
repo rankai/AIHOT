@@ -38,7 +38,6 @@ function work(operation:XiaohongshuOperation,raw:unknown,index:number):Xiaohongs
     const r=Work.parse(raw);record=r;title=r.workTitle??null;workId=r.workId??null;address=url(r.workUrl);if(r.accountUserid)identity.userId=r.accountUserid;
   }
   const missing:string[]=[];
-  if(!identity.userId)missing.push("缺少已确认作者 userId；展示号、昵称和 AI authorId 不授予归属");
   if(!workId)missing.push("缺少已确认作品 ID；AI photoId 不直接当原生笔记 ID");
   if(!address)missing.push("缺少已收原文地址，不能只凭作品 ID 导入");
   return {kind:"xiaohongshu_work",itemKey:`work:${index}`,data:{platform:"xiaohongshu",operationId:operation,title:title??"小红书作品",workId,url:address,identity,missing,record}};
@@ -64,7 +63,7 @@ export function parseXiaohongshu(operation:XiaohongshuOperation,raw:unknown,para
     const parsed=Research.parse(raw),{articles,latestHotArticles=[],hotTopics=[],relatedSearches=[],...metadata}=parsed;
     const results:XiaohongshuResult[]=[];
     for(const [role,rows] of [["keyword_match",articles],["provider_recommendation",latestHotArticles]] as const)for(const [i,record] of rows.entries()){
-      const address=url(record.shareInfoLink),missing:string[]=[];if(!record.id)missing.push("缺少原生笔记 ID");if(!record.authorId)missing.push("缺少已确认作者 ID");if(!address)missing.push("缺少已收原文地址");
+      const address=url(record.shareInfoLink),missing:string[]=[];if(!record.id)missing.push("缺少原生笔记 ID");if(!address)missing.push("缺少已收原文地址");
       results.push({kind:"xiaohongshu_work",itemKey:`${role}:${i}`,data:{platform:"xiaohongshu",operationId:operation,title:record.title??"小红书洞察笔记",workId:record.id??null,url:address,identity:record.authorId?{userId:record.authorId}:{},role,missing,record}});
     }
     results.push({kind:"xiaohongshu_research",itemKey:"research",data:{platform:"xiaohongshu",operationId:operation,title:"相关搜索与热门话题",record:{...metadata,hotTopics,relatedSearches},matchedCount:articles.length,recommendedCount:latestHotArticles.length}});

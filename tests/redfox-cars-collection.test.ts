@@ -16,7 +16,7 @@ before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));proc
 after(async()=>{await sql`UPDATE budgets SET per_minute=${budget.per_minute as number},per_hour=${budget.per_hour as number},per_day=${budget.per_day as number} WHERE service='redfox.collect'`;process.env.REDFOX_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
-async function start(operationId:string,parameters:Record<string,unknown>,pages=2,items=10){const sub=await createPlatformSubscription({name:tag(),operationId,parameters,enabled:true,limits:{pages,items,details:0}},'test',tag());return startPlatformSubscription(sub.id,'test',tag());}
+async function start(operationId:string,parameters:Record<string,unknown>,pages=2,items=10){const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),operationId,parameters,enabled:true,limits:{pages,items,details:0}},'test',tag());return startPlatformSubscription(sub.id,'test',tag());}
 async function finish(id:number){for(let i=0;i<30;i++){const r=await row(id);if(r.status!=='active')return r;await step(id);}throw new Error('Fixture exceeded bounded steps');}
 test('domain author conflict is pending inside importer savepoint, next item commits and run completes',async()=>{
  const userId=tag(),workId=String(Date.now());respond=()=>({account:{userId,displayName:'Synthetic author'},workList:[{workId:workId+'1',authorId:'conflicting-'+tag(),title:'Rejected author',articleType:7,articleTypeStr:'ugc_article',workUrl:`https://www.dcdapp.com/motor/m/feed/detail?group_id=${workId}1`},{workId:workId+'2',title:'Valid author',description:'<p>Complete body</p>',articleType:7,articleTypeStr:'ugc_article',workUrl:`https://www.dcdapp.com/motor/m/feed/detail?group_id=${workId}2`}]});
@@ -48,3 +48,6 @@ test('documented decimal pagination and raw Yiche timestamp advance without numb
  ['YGYYT0G0',{userId:tag(),timestamp:''},{workList:[{workId:tag(),title:'Synthetic',publishTime:' 1700000000000 '}]},'timestamp',' 1700000000000 '],
  ] as [string,Record<string,unknown>,unknown,string,string|number][]){respond=()=>response;const initial=requests.length,run=await start(op,parameters,2);assert.equal((await finish(run.id)).status,'completed',op);assert.equal(requests.length,initial+2,op);assert.equal(requests.at(-1)!.parameters[field],expected,op);if(op==='YGYYT0G0'){const summaries=await sql`SELECT data FROM operation_results WHERE run_id=${run.id} AND kind='query_summary' ORDER BY id`;assert.equal(summaries[1]!.data.nextParameters,null);}}
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Chosen work source','rss','isolated',false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

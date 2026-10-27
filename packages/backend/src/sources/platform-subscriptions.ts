@@ -29,7 +29,7 @@ import type { PlatformCollectionProviderPreflight } from "@aihot/contracts/redfo
 import { UnsupportedReplacement } from "./x-replacement.ts";
 import { stableJson,sha256 } from "../lib/ids.ts";
 import { audit } from "../admin/auth.ts";
-import { createSubscription } from "./subscriptions.ts";
+import { contentSubscription, createSubscription } from "./subscriptions.ts";
 import { createRun,StaleOperationError,type RunRow } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
 import { weiboOperations } from "../providers/redfox/weibo-contract.ts";
@@ -84,7 +84,7 @@ export function collectionContract(operationId:typeof collectionOperationIds[num
   if(operationId==="5K5EG87P")return {platform:"x-research" as const,schema:xResearchOperations["5K5EG87P"].schema};
   return {platform:"xiaohongshu" as const,schema:xiaohongshuOperations[operationId as keyof typeof xiaohongshuOperations].schema};
 }
-const Config=z.object({name:z.string().trim().min(1).max(100),provider:z.enum(platformCollectionProviderIds).default("redfox"),operationId:z.enum(collectionOperationIds),parameters:z.record(z.string(),z.unknown()),enabled:z.boolean().default(false),intervalMinutes:z.number().int().min(1).max(10080).optional(),enrichDetails:z.boolean().default(false),autoDownloadVideo:z.boolean().default(false),detailOperationId:CollectionDetailTarget.optional(),detailPage:z.number().int().safe().optional(),limits:z.object({pages:z.number().int().min(1).max(10),items:z.number().int().min(1).max(500),details:z.number().int().min(0).max(100)}).strict().default({pages:3,items:100,details:20})}).strict();
+const Config=z.object({sourceId:z.string().trim().min(1).max(200).optional(),name:z.string().trim().min(1).max(100),provider:z.enum(platformCollectionProviderIds).default("redfox"),operationId:z.enum(collectionOperationIds),parameters:z.record(z.string(),z.unknown()),enabled:z.boolean().default(false),intervalMinutes:z.number().int().min(1).max(10080).optional(),enrichDetails:z.boolean().default(false),autoDownloadVideo:z.boolean().default(false),detailOperationId:CollectionDetailTarget.optional(),detailPage:z.number().int().safe().optional(),limits:z.object({pages:z.number().int().min(1).max(10),items:z.number().int().min(1).max(500),details:z.number().int().min(0).max(100)}).strict().default({pages:3,items:100,details:20})}).strict();
 function validated(raw:unknown,onlyPlatform?:CollectionPlatform){
   const input=Config.parse(raw),contract=collectionContract(input.operationId);
   if(onlyPlatform && contract.platform!==onlyPlatform)throw new StaleOperationError("Operation is outside this platform endpoint");
@@ -113,7 +113,7 @@ function validated(raw:unknown,onlyPlatform?:CollectionPlatform){
   if(target==="LLCI8QTE"&&input.detailPage===undefined||target!=="LLCI8QTE"&&input.detailPage!==undefined)throw new StaleOperationError("Only LLCI8QTE requires an explicit detail page");
   return {...input,parameters,...(weibo&&target?{detailOperationId:target}:{}),...(x||snapshot||xhs||bili||weibo?{limits:{pages:1,items:input.limits.items,details:(xhs||biliEnrichment||weiboEnrichment)&&input.enrichDetails&&(!(bili||weibo)||(raw as {limits?:unknown}).limits!==undefined)?input.limits.details:0}}:{}),intervalMinutes:input.intervalMinutes??(contract.platform==="hot-research"?60:15)};
 }
-export async function listPlatformSubscriptions(onlyPlatform?:CollectionPlatform){const rows=await sql`SELECT s.id,s.provider,s.platform,s.config->>'name' AS name,s.config->>'operationId' AS "operationId",s.config->'parameters' AS parameters,s.config->'enrichDetails' AS "enrichDetails",COALESCE(s.config->'autoDownloadVideo','false'::jsonb) AS "autoDownloadVideo",s.config->>'detailOperationId' AS "detailOperationId",s.config->'detailPage' AS "detailPage",s.enabled,s.interval_minutes AS "intervalMinutes",s.limits,s.edit_version AS "editVersion",s.execution_version AS "executionVersion",s.next_run_at AS "nextRunAt",CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'status',r.status,'step',r.step_key,'waitReason',r.wait_reason) END AS "activeRun" FROM collection_subscriptions s LEFT JOIN operation_runs r ON r.id=s.active_run_id WHERE s.control_source_id IS NULL AND (${onlyPlatform??null}::text IS NULL OR s.platform=${onlyPlatform??null}) ORDER BY s.id DESC`;const summaries=await videoDownloadSummaries(rows.map(row=>Number(row.id)));for(const row of rows)row.videoDownloads=summaries.get(Number(row.id))??null;return rows;}
+export async function listPlatformSubscriptions(onlyPlatform?:CollectionPlatform){const rows=await sql`SELECT s.id,s.provider,s.platform,s.config->>'sourceId' AS "sourceId",owner.name AS "sourceName",s.config->>'name' AS name,s.config->>'operationId' AS "operationId",s.config->'parameters' AS parameters,s.config->'enrichDetails' AS "enrichDetails",COALESCE(s.config->'autoDownloadVideo','false'::jsonb) AS "autoDownloadVideo",s.config->>'detailOperationId' AS "detailOperationId",s.config->'detailPage' AS "detailPage",s.enabled,s.interval_minutes AS "intervalMinutes",s.limits,s.edit_version AS "editVersion",s.execution_version AS "executionVersion",s.next_run_at AS "nextRunAt",CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'status',r.status,'step',r.step_key,'waitReason',r.wait_reason) END AS "activeRun" FROM collection_subscriptions s LEFT JOIN sources owner ON owner.id=s.config->>'sourceId' LEFT JOIN operation_runs r ON r.id=s.active_run_id WHERE s.control_source_id IS NULL AND (${onlyPlatform??null}::text IS NULL OR s.platform=${onlyPlatform??null}) ORDER BY s.id DESC`;const summaries=await videoDownloadSummaries(rows.map(row=>Number(row.id)));for(const row of rows){row.videoDownloads=summaries.get(Number(row.id))??null;row.sourceRequired=contentSubscription({platform:row.platform,config:{operationId:row.operationId}});}return rows;}
 export async function createPlatformSubscription(raw:unknown,actor:string,key:unknown,onlyPlatform?:CollectionPlatform){
   const input=validated(raw,onlyPlatform),clientKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const creationKey=stableJson([actor,clientKey]),hash=sha256(stableJson(input));
@@ -122,7 +122,9 @@ export async function createPlatformSubscription(raw:unknown,actor:string,key:un
     const [existing]=await tx`SELECT id,edit_version,creation_input_hash FROM collection_subscriptions WHERE creation_command_key=${creationKey}`;
     if(existing){if(existing.creation_input_hash!==hash)throw new StaleOperationError("Creation key reused with different subscription input");return {id:existing.id,editVersion:existing.edit_version};}
     const platform=collectionContract(input.operationId).platform,execution=collectionExecution(input.provider,platform,input.operationId);
-    const id=await createSubscription(tx,{provider:input.provider,platform,operationKey:execution.operationKey,contractVersion:1,config:{name:input.name,operationId:input.operationId,parameters:input.parameters,enrichDetails:input.enrichDetails,autoDownloadVideo:input.autoDownloadVideo,...(input.detailOperationId?{detailOperationId:input.detailOperationId}:{}),...(input.detailPage!==undefined?{detailPage:input.detailPage}:{})},intervalMinutes:input.intervalMinutes,enabled:input.enabled,limits:input.limits});
+    if(contentSubscription({platform,config:input})&&!input.sourceId)throw new StaleOperationError("Subscription requires an associated source");
+    if(input.sourceId){const [source]=await tx`SELECT id FROM sources WHERE id=${input.sourceId} FOR SHARE`;if(!source)throw new StaleOperationError("Associated source not found");}
+    const id=await createSubscription(tx,{provider:input.provider,platform,operationKey:execution.operationKey,contractVersion:1,config:{...(input.sourceId?{sourceId:input.sourceId}:{}),name:input.name,operationId:input.operationId,parameters:input.parameters,enrichDetails:input.enrichDetails,autoDownloadVideo:input.autoDownloadVideo,...(input.detailOperationId?{detailOperationId:input.detailOperationId}:{}),...(input.detailPage!==undefined?{detailPage:input.detailPage}:{})},intervalMinutes:input.intervalMinutes,enabled:input.enabled,limits:input.limits});
     await tx`UPDATE collection_subscriptions SET next_run_at=${input.enabled?new Date():null},creation_command_key=${creationKey},creation_input_hash=${hash} WHERE id=${id}`;
     await audit(actor,"subscription.create",`subscription:${id}`,null,null,input,undefined,tx);return {id,editVersion:1};
   });
@@ -137,7 +139,11 @@ export async function updatePlatformSubscription(id:number,raw:unknown,actor:str
   if(sub.platform!==collectionContract(input.operationId).platform)throw new StaleOperationError("Subscription platform cannot change");
   const execution=collectionExecution(input.provider,sub.platform,input.operationId);
   if(sub.operation_key!==execution.operationKey)throw new StaleOperationError("Subscription execution contract changed");
-  const config={name:input.name,operationId:input.operationId,parameters:input.parameters,enrichDetails:input.enrichDetails,autoDownloadVideo:input.autoDownloadVideo,...(input.detailOperationId?{detailOperationId:input.detailOperationId}:{}),...(input.detailPage!==undefined?{detailPage:input.detailPage}:{})};
+  if(sub.config.sourceId&&input.sourceId&&sub.config.sourceId!==input.sourceId)throw new StaleOperationError("Subscription source cannot change");
+  const sourceId=sub.config.sourceId??input.sourceId;
+  if(input.enabled&&!sourceId&&contentSubscription({platform:sub.platform,config:input}))throw new StaleOperationError("Subscription requires an associated source");
+  if(sourceId){const [source]=await tx`SELECT id FROM sources WHERE id=${sourceId} FOR SHARE`;if(!source)throw new StaleOperationError("Associated source not found");}
+  const config={...(sourceId?{sourceId}:{}),name:input.name,operationId:input.operationId,parameters:input.parameters,enrichDetails:input.enrichDetails,autoDownloadVideo:input.autoDownloadVideo,...(input.detailOperationId?{detailOperationId:input.detailOperationId}:{}),...(input.detailPage!==undefined?{detailPage:input.detailPage}:{})};
   const changed=stableJson(executionConfig(sub.config))!==stableJson(executionConfig(config)) || stableJson(sub.limits)!==stableJson(input.limits) || sub.enabled!==input.enabled;
   if(changed)await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription execution configuration changed',next_attempt_at=NULL,job_id=NULL WHERE subscription_id=${id} AND operation_key='subscription.video.download' AND status NOT IN ('completed','failed')`;
   if(changed && sub.active_run_id)await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription execution configuration changed',next_attempt_at=NULL WHERE id=${sub.active_run_id} AND status NOT IN ('completed','failed')`;
@@ -301,7 +307,8 @@ export async function startPlatformSubscription(id:number,actor:string,key:unkno
   const execution=collectionExecution(sub.provider,sub.platform,sub.config.operationId);
   if(sub.operation_key!==execution.operationKey)throw new StaleOperationError("Subscription execution contract changed");
   const parameters=sub.platform==="hot-research"?hotResearchDayParameters(HotResearchOperationId.parse(sub.config.operationId),sub.config.parameters,new Date()):sub.config.parameters;
-  const run=await createRun(tx,{actor,commandKey,provider:sub.provider,operationKey:sub.operation_key,contractVersion:1,subscriptionIds:[id],stepKey:execution.stepKey,input:{...(sub.provider==="agentkey"?{tool:agentKeyOperation(sub.config.operationId)!.route.tool,upstream:"TikHub"}:{}),commandIntent:intent,mode:"collection",platform:sub.platform,...sub.config,parameters,window:`subscription:${id}:${commandKey}`},limits:{...sub.limits,retries:3}});
+  const {sourceId:_sourceId,...runConfig}=sub.config;
+  const run=await createRun(tx,{actor,commandKey,provider:sub.provider,operationKey:sub.operation_key,contractVersion:1,subscriptionIds:[id],stepKey:execution.stepKey,input:{...(sub.provider==="agentkey"?{tool:agentKeyOperation(sub.config.operationId)!.route.tool,upstream:"TikHub"}:{}),commandIntent:intent,mode:"collection",platform:sub.platform,...runConfig,parameters,window:`subscription:${id}:${commandKey}`},limits:{...sub.limits,retries:3}});
   await queueOperationStep(tx,run.id);return run;
 });}
 export async function schedulePlatformSubscriptions(){
@@ -310,7 +317,11 @@ export async function schedulePlatformSubscriptions(){
   if(unknown)throw new Error(`Unsupported collection provider: ${unknown.provider} (subscription ${unknown.id})`);
   const providers=platformCollectionProviderIds.filter(provider=>provider==="agentkey"?process.env.AGENTKEY_CALLS_ENABLED==="true":process.env.REDFOX_CALLS_ENABLED==="true");
   if(!providers.length)return 0;
-  const rows=await sql`SELECT id,provider,platform,next_run_at FROM collection_subscriptions WHERE control_source_id IS NULL AND enabled AND active_run_id IS NULL AND next_run_at<=now() AND provider IN ${sql(providers)} ORDER BY next_run_at,id LIMIT 100`;
+  const researchOperations=collectionOperationIds.filter(operationId=>!contentSubscription({config:{operationId}}));
+  const rows=await sql`SELECT s.id,s.provider,s.platform,s.next_run_at FROM collection_subscriptions s LEFT JOIN sources owner ON owner.id=s.config->>'sourceId'
+    WHERE s.control_source_id IS NULL AND s.enabled AND s.active_run_id IS NULL AND s.next_run_at<=now() AND s.provider IN ${sql(providers)}
+      AND (owner.enabled OR (NULLIF(s.config->>'sourceId','') IS NULL AND s.config->>'operationId' IN ${sql(researchOperations)}))
+    ORDER BY s.next_run_at,s.id LIMIT 100`;
   let count=0;
   for(const sub of rows){
     try{await startPlatformSubscription(sub.id,"schedule",`${sub.platform}:${sub.id}:${sub.next_run_at.toISOString()}`);count++;}

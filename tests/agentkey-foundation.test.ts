@@ -167,7 +167,7 @@ test("structured numeric literals retain original identity, while already rounde
   assert.equal((parseLosslessJson(`{"id":${big}}`) as { id: string }).id, big);
   const parsed = parseDouyinSearch({ envelope: envelope([douyinItem({ AwemeId: Number(big), Author: {}, Video: {} })]) }, { keyword: "x" });
   assert.ok(parsed.candidates[0].data.importBlockers.includes("lossless_work_id_required"));
-  assert.ok(parsed.candidates[0].data.importBlockers.includes("lossless_author_id_required"));
+  assert.equal(parsed.candidates[0].data.importBlockers.includes("lossless_author_id_required"),false);
   assert.equal(parsed.candidates[0].data.aweme_id, undefined);
 });
 
@@ -572,7 +572,9 @@ test("APP account query uses the fixed tool and persists linked importable recei
     const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;
     assert.ok(result.data.querySummaryId);
     assert.equal(server.requests.find(r=>r.body.method==="tools/call")?.body.params.arguments.name,douyinAccountPostsRoute.tool);
-    const imported=await importDouyinResult(result.id,{reason:"Synthetic APP query test"},actor,tag());
+    const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${sourceId},'Selected APP owner','rss','isolated',false)`;
+    await sql`UPDATE operation_results SET data=data||'{"importBlockers":["lossless_author_id_required"]}'::jsonb WHERE id=${result.id}`;
+    const imported=await importDouyinResult(result.id,{sourceId,reason:"Synthetic APP query test"},actor,tag());
     assert.ok(imported?.articleId);
     const [source]=await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${imported!.sourceId}`;
     assert.equal(source.participation_mode,"isolated");assert.equal(source.site_fulltext,false);

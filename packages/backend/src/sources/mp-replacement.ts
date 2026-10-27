@@ -1,3 +1,4 @@
+import {wechatArticlesInput} from "../providers/agentkey/wechat-contract.ts";
 import {videoDownloadCapability} from "./subscription-video-candidates.ts";
 import {agentKeyWechatEvidence} from "../providers/agentkey/wechat-evidence.ts";
 import { z } from "zod";
@@ -63,12 +64,18 @@ export async function preflightMpReplacement(sourceId:string,target:"redfox"|"da
   const bad=unsupportedConfig("mp_account",config);
   check("configuration",validConfig&&!bad.length&&[config.ghid,config.wxid].some(v=>typeof v==="string"&&v.length>0),!validConfig?"配置不是有效对象，请先修正":bad.length?`不支持的配置：${bad.join("、")}`:"保留 ghid/wxid/nickname，不改变原周期");
   check("credentials",!!credential("collectors",target==="redfox"?"REDFOX_API_KEY":target==="agentkey"?"AGENTKEY_API_KEY":"DAJIALA_KEY"),"需服务端凭证；预检不向供应商发请求","server configuration","unavailable");
-  const identity=target!=="dajiala"?await accountMapping(db,sourceId,config):{wxId:undefined,bizInfo:undefined,account:undefined,matches:false};
+  const configuredGh=typeof config.ghid==="string"&&/^gh_[A-Za-z0-9]+$/.test(config.ghid)?config.ghid:undefined;
+  const directParameters=selected==="premium"?{account:config.wxid}:configuredGh?{wxId:configuredGh}:{account:config.wxid};
+  const directWechat=wechatArticlesInput.safeParse({username:typeof config.ghid==="string"&&config.ghid.trim()?config.ghid:config.wxid});
+  const directRedfox=wechatOperations[mpOperations[selected].list].schema.safeParse(directParameters);
+  const direct=target==="agentkey"?directWechat.success:target==="redfox"&&directRedfox.success;
+  const fallback=!direct&&target!=="dajiala"?await accountMapping(db,sourceId,config):null;
+  const identity=direct?{wxId:configuredGh,bizInfo:undefined,account:typeof config.wxid==="string"?config.wxid:undefined}:fallback?.matches?fallback:{wxId:undefined,bizInfo:undefined,account:undefined};
+  const fallbackParameters=selected==="premium"?{account:identity.account}:identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)?{wxId:identity.wxId}:{bizInfo:identity.bizInfo};
+  const checkedParameters=wechatOperations[mpOperations[selected].list].schema.safeParse(direct?directParameters:fallbackParameters);
+  const checkedWechat=directWechat.success?directWechat:wechatArticlesInput.safeParse({username:identity.wxId??identity.account});
   if(target!=="dajiala"){
-    check("identity",identity.matches&&!!(identity.wxId||identity.bizInfo),"需已有同源稳定账号绑定；有 ghid 时必须匹配 wxId，无 ghid 时须由已收账号记录核实 wxid","source_account_bindings");
-    if(target==="agentkey")check("username",!!(identity.wxId||identity.account),"AgentKey 文章列表需要已收且匹配同源的 username；不能由 bizInfo 推造","operation_results");
-    if(target==="redfox"&&selected==="wide")check("redfox_identifier",!!(identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)||identity.bizInfo),"Redfox 仅接受其已确认的 gh ID 格式或 bizInfo；不剥离 @app","operation_results");
-    if(target==="redfox"&&selected==="premium")check("account",!!identity.account,"优质库仅接受已收并绑定同源的展示 account；不能用 ghid 或昵称替代","operation_results");
+    check("identity",target==="agentkey"?checkedWechat.success:checkedParameters.success,"账号定位参数必须满足所选接口；不额外付费绑定，不以昵称代替账号","subscription.config");
     for(const op of target==="redfox"?Object.values(mpOperations[selected]).slice(0,2):[]){
       const [r]=await db`SELECT response FROM receipts WHERE service LIKE 'redfox.%' AND model=${op} AND request->>'base'=${redfoxBaseUrl()} AND response IS NOT NULL ORDER BY received_at DESC NULLS LAST,id DESC LIMIT 1`;
       let code:unknown;try{code=(parseRedfoxJson(r?.response?.body??"null") as {code?:unknown}|null)?.code;}catch{code=undefined;}
@@ -76,10 +83,10 @@ export async function preflightMpReplacement(sourceId:string,target:"redfox"|"da
       checks.push({key:`permission:${op}`,source:"current endpoint latest receipt",conclusion:denied?"unavailable":success?"supported":"unverified",evidence:denied?"此接口最近已收响应拒绝访问":success?"此接口最近已收响应成功":"尚未核实此接口权限；不会额外付费探测"});
     }
   }
-  const parameters=selected==="premium"?{account:identity.account??null}:identity.wxId&&/^gh_[A-Za-z0-9]+$/.test(identity.wxId)?{wxId:identity.wxId}:{bizInfo:identity.bizInfo??null};
+  const parameters=checkedParameters.success?checkedParameters.data:directParameters;
   check("videoDownload",true,videoDownloadCapability("wechat",target,""),"subscription.config");
   return {sourceId,target,library:target==="redfox"?selected:null,mappingVersion:MP_MAPPING_VERSION,sourceVersion:new Date(s.updated_at).toISOString(),subscriptionVersion:s.edit_version??null,supported:checks.every(c=>["supported","unverified"].includes(c.conclusion)),checks,
-    mapping:target==="agentkey"?{operation:"agentkey.wechat_mp.account_articles",parameters:{username:identity.wxId??identity.account??null,offset:"",page_size:20,item_show_type:0,raw:false},identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:target==="redfox"?{operation:"redfox.wechat.collection",...mpOperations[selected],parameters,identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:{operation:"mp.history",parameters:{ghid:config.ghid??config.wxid}},
+    mapping:target==="agentkey"?{operation:"agentkey.wechat_mp.account_articles",parameters:checkedWechat.success?checkedWechat.data:{username:null,offset:"",page_size:20,item_show_type:0,raw:false},identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:target==="redfox"?{operation:"redfox.wechat.collection",...mpOperations[selected],parameters,identity:{wxId:identity.wxId??null,bizInfo:identity.bizInfo??null}}:{operation:"mp.history",parameters:{ghid:config.ghid??config.wxid}},
     impact:{...(target!=="dajiala"?{firstImport:!s.effective_progress?.lastCheckedAt,firstImportNote:!s.effective_progress?.lastCheckedAt?"最多8条，全部标记历史回填；不按无时区日期筛选7天范围":null}:{}),delay:target==="redfox"?"T+1":target==="agentkey"?"TikHub 刷新时效未知":null,intervalMinutes:s.effective_interval??s.interval_minutes,activeRunId:s.active_run_id??null,sourceId,subscriptionId:s.subscription_id??null,note:"保留原材料与权限；切换使旧轮失去提交资格，供应商/库的分页与 UUID 不跨库复用"}};
 }
 const Switch=z.object({target:z.enum(["redfox","dajiala","agentkey"]),library:MpLibrary.default("wide"),sourceVersion:z.string().datetime(),subscriptionVersion:z.number().int(),mappingVersion:z.number().int(),reason:z.string().min(1).max(500)}).strict();

@@ -1,3 +1,4 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {agentKeyWeiboEvidence} from "../agentkey/weibo-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -41,19 +42,31 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
     if(origin?.identity.uid&&!data.uid)data.uid=origin.identity.uid;
     if(data.uid && input.supplement?.uid && data.uid!==input.supplement.uid)throw new StaleOperationError("Confirmed author UID cannot be replaced");
     const uid=data.uid??input.supplement?.uid;
+    let sourceId:string,source;
+    if(account){
     if(!uid)throw new UnsupportedReplacement("A verified author UID is required");
     if(account && input.supplement)throw new UnsupportedReplacement("Account binding requires the received UID");
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`weibo:account:${uid}`},0))`;
     const [binding]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='weibo' AND id_kind='uid' AND id_value=${uid}`;
-    const sourceId=input.sourceId??binding?.source_id??`weibo-${sha256(uid).slice(0,24)}`;
+    sourceId=input.sourceId??binding?.source_id??`weibo-${sha256(uid).slice(0,24)}`;
     if(binding && binding.source_id!==sourceId)throw new StaleOperationError("Weibo UID already belongs to another source");
-    if(!account && input.sourceId && binding?.source_id!==input.sourceId)throw new UnsupportedReplacement("Work imports use the confirmed author binding, not an arbitrary source");
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
+    [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
     if(source && source.kind!=="external")throw new UnsupportedReplacement("Weibo accounts require an external source");
     if(source && !data.uid && source.participation_mode!=="isolated")throw new UnsupportedReplacement("A manually supplied UID cannot inherit an existing source's publication permissions");
     if(!source && input.sourceId)return null;
     const others=await tx`SELECT id_value FROM source_account_bindings WHERE platform='weibo' AND source_id=${sourceId}`;
     if(others.some(x=>x.id_value!==uid))throw new StaleOperationError("Source is already bound to another Weibo UID");
+    }else{
+      if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.weiboImport?.key===commandKey){
+        const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+        requireLiveResult(completed,snapshot.kind);
+        if(!completed!.article_id||!completed!.source_id||completed!.provenance?.weiboImport?.key!==commandKey||stableJson(completed!.provenance.weiboImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+        return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+      }
+      source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin?{resultId:origin.resultId,provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+      if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+      sourceId=source.id;
+    }
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null};
@@ -63,12 +76,11 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
       if(result!.source_id!==sourceId || (previous && stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with a different target or evidence");
       return {resultId,sourceId,articleId:result!.article_id};
     }
-    if(!source){
+    if(account&&!source){
       [source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at)
         VALUES (${sourceId},${String(data.nickname??data.name??`微博 ${uid}`).slice(0,200)},'external',${tx.json({platform:"weibo",uid})},'isolated',false,false,true,NULL) RETURNING *`;
     }
-    if(!account && !source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    try{await bindSourceAccount(tx,{platform:"weibo",idKind:"uid",idValue:uid,sourceId,evidence:{kind:"result",reference:String(resultId)}});}catch(e){if(e instanceof Error && e.message==="Account identity already belongs to another source")throw new StaleOperationError(e.message);throw e;}
+    if(account)try{await bindSourceAccount(tx,{platform:"weibo",idKind:"uid",idValue:uid!,sourceId,evidence:{kind:"result",reference:String(resultId)}});}catch(e){if(e instanceof Error && e.message==="Account identity already belongs to another source")throw new StaleOperationError(e.message);throw e;}
     let articleId:string|null=null;
     if(!account){
       const work=WeiboWork.parse(data),originalUrl=work.opusUrl||work.url;
@@ -77,7 +89,7 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
       const url=originalUrl??input.supplement?.url;
       if(!work.opusId || !url)throw new UnsupportedReplacement("Work ID and verified original URL are required");
       const parsed=new URL(url);const parts=parsed.pathname.split("/").filter(Boolean);
-      if(!["http:","https:"].includes(parsed.protocol) || !["weibo.com","www.weibo.com"].includes(parsed.hostname) || parsed.username || parsed.password || parts.length!==2 || parts[0]!==uid || ![work.opusId,confirmedShortId].includes(parts[1]))throw new UnsupportedReplacement("Original URL does not verify the work and author identities");
+      if(!["http:","https:"].includes(parsed.protocol) || !["weibo.com","www.weibo.com"].includes(parsed.hostname) || parsed.username || parsed.password || parts.length!==2 || (uid&&parts[0]!==uid) || ![work.opusId,confirmedShortId].includes(parts[1]))throw new UnsupportedReplacement("Original URL does not verify the work and author identities");
       let discoveredAt=new Date(verified?.sourceDiscoveredAt??origin?.discoveredAt??snapshot.created_at);
       const pageResultId=result!.provenance?.sourcePageResultId;
       if(!collected&&snapshot.operation_key==="redfox.weibo.collection" && pageResultId!==undefined){
@@ -94,7 +106,7 @@ export async function importWeiboResult(resultId:number,raw:unknown,actor:string
       const bodyText=agentkey&&received.isLongText!==false?null:work.text;
       const hasVideo=!agentkey&&(operation==="TXQPVGJG"&&work.type==="video"||operation==="API_1789098514899"&&!!mediaUrl(work.videoUrl));
       const material=await upsertMaterial({sourceId,url,identityKey:`weibo:opusId:${work.opusId}`,title:(work.text??"微博作品").slice(0,200),author:work.nickname,bodyUpdate:origin||verified?.detail?"fill-missing":undefined,bodyText,bodyStatus:bodyText?"ok":"pending",publishedAt,discoveredAt,backfill,media:weiboMedia(work,hasVideo),via:"import",raw:{provider:agentkey?"agentkey":"redfox",resultId,publishTime:work.publishTime??null,...(agentkey?{upstream:"TikHub",operationId:executionInput.operationId,tool:executionInput.tool,urlSource:received.urlSource,isLongText:received.isLongText??null,textScope:received.textScope,receivedText:work.text??null}: {})},
-        confirmedIdentity:confirmedShortId?{platform:"weibo",opusId:work.opusId,mblogid:confirmedShortId,uid,evidence:{kind:"result",reference:String(resultId)}}:undefined},tx);
+        confirmedIdentity:confirmedShortId&&uid?{platform:"weibo",opusId:work.opusId,mblogid:confirmedShortId,uid,evidence:{kind:"result",reference:String(resultId)}}:undefined},tx);
       articleId=material.articleId;
       if(material.created || material.revised)await queueProcessing(articleId,{db:tx});
     }

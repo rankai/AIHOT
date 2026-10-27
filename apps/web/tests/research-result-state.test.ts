@@ -26,7 +26,7 @@ test("research result renders pending facts only before real linkage, while reta
       try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); }
     };
     const pending = render(result);
-    assert(pending.includes("本地处理待核实原因")); assert(pending.includes("需要核实作者原文关系"));
+    assert(pending.includes("历史处理提示")); assert(pending.includes("需要核实作者原文关系"));
     assert(pending.includes("同页已收账号上下文（导入时由后台核实归属）")); assert(pending.includes("900719925474099312345"));
     for (const association of [{ sourceId: "bound-author" }, { articleId: "existing-material" }, { sourceId: "bound-author", articleId: "existing-material" }]) {
       const linked = { ...result, ...association };

@@ -43,10 +43,10 @@ test("account binding needs received numeric userId; usernames, display names an
   assert.deepEqual(instagramImportSupplement(fields, draft), {});
   const missing = instagramImportFields("instagram_account", { identity: {}, record: { userId, username: "locator", fullName: "display" } });
   assert.equal(missing.canImport, false);
-  assert.equal(missing.needsIdentity, false);
+  assert.equal(Object.hasOwn(missing, "needsIdentity"), false);
   assert.ok(instagramImportSupplement(missing, draft).error);
   const work = instagramImportFields("instagram_work", { identity: {}, workId: code, url, record: { mediaId: userId, postId: userId, user: { id: userId }, carouselItems: [{ id: userId }] } });
-  assert.equal(work.needsIdentity, true);
+  assert.equal(Object.hasOwn(work, "needsIdentity"), false);
   assert.equal(instagramImportFields("query_summary", { identity: { userId }, workId: code, url }).canImport, false);
 });
 
@@ -61,12 +61,12 @@ test("existing external candidates must remain in the current idle result page a
 
 test("complete received identity and original are never emitted as user overrides", () => {
   const fields = instagramImportFields("instagram_work", { workId: code, url, identity: { userId } });
-  assert.deepEqual(instagramImportSupplement(fields, { url: "https://example.com/replace", userId: "other", evidence: "changed" }), {});
+  assert.deepEqual(instagramImportSupplement(fields, { url: "https://example.com/replace", evidence: "changed" }), {});
 });
 
 test("missing original needs matching native shortcode and evidence, while no received shortcode can be confirmed by a verified native URL", () => {
   const fields = instagramImportFields("instagram_work", { workId: code, identity: { userId } });
-  assert.equal(fields.needsIdentity, false);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.ok(instagramImportSupplement(fields, { ...draft, url: url.replace(code, "different-code") }).error);
   assert.ok(instagramImportSupplement(fields, { ...draft, evidence: " " }).error);
   assert.deepEqual(instagramImportSupplement(fields, draft), { supplement: { url, evidence: draft.evidence } });
@@ -74,12 +74,13 @@ test("missing original needs matching native shortcode and evidence, while no re
   assert.deepEqual(instagramImportSupplement(noCode, draft), { supplement: { url, evidence: draft.evidence } });
 });
 
-test("missing work author accepts only a complete numeric userId plus evidence", () => {
-  const fields = instagramImportFields("instagram_work", { workId: code, url, identity: {} });
-  for (const value of ["", "@username", "display name", "12.5", "-1"]) assert.ok(instagramImportSupplement(fields, { ...draft, userId: value }).error);
-  assert.ok(instagramImportSupplement(fields, { ...draft, evidence: "" }).error);
-  assert.deepEqual(instagramImportSupplement(fields, draft), { supplement: { userId, evidence: draft.evidence } });
-  assert.deepEqual(instagramImportSupplement(instagramImportFields("instagram_work", { identity: {} }), draft), { supplement: { userId, url, evidence: draft.evidence } });
+test("work import without author ID needs no author supplement or evidence; only missing original is supplemented", () => {
+  const fields = instagramImportFields("instagram_work", { identity: {}, workId: code, url });
+  assert.equal(fields.canImport, true); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+  assert.deepEqual(instagramImportSupplement(fields, { url: "", evidence: "" }), {});
+  const noOriginal = instagramImportFields("instagram_work", { identity: {}, workId: code });
+  assert.ok(instagramImportSupplement(noOriginal, { url, evidence: "" }).error);
+  assert.deepEqual(instagramImportSupplement(noOriginal, { url, evidence: draft.evidence }), { supplement: { url, evidence: draft.evidence } });
 });
 
 test("detail lookup whitelists only received shortcode and actual source result PK, regardless of missing author", () => {
