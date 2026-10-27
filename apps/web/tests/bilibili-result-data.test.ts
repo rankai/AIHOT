@@ -41,7 +41,7 @@ test("account imports require received MID, never a raw nickname or manually sup
   assert.deepEqual(bilibiliImportSupplement(account, draft), {});
   const missing = bilibiliImportFields("bilibili_account", { identity: {}, record: { mid, name: "name" } });
   assert.equal(missing.canImport, false);
-  assert.equal(missing.needsIdentity, false);
+  assert.equal(Object.hasOwn(missing, "needsIdentity"), false);
   assert.ok(bilibiliImportSupplement(missing, draft).error);
   assert.equal(bilibiliImportFields("query_summary", { identity: { mid }, workId: bv, url }).canImport, false);
 });
@@ -49,29 +49,29 @@ test("account imports require received MID, never a raw nickname or manually sup
 test("work author uses the verified identity DTO while cover and outer account context do not fill missing identity", () => {
   const missing = bilibiliImportFields("bilibili_work", { identity: {}, workId: null, url: null, accountMid: mid, record: { authorId: mid, picUrl: url, author: "name" } });
   assert.equal(missing.mid, null);
-  assert.equal(missing.needsIdentity, true);
+  assert.equal(Object.hasOwn(missing, "needsIdentity"), false);
   assert.equal(missing.needsUrl, true, "a cover is not an original URL even when it looks like a BV link");
   const received = bilibiliImportFields("bilibili_work", { identity: { mid }, workId: bv, url, accountMid: mid });
-  assert.equal(received.needsIdentity, false);
-  assert.deepEqual(bilibiliImportSupplement(received, { mid: "other", url: "https://example.com/replace", evidence: "changed" }), {}, "received fields are not sent as overrides");
+  assert.equal(Object.hasOwn(received, "needsIdentity"), false);
+  assert.deepEqual(bilibiliImportSupplement(received, { url: "https://example.com/replace", evidence: "changed" }), {}, "received fields are not sent as overrides");
 });
 
 test("missing original requires native BV agreement and evidence, then accepts a corrected draft", () => {
   const fields = bilibiliImportFields("bilibili_work", { identity: { mid }, workId: bv });
-  assert.equal(fields.needsIdentity, false);
+  assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
   assert.ok(bilibiliImportSupplement(fields, { ...draft, url: url.replace(bv, "BV1wE7P6bESL") }).error);
   assert.ok(bilibiliImportSupplement(fields, { ...draft, url: "https://b23.tv/slug" }).error);
   assert.ok(bilibiliImportSupplement(fields, { ...draft, evidence: " " }).error);
   assert.deepEqual(bilibiliImportSupplement(fields, draft), { supplement: { url, evidence: draft.evidence } });
 });
 
-test("missing author accepts an unrounded decimal MID with evidence, and only emits fields actually missing", () => {
+test("work import without author ID needs no author supplement or evidence; only missing original is supplemented", () => {
   const fields = bilibiliImportFields("bilibili_work", { identity: {}, workId: bv, url });
-  for (const invalid of ["", "-1", "12.3", "nickname"]) assert.ok(bilibiliImportSupplement(fields, { ...draft, mid: invalid }).error);
-  assert.ok(bilibiliImportSupplement(fields, { ...draft, evidence: "" }).error);
-  assert.deepEqual(bilibiliImportSupplement(fields, draft), { supplement: { mid, evidence: draft.evidence } });
-  const both = bilibiliImportFields("bilibili_work", { identity: {}, workId: null });
-  assert.deepEqual(bilibiliImportSupplement(both, draft), { supplement: { mid, url, evidence: draft.evidence } });
+  assert.equal(fields.canImport, true); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+  assert.deepEqual(bilibiliImportSupplement(fields, { url: "", evidence: "" }), {});
+  const noOriginal = bilibiliImportFields("bilibili_work", { identity: {}, workId: bv });
+  assert.ok(bilibiliImportSupplement(noOriginal, { url, evidence: "" }).error);
+  assert.deepEqual(bilibiliImportSupplement(noOriginal, { url, evidence: draft.evidence }), { supplement: { url, evidence: draft.evidence } });
 });
 
 test("search page remains string while account-list page is integer; false, size limit and large MID survive forms", () => {
@@ -91,13 +91,14 @@ test("search page remains string while account-list page is integer; false, size
 });
 
 
-test("AgentKey requires verified detail identity and never supplements lists or recommendations", () => {
+test("AgentKey requires verified detail work evidence and never supplements lists or recommendations", () => {
   const full = { provider: "agentkey", platform: "bilibili", operationId: "TIN1NMTZ", workId: "BV1234567890", avId: "321", url: "https://www.bilibili.com/video/BV1234567890", identity: { mid: "123" } };
   assert.equal(bilibiliImportFields("bilibili_work", full).canImport, true);
-  for (const data of [{ ...full, operationId: "LEN9QXR3" }, { ...full, role: "provider_recommendation" }, { ...full, identity: {} }, { ...full, url: null }]) {
+  assert.equal(bilibiliImportFields("bilibili_work", { ...full, identity: {} }).canImport, true);
+  for (const data of [{ ...full, operationId: "LEN9QXR3" }, { ...full, role: "provider_recommendation" }, { ...full, url: null }]) {
     const fields = bilibiliImportFields("bilibili_work", data, full.url);
-    assert.equal(fields.canImport, false); assert.equal(fields.needsUrl, false); assert.equal(fields.needsIdentity, false);
-    assert(bilibiliImportSupplement(fields, { mid: "123", url: full.url, evidence: "manual" }).error);
+    assert.equal(fields.canImport, false); assert.equal(fields.needsUrl, false); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+    assert(bilibiliImportSupplement(fields, { url: full.url, evidence: "manual" }).error);
   }
   assert.equal(bilibiliImportFields("bilibili_account", { provider: "agentkey", operationId: "EH53TOT7", identity: { mid: "123" } }).canImport, true);
 });

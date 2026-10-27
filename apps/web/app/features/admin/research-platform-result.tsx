@@ -33,7 +33,7 @@ export function ResearchPlatformResult({ result: r }: { result: OperationResult 
       {links.length > 0 && <div className="space-y-2"><p className="text-[12px] text-ink-3">实际收到的链接字段（只提供链接，不主动加载或下载）</p>{links.map(item => <div key={item.key} className="min-w-0 text-[12px]"><p className="text-ink-4">{item.label} · {item.role}</p>{item.url ? <a className="break-all text-accent" href={item.url} target="_blank" rel="noreferrer">{researchFactText(item.value)} ↗</a> : <p className="break-all text-ink-3">{researchFactText(item.value)}（未生成链接）</p>}</div>)}</div>}
       <p className="text-[12px] text-ink-4">时间按字段原值展示；未说明的单位、相对日期或时区不换算为今天，不把查询发现时间当作发表时间。请求参数及 requestedWorkId 不补作收到的作者身份。</p>
       {missing.length > 0 && <div><p className="mb-1 text-[12px] text-ink-3">上游缺项与待核实事实</p><ul className="space-y-1 rounded-control bg-amber/10 p-3 text-[12.5px] text-amber">{missing.map(item => <li key={item}>{item}</li>)}</ul></div>}
-      {!r.articleId && !r.sourceId && Object.hasOwn(r.data, "pendingReason") && <div className="text-[12.5px] text-amber"><p>本地处理待核实原因</p><p className="whitespace-pre-wrap break-all">{researchFactText(r.data.pendingReason)}</p></div>}
+      {!r.articleId && !r.sourceId && Object.hasOwn(r.data, "pendingReason") && <details className="text-[12px] text-ink-4"><summary className="cursor-pointer">历史处理提示（当前资格以作品与原文为准）</summary><p className="whitespace-pre-wrap break-all">{researchFactText(r.data.pendingReason)}</p></details>}
       <ResearchLocalImport result={r} />
       <DetailQueryActions result={r} />
     </>}

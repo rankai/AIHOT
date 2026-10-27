@@ -15,14 +15,14 @@ export async function xAccount(input: z.infer<typeof AccountInput>, window: stri
   return { ...receipt, account: parsed.data };
 }
 
-const Author=z.object({userId:Id,username:z.string().nullable().optional(),displayName:z.string().nullable().optional(),avatar:z.string().nullable().optional()}).passthrough();
+const Author=z.object({userId:Id.optional(),username:z.string().nullable().optional(),displayName:z.string().nullable().optional(),avatar:z.string().nullable().optional()}).passthrough();
 const Tweet=z.object({tweetId:Id,author:Author,createdAt:z.string(),text:z.string().nullable().optional(),content:z.string().nullable().optional(),retweetedTweet:z.unknown().optional()}).passthrough();
 const Timeline=z.object({user:Author,pinned:Tweet.nullable().optional(),timeline:z.array(Tweet).max(200),nextCursor:z.string().nullable()}).passthrough();
 export type RedfoxTweet=z.infer<typeof Tweet>;
 export type RedfoxTimeline=z.infer<typeof Timeline>;
 export function parseTimeline(raw: unknown,restId:string):RedfoxTimeline {
   const parsed=Timeline.safeParse(raw);
-  if(!parsed.success || parsed.data.user.userId!==restId)throw new RedfoxResponseError("Redfox timeline fields or account identity are invalid");
+  if(!parsed.success || (parsed.data.user.userId!==undefined&&parsed.data.user.userId!==restId))throw new RedfoxResponseError("Redfox timeline fields or account identity are invalid");
   return parsed.data;
 }
 export async function xTimeline(input:{restId:string;cursor?:string},window:string,options:PaidRequestOptions) {

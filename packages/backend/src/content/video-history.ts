@@ -66,8 +66,7 @@ async function prepare(tx:Tx,id:string):Promise<{entry:Entry;media:MediaItem[]}>
   const proof=await videoProof(tx,s,a!.url);
   if(!proof.hasVideo)fail("no-positive-video-evidence");
   if(!proof.identityKey||proof.identityKey!==a!.identity_key)fail("work-identity-mismatch");
-  const ids=Object.entries(proof.identity);if(!ids.length&&!proof.manualAttribution)fail("author-identity-missing");
-  for(const [kind,value] of ids){if(!value)fail("author-identity-missing");const [binding]=await tx`SELECT source_id FROM source_account_bindings WHERE platform=${proof.platform} AND id_kind=${kind} AND id_value=${value}`;if(binding?.source_id!==a!.source_id)fail("author-binding-mismatch");}
+  // The committed material/result association owns attribution; author bindings are optional provenance.
   evidence={kind:"result",resultId:s.id,proofHash:sha256(stableJson({data:s.data,provenance:s.provenance,input:s.input,request:s.receipt_request,response:s.receipt_response}))};
  }
  const media=a!.media as MediaItem[],factIndex=media.findIndex(m=>m.kind==="video"&&m.url===undefined),slot=factIndex<0?undefined:media[factIndex];

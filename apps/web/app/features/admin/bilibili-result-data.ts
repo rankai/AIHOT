@@ -19,25 +19,24 @@ export function bilibiliImportFields(kind: string, data: Record<string, unknown>
   const native = bilibiliNativeVideo(receivedUrl ?? additionalUrl);
   const receivedNative = bilibiliNativeVideo(receivedUrl);
   const agentkey = data.provider === "agentkey";
-  const eligible = account ? data.operationId === "EH53TOT7" && !!mid : work && data.operationId === "TIN1NMTZ" && data.role !== "provider_recommendation" && !!mid && !!workId && receivedNative?.id === workId;
-  const blockedReason = agentkey && !eligible ? "此结果仅供研究；需显式查询详情，实际收到作者 MID、BV 与匹配原文后才可导入，不能人工补齐身份或地址。" : work && receivedUrl && !receivedNative ? "已有地址不是受支持的 B站原生 BV 作品链接，不能直接替换。请显式查询作品详情核实；b23 短链、AV 地址和封面不能作为人工补充原文。"
+  const eligible = account ? data.operationId === "EH53TOT7" && !!mid : work && data.operationId === "TIN1NMTZ" && data.role !== "provider_recommendation" && !!workId && receivedNative?.id === workId;
+  const blockedReason = agentkey && !eligible ? "此结果仅供研究；需显式查询详情，实际收到BV 与匹配原文后才可导入，不能人工补齐身份或地址。" : work && receivedUrl && !receivedNative ? "已有地址不是受支持的 B站原生 BV 作品链接，不能直接替换。请显式查询作品详情核实；b23 短链、AV 地址和封面不能作为人工补充原文。"
     : work && receivedNative && workId && receivedNative.id !== workId ? "已收到 BV 与原生链接中的 BV 不一致，不能导入或替换；请显式查询详情核实。" : null;
-  return { agentkey, account, work, mid, receivedUrl, workId, native, receivedNative, blockedReason, needsUrl: !agentkey && work && !receivedUrl, needsIdentity: !agentkey && work && !mid, canImport: agentkey ? eligible && !blockedReason : account ? !!mid : work && !blockedReason };
+  return { agentkey, account, work, mid, receivedUrl, workId, native, receivedNative, blockedReason, needsUrl: !agentkey && work && !receivedUrl, canImport: agentkey ? eligible && !blockedReason : account ? !!mid : work && !blockedReason };
 }
 
-type Supplement = { mid?: string; url?: string; evidence: string };
-export function bilibiliImportSupplement(fields: ReturnType<typeof bilibiliImportFields>, draft: { mid: string; url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
+type Supplement = { url?: string; evidence: string };
+export function bilibiliImportSupplement(fields: ReturnType<typeof bilibiliImportFields>, draft: { url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
   if (!fields.canImport) return { error: fields.blockedReason ?? "此结果暂不能导入，请显式查询并核实" };
-  if (!fields.needsUrl && !fields.needsIdentity) return {};
+  if (!fields.needsUrl) return {};
   if (fields.needsUrl) {
     const native = bilibiliNativeVideo(draft.url.trim());
     if (!native) return { error: "请填写无凭证、端口或片段的 bilibili.com/video/BV号 原文；不接受 b23 短链、AV 地址或封面" };
     if (fields.workId && fields.workId !== native.id) return { error: "补充原文中的 BV 必须与已收到的 BV 完全一致" };
   }
-  const mid = draft.mid.trim(), evidence = draft.evidence.trim();
-  if (fields.needsIdentity && !/^[0-9]+$/.test(mid)) return { error: "请填写已核实作者 MID 的完整数字字符串" };
+  const evidence = draft.evidence.trim();
   if (!evidence || evidence.length > 1000) return { error: "请填写缺失字段的核实依据（最多 1000 字）" };
-  return { supplement: { ...(fields.needsIdentity ? { mid } : {}), ...(fields.needsUrl ? { url: draft.url.trim() } : {}), evidence } };
+  return { supplement: { ...(fields.needsUrl ? { url: draft.url.trim() } : {}), evidence } };
 }
 
 /** Only received aliases may seed a separate, explicitly submitted detail query. */

@@ -4,6 +4,7 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {before,after,test} from 'node:test';
 import {sql,closeDb} from '@aihot/backend/db';
+import {createPlatformSubscription,startPlatformSubscription} from '@aihot/backend/sources/platform-subscriptions';
 import {config} from '@aihot/backend/config';
 import {stopBoss} from '@aihot/backend/jobs/queue';
 import {createSynchronousQuery} from '@aihot/backend/providers/redfox/synchronous';
@@ -12,8 +13,9 @@ import {importManualWorkResult as load,isKuaishouWorkUrl} from '@aihot/backend/p
 import {upsertMaterial} from '@aihot/backend/content/materials';
 let data:unknown,hits=0,saved:Record<string,unknown>;
 const server=http.createServer((req,res)=>{hits++;req.resume();req.on('end',()=>res.end(JSON.stringify({code:2000,data})));});
-before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='fake-manual';process.env.REDFOX_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
-after(async()=>{await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+let savedCollect:Record<string,unknown>;
+before(async()=>{savedCollect=(await sql`SELECT * FROM budgets WHERE service='redfox.collect'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.collect'`;await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='fake-manual';process.env.REDFOX_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
+after(async()=>{await sql`UPDATE budgets SET per_minute=${savedCollect.per_minute as number},per_hour=${savedCollect.per_hour as number},per_day=${savedCollect.per_day as number} WHERE service='redfox.collect'`;await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
 async function query(operationId:string,parameters:Record<string,unknown>,response:unknown,sourceResultId?:number){data=response;const run=await createSynchronousQuery({operationId,parameters,...(sourceResultId?{sourceResultId}:{})},'manual-test',tag());await step(run.id);assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);return {run,results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};}
@@ -49,7 +51,7 @@ test('origin accepts only received IDs from approved lists; no export/request/no
 });
 test('current permission checks, strict native links, and fixed share scope reject without partial writes',async()=>{
  const share=sphUrl(),q=await query('MH5YA9DL',{url:share},{exportId:'received-export',description:'Synthetic'}),id=q.results[0]!.id,isolated=await source();
- for(const target of [await source('editorial'),await source('isolated','rss'),await source('isolated','external',false)])await assert.rejects(load(id,body(target,share),'manual-test',tag()),/enabled isolated/);
+ await assert.rejects(load(id,body(await source('isolated','external',false),share),'manual-test',tag()),/停用/);
  for(const url of ['https://example.com/video','https://weixin.qq.com:443/sph/test',share+'#fragment','https://u@weixin.qq.com/sph/test'])await assert.rejects(load(id,body(isolated,url),'manual-test',tag()));
  await assert.rejects(load(id,body(isolated,sphUrl()),'manual-test',tag()),{code:'conflict'});
  for(const url of ['https://kuaishou.com:443/short-video/x','https://u@kuaishou.com/short-video/x','https://kuaishou.com/short-video/x#hash','https://kuaishou.com/profile/x','https://v.kuaishou.com/x'])assert.equal(isKuaishouWorkUrl(url),false);
@@ -69,13 +71,13 @@ test('concurrent import is idempotent; changed evidence or target conflicts, exi
 });
 test('HTTP import requires CSRF, strict input, exposes conflicts, and local mutation does not call suppliers',async()=>{
  const q=await query('OE4KUEUO',{videoId:'requested-only'},{description:'Synthetic'}),r=q.results[0]!,selected=await source(),payload=body(selected,sphUrl());const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Synthetic admin'};
- try{const initial=hits,url=`/api/admin/operations/results/${r.id}/import`,headers={'x-csrf-token':'dev','idempotency-key':tag()};assert.equal((await app.inject({method:'POST',url,payload})).statusCode,403);assert.equal((await app.inject({method:'POST',url,headers,payload:{sourceId:selected,reason:'Missing evidence'}})).statusCode,400);assert.equal((await app.inject({method:'POST',url,headers,payload})).statusCode,200);assert.equal((await app.inject({method:'POST',url,headers,payload:{...payload,supplement:{...payload.supplement,url:sphUrl()}}})).statusCode,409);assert.equal(hits,initial);}finally{config.devAdmin=null;await app.close();}
+ try{const initial=hits,url=`/api/admin/operations/results/${r.id}/import`,headers={'x-csrf-token':'dev','idempotency-key':tag()};assert.equal((await app.inject({method:'POST',url,payload})).statusCode,403);assert.equal((await app.inject({method:'POST',url,headers,payload:{sourceId:selected,reason:'Missing evidence'}})).statusCode,422);assert.equal((await app.inject({method:'POST',url,headers,payload})).statusCode,200);assert.equal((await app.inject({method:'POST',url,headers,payload:{...payload,supplement:{...payload.supplement,url:sphUrl()}}})).statusCode,409);assert.equal(hits,initial);}finally{config.devAdmin=null;await app.close();}
 });
 test('concurrent different targets commit one attribution only and later permission changes are rechecked',async()=>{
  const q=await query('27DQ6SF9',{threeXId:'locator-only'},{list:[{photoId:'opaque-'+tag(),caption:'Synthetic'}]}),r=q.results[0]!,a=await source(),b=await source(),url=ksUrl();
  const outcomes=await Promise.allSettled([load(r.id,body(a,url),'manual-test',tag()),load(r.id,body(b,url),'manual-test',tag())]);assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1);const rejected=outcomes.find(x=>x.status==='rejected') as PromiseRejectedResult;assert.equal(rejected.reason.code,'conflict');
  const [stored]=await sql`SELECT source_id,article_id FROM operation_results WHERE id=${r.id}`;assert.ok([a,b].includes(stored!.source_id));assert.equal((await sql`SELECT count(*)::int AS n FROM audit_log WHERE subject=${`result:${r.id}`} AND action='material.import'`)[0]!.n,1);
- await sql`UPDATE sources SET enabled=false WHERE id=${stored!.source_id}`;await assert.rejects(load(r.id,body(stored!.source_id,url),'manual-test',tag()),/enabled isolated/);
+ await sql`UPDATE sources SET enabled=false WHERE id=${stored!.source_id}`;await assert.rejects(load(r.id,body(stored!.source_id,url),'manual-test',tag()),/停用/);
  assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id IN (${a},${b})`).length,0);
 });
 
@@ -95,4 +97,37 @@ test('new manual SPH and KS descriptions fill missing bodies but preserve full s
   for(const field of ['body_text','body_html','body_status','content_hash','revision','processing_state','discovered_at','backfill'])assert.deepEqual(after![field],before![field],field);
   assert.equal(hits,initialHits);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${r.id}`)[0]!.article_id,a!.articleId);
  }
+});
+
+test('work attribution accepts configured editorial RSS sources without author identity or duplicate share evidence',async()=>{
+ const selected=await source('editorial','rss'),share=sphUrl();
+ const q=await query('MH5YA9DL',{url:share},{exportId:'received-'+tag(),description:'Synthetic ownerless author'}),r=q.results[0]!;
+ await assert.rejects(load(r.id,{reason:'No selection'},'manual-test',tag()),/所属信源/);
+ const imported=await load(r.id,{sourceId:selected,reason:'Use the received share scope'},'manual-test',tag());
+ assert.equal(imported!.sourceId,selected);
+ assert.equal((await sql`SELECT participation_mode FROM sources WHERE id=${selected}`)[0]!.participation_mode,'editorial');
+ assert.equal((await sql`SELECT source_id FROM articles WHERE id=${imported!.articleId}`)[0]!.source_id,selected);
+});
+
+test('Channels and Kuaishou collections inherit the source and keep missing originals pending until explicitly proven',async()=>{
+ for(const sph of [true,false]){
+  const selected=await source('editorial','rss'),operationId=sph?'E7G00COY':'ZWR31P2A';
+  data={list:[sph?{videoId:'opaque-'+tag(),description:'No author, no original'}:{photoId:'opaque-'+tag(),caption:'No author, no original'}]};
+  const sub=await createPlatformSubscription({name:tag(),sourceId:selected,operationId,parameters:{keyword:'synthetic'},enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
+  process.env.COLLECT_ENABLED='true';const run=await startPlatformSubscription(sub.id,'test',tag());
+  try{for(let i=0;i<5&&(await row(run.id)).status==='active';i++)await step(run.id);}finally{process.env.COLLECT_ENABLED='false';}
+  const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind=${sph?'shipinhao_work':'kuaishou_work'}`;
+  assert.equal(r!.article_id,null);assert.match(r!.data.pendingReason,/原文/);assert.doesNotMatch(r!.data.pendingReason,/作者|隔离/);
+  const url=sph?sphUrl():ksUrl(),before=hits,imported=await load(r!.id,{reason:'Verified original',supplement:{url,evidence:'Synthetic verified native original'}},'test',tag());
+  assert.equal(imported!.sourceId,selected);assert.equal((await sql`SELECT source_id FROM articles WHERE id=${imported!.articleId}`)[0]!.source_id,selected);assert.equal(hits,before);
+ }
+});
+
+test('completed manual work command replays after source disable without new writes',async()=>{
+ const selected=await source(),id=tag(),q=await query('ZWR31P2A',{keyword:tag()},{list:[{photoId:id,caption:'Authorless replay'}]}),r=q.results[0]!,key=tag(),input=body(selected,ksUrl());
+ const saved=await load(r.id,input,'manual-test',key),before=hits;
+ await sql`UPDATE sources SET enabled=false,execution_version=execution_version+1 WHERE id=${selected}`;
+ assert.deepEqual(await load(r.id,input,'manual-test',key),saved);assert.equal(hits,before);
+ await assert.rejects(load(r.id,{...input,supplement:{...input.supplement,evidence:'Changed'}},'manual-test',key),{code:'conflict'});
+ await assert.rejects(load(r.id,input,'manual-test',tag()),/停用|失效/);
 });

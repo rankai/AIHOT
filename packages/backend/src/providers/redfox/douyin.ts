@@ -38,7 +38,6 @@ function work(operation:DouyinOperation,raw:unknown,index:number):DouyinResult{
     // not an automatic conversion to secUserId or permission-bearing account ownership.
   }
   const missing:string[]=[];
-  if(!Object.keys(identity).length)missing.push("缺少已确认作者 UID/安全 ID；展示号可显式查询账号详情，不能按昵称归属");
   if(!workId)missing.push("缺少已确认原生作品 ID；不能把 AI photoId 当作 aweme_id");
   if(!url)missing.push("缺少有效原文地址");
   return {kind:"douyin_work",itemKey:`work:${index}`,data:{platform:"douyin",operationId:operation,title:title?.slice(0,200)??"抖音作品",identity,workId,url,missing,record}};

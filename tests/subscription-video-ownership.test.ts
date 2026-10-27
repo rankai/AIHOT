@@ -16,7 +16,7 @@ async function fixture(enabled: boolean | undefined = true, control = false) {
   await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at)
     VALUES (${articleId},${sourceId},${`douyin:${tag()}`},${`https://www.douyin.com/video/${tag()}`},'Synthetic video',now(),now())`;
   const subscriptionId = await sql.begin(tx => createSubscription(tx, { ...(control ? { sourceId } : {}), provider: "agentkey", platform: "douyin", operationKey: "synthetic.collect", contractVersion: 1,
-    config: enabled === undefined ? {} : { autoDownloadVideo: enabled }, enabled: true, intervalMinutes: 30 }));
+    config: { ...(!control ? {sourceId} : {}), ...(enabled === undefined ? {} : { autoDownloadVideo: enabled }) }, enabled: true, intervalMinutes: 30 }));
   const command = { actor: "video-tests", commandKey: tag(), provider: "local", operationKey: SUBSCRIPTION_VIDEO_DOWNLOAD,
     contractVersion: 1, subscriptionIds: [subscriptionId], input: { articleId }, stepKey: "subscription.video.resolve" };
   return { sourceId, articleId, subscriptionId, command };
@@ -83,7 +83,7 @@ test("subscription, author and material changes fence claim, payment, commit and
 test("closing one subscription does not invalidate another download of the same material", async () => {
   const f = await fixture();
   const other = await sql.begin(tx => createSubscription(tx, { provider: "agentkey", platform: "douyin", operationKey: "synthetic.collect", contractVersion: 1,
-    config: { autoDownloadVideo: true }, enabled: true, intervalMinutes: 30 }));
+    config: { sourceId: f.sourceId, autoDownloadVideo: true }, enabled: true, intervalMinutes: 30 }));
   const a = await sql.begin(tx => createRun(tx, f.command));
   const b = await sql.begin(tx => createRun(tx, { ...f.command, commandKey: tag(), subscriptionIds: [other] }));
   await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${f.subscriptionId}`;
@@ -109,4 +109,18 @@ test("late paid response remains governed after owner invalidation and cannot pu
   assert.equal(stored!.status, "received");
   assert.deepEqual(stored!.response, { video: "synthetic" });
   assert.equal(stored!.current_receipt_id, response.receiptId);
+});
+
+test("download checks the independent subscription source as well as the deduplicated article owner", async () => {
+  const f=await fixture(), owner=`owner-${tag()}`;
+  await sql`INSERT INTO sources(id,name,kind) VALUES (${owner},'Original material owner','external')`;
+  await sql`UPDATE articles SET source_id=${owner} WHERE id=${f.articleId}`;
+  const run=await sql.begin(tx=>createRun(tx,f.command));
+  assert.equal(run.input.members[0]!.sourceId,f.sourceId);
+  assert.equal(run.input.videoDownloadOwnership!.sourceId,owner);
+  await sql`UPDATE sources SET enabled=false WHERE id=${owner}`;
+  assert.equal((await sql.begin(tx=>lockRun(tx,run.id))).eligible.length,0);
+  await sql`UPDATE sources SET enabled=true WHERE id=${owner}`;
+  await sql`UPDATE sources SET enabled=false WHERE id=${f.sourceId}`;
+  assert.equal((await sql.begin(tx=>lockRun(tx,run.id))).eligible.length,0);
 });

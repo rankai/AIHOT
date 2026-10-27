@@ -19,8 +19,9 @@ const id=()=>BigInt('0x'+randomUUID().replaceAll('-','').slice(0,20)).toString()
 const author=(uid=id())=>({rest_id:uid,screen_name:'sample',name:'Sample'});
 const tweet=(a=author())=>({tweet_id:id(),text:'Received text',created_at:new Date().toISOString(),author:a,lang:'en'});
 const envelope=(body:unknown)=>({httpStatus:200,mcp:{},envelope:{provider:'TikHub',data:{code:200,data:body}}});
+const chosenWorkSource=tag();
 let budgets:any[]=[];
-before(async()=>{const [d]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(d!.name,d!.port);budgets=await sql`SELECT * FROM budgets WHERE service='agentkey.query'`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.query'`;});
+before(async()=>{await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Chosen X source','rss','isolated',false)`;const [d]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(d!.name,d!.port);budgets=await sql`SELECT * FROM budgets WHERE service='agentkey.query'`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.query'`;});
 after(async()=>{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
 async function query(operationId:string,parameters:unknown,body:unknown){
  let hits=0;const server=await stub(async(_hit,req)=>{const q=JSON.parse(req.body);if(q.method?.startsWith('notifications/'))return {};if(q.method==='initialize')return {jsonrpc:'2.0',id:q.id,result:{protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fake',version:'1'}}};hits++;return {jsonrpc:'2.0',id:q.id,result:{content:[],structuredContent:{provider:'TikHub',data:{code:200,data:body}}}};});
@@ -30,7 +31,7 @@ async function query(operationId:string,parameters:unknown,body:unknown){
 }
 async function search(t:any){return (await query('5K5EG87P',{keyword:'test'},{timeline:[{...t,author:undefined,user_info:t.author,type:'tweet'}]}))[0]!;}
 async function source(uid:string,mode='isolated',kind='x_search',handle='sample',bind=true){const sid=tag();await sql`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,enabled) VALUES(${sid},'Synthetic',${kind},${sql.json({query:`from:${handle} -filter:replies`})},${mode},false,true)`;if(bind)await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES('x','user_id',${uid},${sid},'{"kind":"audit","reference":"synthetic"}')`;return sid;}
-const importWork=(r:any,key=tag())=>(r.kind==='x_detail_work'?importXDetailResult:importXSearchResult)(r.id,{reason:'verified synthetic'},'test',key);
+const importWork=(r:any,key=tag(),sourceId=chosenWorkSource)=>(r.kind==='x_detail_work'?importXDetailResult:importXSearchResult)(r.id,{sourceId,reason:'verified synthetic'},'test',key);
 const article=async(id:string)=>(await sql`SELECT * FROM articles WHERE id=${id}`)[0]!;
 test('five eligible producers, pinned and actual context reuse the sole writer with honest pending text and original discovery',async()=>{
  for(const producer of ['search','account_posts','list_posts','community_posts','detail']){
@@ -51,7 +52,7 @@ test('unknown, invalid and zone-less dates stay historical with null publication
 test('quotes retain their own author and text; partial, retweet, limited roles and missing identities remain research',async()=>{
  const t=tweet(),q={...tweet(),text:'Quoted text',author:{...author(),screen_name:'quoted'}};
  const r=await search({...t,quoted:q}),got=await importWork(r),a=await article(got!.articleId);assert.deepEqual(a.x_post.quoted,{authorName:'Sample',handle:'quoted',text:'Quoted text',url:`https://x.com/quoted/status/${q.tweet_id}`});
- for(const invalid of [{...tweet(),author:{rest_id:id(),screen_name:null}},{...tweet(),tweet_id:undefined},{...tweet(),tweet_id:'1'.repeat(31)},{...tweet(),text:''},{...tweet(),quoted:{...q,author:{...q.author,rest_id:undefined}}},{...tweet(),quoted:{...q,author:{...q.author,screen_name:null}}}]){const r=await search(invalid);await assert.rejects(importWork(r));assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${r.id}`)[0]!.article_id,null);}
+ for(const invalid of [{...tweet(),author:{rest_id:id(),screen_name:null}},{...tweet(),tweet_id:undefined},{...tweet(),tweet_id:'1'.repeat(31)},{...tweet(),text:''},{...tweet(),quoted:{...q,author:{...q.author,screen_name:null}}}]){const r=await search(invalid);await assert.rejects(importWork(r));assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${r.id}`)[0]!.article_id,null);}
  const wrapped={...tweet(),retweeted:{id:q.tweet_id},retweeted_tweet:q};const [wrapper]=await query('x.account_posts',{screen_name:'sample'},{timeline:[wrapped]});await assert.rejects(importWork(wrapper),/role/);
  const [limited]=await query('x.list_posts',{list_id:'1'},{timeline:[{...tweet(),quoted:q}]});await assert.rejects(importWork(limited),/role/);
  const [standalone]=await query('x.list_posts',{list_id:'1'},{timeline:[{...tweet(),retweeted:{id:q.tweet_id}}]});await assert.rejects(importWork(standalone),/role/);
@@ -70,10 +71,10 @@ test('original receipt, frozen input, summary and candidate tampering or expiry 
  await sql`UPDATE operation_results SET data=${sql.json({...r.data,importable:true,missing:[]})} WHERE id=${r.id}`;assert.ok(await importWork(r));
 });
 test('disabled bound sources, explicit target conflicts and Article requirements keep existing permissions',async()=>{
- const t=tweet(),sid=await source(t.author.rest_id,'editorial');await sql`UPDATE sources SET enabled=false WHERE id=${sid}`;const r=await search(t);await assert.rejects(importWork(r),/disabled/);await sql`UPDATE sources SET enabled=true WHERE id=${sid}`;
- await assert.rejects(importXSearchResult(r.id,{reason:'wrong',sourceId:tag()},'test',tag()),/bound/);
- const ar=await search({...tweet(t.author),text:'Article https://x.com/i/article/123'});await assert.rejects(importWork(ar),/Article/);
- const got=await importWork(r),[s]=await sql`SELECT * FROM sources WHERE id=${got!.sourceId}`;assert.equal(got!.sourceId,sid);assert.equal(s!.participation_mode,'editorial');assert.equal(s!.site_fulltext,false);
+ const t=tweet(),sid=await source(t.author.rest_id,'editorial');await sql`UPDATE sources SET enabled=false WHERE id=${sid}`;const r=await search(t);await assert.rejects(importWork(r,tag(),sid),/disabled/);await sql`UPDATE sources SET enabled=true WHERE id=${sid}`;
+ await assert.rejects(importXSearchResult(r.id,{reason:'wrong',sourceId:tag()},'test',tag()),/associated source/);
+ const ar=await search({...tweet(t.author),text:'Article https://x.com/i/article/123'});await assert.rejects(importWork(ar,tag(),sid),/Article/);
+ const got=await importWork(r,tag(),sid),[s]=await sql`SELECT * FROM sources WHERE id=${got!.sourceId}`;assert.equal(got!.sourceId,sid);assert.equal(s!.participation_mode,'editorial');assert.equal(s!.site_fulltext,false);
 });
 test('canonical native URL and existing Redfox identity deduplicate without overwriting complete body',async()=>{
  const t=tweet(),sid=await source(t.author.rest_id),old=await upsertMaterial({sourceId:sid,via:'import',url:`https://twitter.com/sample/status/${t.tweet_id}`,title:'Existing',bodyText:'Complete existing body',bodyStatus:'ok',raw:{provider:'redfox'}}),r=await search(t),got=await importWork(r);assert.equal(got!.articleId,old.articleId);const a=await article(got!.articleId);assert.equal(a.identity_key,`x:${t.tweet_id}`);assert.equal(a.body_text,'Complete existing body');assert.equal(a.raw.provider,'redfox');
@@ -85,12 +86,12 @@ test('profile only binds matching existing single-account X source and rejects m
  const target=await source(id(),'isolated','x_search','sample',false),[same]=await query('x.account_profile',{screen_name:'sample'},{profile:'sample',rest_id:uid});await assert.rejects(importXAccountResult(same!.id,{sourceId:target,reason:'conflict'},'test',tag()),/conflict/);
 });
 test('transaction rollback removes material, author binding, result association, queue and audit together',async()=>{
- const t=tweet(),r=await search(t);let aid='';await assert.rejects(sql.begin(async tx=>{const got=await importXSearchResult(r.id,{reason:'rollback'},'test',tag(),tx);aid=got!.articleId;throw Error('synthetic abort');}),/synthetic abort/);
+ const t=tweet(),r=await search(t);let aid='';await assert.rejects(sql.begin(async tx=>{const got=await importXSearchResult(r.id,{sourceId:chosenWorkSource,reason:'rollback'},'test',tag(),tx);aid=got!.articleId;throw Error('synthetic abort');}),/synthetic abort/);
  assert.equal((await sql`SELECT id FROM articles WHERE id=${aid}`).length,0);assert.equal((await sql`SELECT id FROM pgboss.job WHERE data->>'articleId'=${aid}`).length,0);assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='x' AND id_value=${t.author.rest_id}`).length,0);assert.equal((await sql`SELECT id FROM audit_log WHERE subject=${`result:${r.id}`}`).length,0);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${r.id}`)[0]!.article_id,null);
 });
 test('AgentKey raw or subscription ownership blocks SocialData and Jina even on explicit extraction',async()=>{
  let hits=0;const server=await stub(()=>{hits++;return {};});const old={...process.env};Object.assign(process.env,{SOCIALDATA_API_KEY:'fake-only',SOCIALDATA_BASE_URL:server.url});
- try{for(const subscription of [false,true]){const t=tweet(),sid=await source(t.author.rest_id),r=await search(t),got=await importWork(r);if(subscription){await sql`INSERT INTO collection_subscriptions(control_source_id,provider,platform,operation_key,contract_version,interval_minutes) VALUES(${sid},'agentkey','x','agentkey.x.collection',1,30)`;await sql`UPDATE articles SET raw='{}' WHERE id=${got!.articleId}`;}
+ try{for(const subscription of [false,true]){const t=tweet(),sid=await source(t.author.rest_id),r=await search(t),got=await importWork(r,tag(),sid);if(subscription){await sql`INSERT INTO collection_subscriptions(control_source_id,provider,platform,operation_key,contract_version,interval_minutes) VALUES(${sid},'agentkey','x','agentkey.x.collection',1,30)`;await sql`UPDATE articles SET raw='{}' WHERE id=${got!.articleId}`;}
   const [count]=await sql`SELECT count(*)::int n FROM receipts WHERE service='socialdata'`;assert.equal(await extractArticleBody(got!.articleId,true),'unconfirmed');assert.equal((await article(got!.articleId)).body_status,'unconfirmed');assert.equal((await sql`SELECT count(*)::int n FROM receipts WHERE service='socialdata'`)[0]!.n,count!.n);assert.equal(hits,0);
  }}finally{await server.close();for(const k of Object.keys(process.env))if(!(k in old))delete process.env[k];Object.assign(process.env,old);}
 });

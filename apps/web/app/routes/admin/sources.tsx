@@ -1,3 +1,4 @@
+import type { OwnershipSource } from "../../features/admin/source-ownership-data";
 import { VideoDownloadLatestView } from "../../features/admin/subscription-video-ui";
 import type { VideoDownloadLatest } from "../../features/admin/subscription-video-data";
 import { SITE } from "@aihot/industry/site";
@@ -41,11 +42,13 @@ interface SourcesData {
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   if (url.searchParams.get("view") === "collections") {
-    const [subscriptions, operations] = await Promise.all([
+    const sourceId = url.searchParams.get("sourceId");
+    const [subscriptions, operations, context] = await Promise.all([
       adminGet<CollectionSubscription[]>(request, "/api/admin/redfox/collections"),
       adminGet<PlatformOperation[]>(request, "/api/admin/redfox/operations"),
+      sourceId ? adminGet<{ source: OwnershipSource }>(request, `/api/admin/sources/${encodeURIComponent(sourceId)}`) : Promise.resolve(null),
     ]);
-    return { view: "collections" as const, subscriptions, operations, requestedId: Number(url.searchParams.get("subscription")) || null };
+    return { view: "collections" as const, subscriptions, operations, sourceContext: context?.source ?? null, requestedId: Number(url.searchParams.get("subscription")) || null };
   }
   return { view: "sources" as const, ...await adminGet<SourcesData>(request, `/api/admin/sources${url.search}`) };
 }
@@ -62,7 +65,7 @@ export default function Sources({ loaderData }: Route.ComponentProps) {
     const seed = incoming && collectionOperations(loaderData.operations).some(operation => operation.id === incoming.operationId) ? incoming : null;
     return <AdminPage title="信源" subtitle="采集订阅配置采什么、多久采一次及是否启用；每轮的进度与结果在执行记录中查看。已有信源的主订阅、参与方式与公开权限在对应信源详情中管理。" actions={<ButtonLink to="/admin/sources/new">新建信源</ButtonLink>}>
       {views}
-      <CollectionSubscriptions key={location.key} seed={seed} subscriptions={loaderData.subscriptions} operations={loaderData.operations} requestedId={loaderData.requestedId} />
+      <CollectionSubscriptions key={location.key} seed={seed} sourceContext={loaderData.sourceContext} subscriptions={loaderData.subscriptions} operations={loaderData.operations} requestedId={loaderData.requestedId} />
     </AdminPage>;
   }
   const { rows, totals, page } = loaderData;

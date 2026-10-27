@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { researchImportBody, researchImportCandidates, researchImportState, researchSupplementFields } from "../app/features/admin/research-import-data.ts";
+import { researchImportBody, researchImportState, researchSupplementFields } from "../app/features/admin/research-import-data.ts";
 type Result = Parameters<typeof researchImportBody>[0];
 const result = (platform: string, suffix = "work", data = {}): Result => ({ kind: `${platform}_${suffix}`, data: { platform, ...data }, sourceId: null, articleId: null });
-const input = { reason: " 核实并导入 ", target: "auto", sourceId: "", requestState: "idle", rows: [], values: {}, evidence: "" };
+const input = { reason: " 核实并导入 ", target: "auto", sourceId: "", requestState: "idle", rows: [], values: {}, evidence: "", ownedSource: { id: "subscribed-source", inherited: true } };
 const huge = "000900719925474099312345";
 
 test("only five platforms' works and received-ID accounts expose local import; existing relations prevent repeats", () => {
@@ -28,22 +28,13 @@ test("default local commands need no replacement identity or supplement, includi
     assert.equal(Object.hasOwn(command, "parameters"), false); assert.equal(Object.hasOwn(command, "operationId"), false);
   }
 });
-test("exact five-platform supplement fields and enumerations retain large IDs as strings", () => {
-  const cases = [
-    ["qichezhijia", { authorId: huge, authorNamespace: "club" }],
-    ["dongchedi", { userId: huge, authorId: "different-kind", workType: "video" }],
-    ["yiche", { userId: huge, authorId: "different-kind", workType: "club" }],
-    ["baijiahao", { uid: huge, secUid: "opaque/_-", uk: "another-kind", workType: "article" }],
-    ["zhihu", { uid: huge, vertical: "zvide" }],
-  ] as const;
-  for (const [platform, values] of cases) assert.deepEqual(researchImportBody(result(platform), { ...input, values, evidence: " 已核实同一作者和原文 " }), { reason: "核实并导入", supplement: { ...values, evidence: "已核实同一作者和原文" } });
-  assert.deepEqual(researchSupplementFields("qichezhijia").find(field => field.name === "authorNamespace")?.options, ["original", "chejiahao", "club"]);
-  assert.deepEqual(researchSupplementFields("dongchedi").find(field => field.name === "workType")?.options, ["article", "video"]);
-  assert.deepEqual(researchSupplementFields("yiche").find(field => field.name === "workType")?.options, ["club", "article", "video"]);
-  assert.deepEqual(researchSupplementFields("baijiahao").find(field => field.name === "workType")?.options, ["article", "video"]);
-  assert.deepEqual(researchSupplementFields("zhihu").find(field => field.name === "vertical")?.options, ["answer", "article", "zvide"]);
+test("work supplements contain only necessary work type or scope, never optional author IDs", () => {
+  const cases = [["dongchedi", { workType: "video" }], ["yiche", { workType: "club" }], ["baijiahao", { workType: "article" }], ["zhihu", { vertical: "zvide" }]] as const;
+  for (const [platform, values] of cases) assert.deepEqual(researchImportBody(result(platform), { ...input, values, evidence: " 已核实作品 " }), { reason: "核实并导入", supplement: { ...values, evidence: "已核实作品" } });
+  assert.deepEqual(researchSupplementFields("qichezhijia"), []);
+  for (const platform of ["qichezhijia", "dongchedi", "yiche", "baijiahao", "zhihu"]) assert(!researchSupplementFields(platform).some(field => ["authorId", "userId", "uid", "secUid", "uk", "authorNamespace"].includes(field.name)));
   assert.throws(() => researchImportBody(result("zhihu"), { ...input, values: { vertical: "zvideo" }, evidence: "proof" }));
-  assert.throws(() => researchImportBody(result("dongchedi"), { ...input, values: { uid: "wrong-field" }, evidence: "proof" }));
+  assert.throws(() => researchImportBody(result("dongchedi"), { ...input, values: { uid: huge }, evidence: "proof" }));
 });
 test("optional supplements require evidence and received identity/types cannot be overwritten", () => {
   const received = result("yiche", "work", { identity: { userId: huge }, workNamespace: { workType: "article" } });
@@ -66,13 +57,13 @@ test("account commands never send supplement or manually provided account identi
   assert.deepEqual(researchImportBody(account, { ...input, target: "existing", sourceId: "editorial", rows: [{ id: "editorial", participation_mode: "editorial" }] }), { reason: "核实并导入", sourceId: "editorial" });
   assert.throws(() => researchImportBody(result("baijiahao", "account"), { ...input, values: { uk: huge } }));
 });
-test("manual work targets are current isolated candidates with evidence; stale/empty/loading/other-page choices are rejected", () => {
-  const rows = [{ id: "iso", participation_mode: "isolated" }, { id: "editorial", participation_mode: "editorial" }];
-  assert.deepEqual(researchImportCandidates(rows, false).map(row => row.id), ["iso"]);
-  assert.deepEqual(researchImportCandidates(rows, true), rows);
-  const chosen = { ...input, target: "existing", sourceId: "iso", rows, evidence: "same author confirmed" };
-  assert.deepEqual(researchImportBody(result("zhihu"), chosen), { reason: "核实并导入", sourceId: "iso", supplement: { evidence: "same author confirmed" } });
-  for (const change of [{ requestState: "loading" }, { requestState: "submitting" }, { sourceId: "editorial" }, { rows: [] }, { rows: [{ id: "other", participation_mode: "isolated" }] }, { sourceId: "" }, { evidence: "" }]) assert.throws(() => researchImportBody(result("zhihu"), { ...chosen, ...change }));
+test("work commands use only the confirmed shared source while account choices retain current-page validation", () => {
+  assert.throws(() => researchImportBody(result("zhihu"), { ...input, ownedSource: undefined }));
+  assert.deepEqual(researchImportBody(result("zhihu"), { ...input, ownedSource: { id: "editorial", inherited: false } }), { reason: "核实并导入", sourceId: "editorial" });
+  const account = result("baijiahao", "account", { identity: { uk: huge } });
+  const chosen = { ...input, target: "existing", sourceId: "editorial", rows: [{ id: "editorial", participation_mode: "editorial" }] };
+  assert.deepEqual(researchImportBody(account, chosen), { reason: "核实并导入", sourceId: "editorial" });
+  for (const change of [{ requestState: "loading" }, { requestState: "submitting" }, { rows: [] }, { sourceId: "other-page" }]) assert.throws(() => researchImportBody(account, { ...chosen, ...change }));
 });
 test("supplement originals are explicit safe text; received native originals are not replaced and DCD protocol is manual", () => {
   const evidence = "verified same work";

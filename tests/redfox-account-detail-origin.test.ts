@@ -64,7 +64,7 @@ test('only actual typed locators create account choices; aliases, nickname, secu
 });
 test('actual collection page proof is required and local options GET is guarded and free',async()=>{
  const uid=digits();data={list:[{videoId:digits(),authorUid:uid,content:'Collected author'}],hasMore:false};on();
- const sub=await createPlatformSubscription({name:tag(),operationId:'OWIBYU1V',parameters:{keyword:tag()},enabled:true,limits:{pages:1,items:10,details:0}},'account-origin-test',tag());const run=await startPlatformSubscription(sub.id,'account-origin-test',tag());for(let i=0;i<15;i++){if((await row(run.id)).status!=='active')break;await step(run.id);}await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;
+ const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),operationId:'OWIBYU1V',parameters:{keyword:tag()},enabled:true,limits:{pages:1,items:10,details:0}},'account-origin-test',tag());const run=await startPlatformSubscription(sub.id,'account-origin-test',tag());for(let i=0;i<15;i++){if((await row(run.id)).status!=='active')break;await step(run.id);}await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;
  const [source]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;assert.ok(source);
  const proof=await accountDetailOrigin(sql,source!.id,'XUT4CECZ',{accountId:uid});assert.equal(proof.identity.uid,uid);
  const detail=await query('XUT4CECZ',{accountId:uid},{uid,nickname:'Collection author'},source!.id);assert.equal(detail.run.status,'completed',detail.run.wait_reason);off();assert.ok((await importDouyinResult(detail.results[0]!.id,{reason:'Collected actual author'},'account-origin-test',tag()))?.sourceId);
@@ -78,7 +78,7 @@ test('actual collection page proof is required and local options GET is guarded 
 test('configured collection detail uses its proven receipt context for explicit account query, never derived locators',async()=>{
  const uid=digits(),videoId=digits(),page={list:[{videoId,content:'Collected original',authorUid:uid,opusUrl:`https://www.douyin.com/video/${videoId}`}],hasMore:false};
  on();data=page;
- const sub=await createPlatformSubscription({name:tag(),operationId:'OWIBYU1V',parameters:{keyword:tag()},enabled:true,enrichDetails:true,detailOperationId:'FK67XDVQ',limits:{pages:1,items:10,details:1}},'account-context-test',tag());
+ const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),operationId:'OWIBYU1V',parameters:{keyword:tag()},enabled:true,enrichDetails:true,detailOperationId:'FK67XDVQ',limits:{pages:1,items:10,details:1}},'account-context-test',tag());
  const run=await startPlatformSubscription(sub.id,'account-context-test',tag());await step(run.id);await step(run.id);
  assert.equal((await row(run.id)).step_key,'redfox.platform.detail');
  data={videoId,content:'Actual detail',authorUid:uid,opusUrl:`https://www.douyin.com/video/${videoId}`};await step(run.id);assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;
@@ -101,3 +101,6 @@ test('configured collection detail uses its proven receipt context for explicit 
  const before=hits;assert.equal((await app.inject({url:path})).statusCode,200);assert.equal(hits,before);
  }finally{config.devAdmin=null;await app.close();}
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

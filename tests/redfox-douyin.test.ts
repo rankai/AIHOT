@@ -8,6 +8,7 @@ import { config } from "@aihot/backend/config";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSynchronousQuery } from "@aihot/backend/providers/redfox/synchronous";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
+import {createPlatformSubscription,startPlatformSubscription} from "@aihot/backend/sources/platform-subscriptions";
 import { resumeRun } from "@aihot/backend/providers/operations/store";
 import { douyinOperations,type DouyinOperation } from "@aihot/backend/providers/redfox/douyin-contract";
 const uid="900719925474099312345",secure="MS4wSyntheticSecureId",workId="900719925474099398765";
@@ -32,8 +33,9 @@ const cases:{id:DouyinOperation;path:string;parameters:Record<string,unknown>;da
 ];
 let fixture=cases[0]!,hits=0,rawOverride:string|undefined,saved:Record<string,unknown>;
 const server=http.createServer((req,res)=>{hits++;let body="";req.on("data",c=>body+=c);req.on("end",()=>{try{assert.equal(req.method,"POST");assert.equal(req.url,fixture.path);assert.equal(req.headers.redfox_api_key,"fake-douyin");assert.match(req.headers["content-type"]!,/application\/json/);assert.deepEqual(JSON.parse(body),fixture.parameters);res.end(rawOverride??JSON.stringify({code:2000,data:fixture.data}));}catch(e){res.statusCode=400;res.end(JSON.stringify({error:String(e)}));}});});
-before(async()=>{await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY="fake-douyin";process.env.REDFOX_CALLS_ENABLED="true";config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
-after(async()=>{await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED="false";delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+let savedCollect:Record<string,unknown>;
+before(async()=>{savedCollect=(await sql`SELECT * FROM budgets WHERE service='redfox.collect'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.collect'`;await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY="fake-douyin";process.env.REDFOX_CALLS_ENABLED="true";config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
+after(async()=>{await sql`UPDATE budgets SET per_minute=${savedCollect.per_minute as number},per_hour=${savedCollect.per_hour as number},per_day=${savedCollect.per_day as number} WHERE service='redfox.collect'`;await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED="false";delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
 async function query(){const run=await createSynchronousQuery({operationId:fixture.id,parameters:fixture.parameters},"douyin-test",tag());await step(run.id);return {run:await row(run.id),results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};}
@@ -87,22 +89,22 @@ test("concurrent same-record UID/secure IDs bind one isolated source, retain exp
   const unrelated=await source("rss"),unbound=await accountQuery(identifiers());await assert.rejects(importDouyinResult(unbound.id,{sourceId:unrelated,reason:"Wrong kind"},"test",tag()),/external source/);
 });
 test("work imports verify native IDs, preserve unknown-time history and media, and never resolve short links",async()=>{
-  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");const i=identifiers(),id=`997${Date.now()}`,original=`https://www.iesdouyin.com/share/video/${id}`;
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");const i=identifiers(),id=`997${Date.now()}`,original=`https://www.iesdouyin.com/share/video/${id}`,owner=await source("rss");
   const r=await workQuery({videoId:id,opusUrl:original,authorUid:i.userId,authorSecUid:i.secureId,content:"Synthetic imported content",publishTime:"2001-01-01 12:00:00",imageUrlList:["https://example.com/synthetic.png","javascript:bad"],coverUrl:"https://example.com/synthetic-cover.png"});
   const beforeHits=hits;process.env.REDFOX_CALLS_ENABLED="false";let result;
-  try{result=await importDouyinResult(r.id,{reason:"Synthetic work"},"test",tag());assert.equal(hits,beforeHits);}finally{process.env.REDFOX_CALLS_ENABLED="true";}
+  try{result=await importDouyinResult(r.id,{sourceId:owner,reason:"Synthetic work"},"test",tag());assert.equal(hits,beforeHits);}finally{process.env.REDFOX_CALLS_ENABLED="true";}
   const [a]=await sql`SELECT * FROM articles WHERE id=${result!.articleId!}`;assert.equal(a!.identity_key,`douyin:aweme_id:${id}`);assert.equal(a!.backfill,true);assert.equal(a!.published_at,null);assert.equal(a!.media.length,2);
-  const mismatch=await workQuery({videoId:id+"1",opusUrl:original,authorUid:i.userId,content:"Mismatch"});await assert.rejects(importDouyinResult(mismatch.id,{reason:"Mismatch"},"test",tag()),{code:"conflict"});
-  const short=await workQuery({videoId:id+"2",opusUrl:"https://v.douyin.com/synthetic",authorUid:i.userId,content:"Short"});await assert.rejects(importDouyinResult(short.id,{reason:"No resolving"},"test",tag()),/permalink/);
-  await sql`UPDATE sources SET enabled=false WHERE id=${result!.sourceId}`;await assert.rejects(importDouyinResult((await workQuery({videoId:id+"3",opusUrl:`https://www.douyin.com/video/${id}3`,authorUid:i.userId,content:"Paused"})).id,{reason:"Paused"},"test",tag()),/disabled/);
+  const mismatch=await workQuery({videoId:id+"1",opusUrl:original,authorUid:i.userId,content:"Mismatch"});await assert.rejects(importDouyinResult(mismatch.id,{sourceId:owner,reason:"Mismatch"},"test",tag()),{code:"conflict"});
+  const short=await workQuery({videoId:id+"2",opusUrl:"https://v.douyin.com/synthetic",authorUid:i.userId,content:"Short"});await assert.rejects(importDouyinResult(short.id,{sourceId:owner,reason:"No resolving"},"test",tag()),/permalink/);
+  await sql`UPDATE sources SET enabled=false WHERE id=${result!.sourceId}`;await assert.rejects(importDouyinResult((await workQuery({videoId:id+"3",opusUrl:`https://www.douyin.com/video/${id}3`,authorUid:i.userId,content:"Paused"})).id,{sourceId:owner,reason:"Paused"},"test",tag()),/disabled/);
 });
-test("AI original URLs may prove work but not author; manual evidence cannot inherit permissions; growth milliseconds stay trusted",async()=>{
-  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin"),i=identifiers(),owner=await source();await importDouyinResult((await accountQuery(i)).id,{sourceId:owner,reason:"Bind verified author"},"test",tag());
+test("AI original proves work without authors; mappings cannot override configured owner and growth time stays trusted",async()=>{
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin"),i=identifiers(),owner=await source(),target=await source("rss");await importDouyinResult((await accountQuery(i)).id,{sourceId:owner,reason:"Bind verified author"},"test",tag());
   const id=`996${Date.now()}`;fixture={...cases.find(c=>c.id==="I8P3HTVH")!,data:{list:[{photoId:"unrelated-provider-id",authorId:i.userId,title:"Synthetic AI",url:`https://www.douyin.com/video/${id}`}]}};const ai=(await query()).results[0]!;
-  await assert.rejects(importDouyinResult(ai.id,{reason:"No author evidence"},"test",tag()),/verified author/);
-  await assert.rejects(importDouyinResult(ai.id,{reason:"Manual must stay isolated",supplement:{uid:i.userId,evidence:"Synthetic manual evidence"}},"test",tag()),/cannot inherit/);
-  const j=identifiers(),imported=await importDouyinResult(ai.id,{reason:"Synthetic isolated evidence",supplement:{uid:j.userId,evidence:"Synthetic verified raw record"}},"test",tag());assert.equal((await sql`SELECT identity_key FROM articles WHERE id=${imported!.articleId!}`)[0]!.identity_key,`douyin:aweme_id:${id}`);
-  const stamp=Date.now()-3600_000,rankId=id+"1";fixture={...cases.find(c=>c.id==="WD6UT8DQ")!,data:[{...growth,aweme_id:rankId,author_user_id:i.userId,share_url:`https://www.iesdouyin.com/share/video/${rankId}`,create_time:stamp}]};const q=(await query()).results[0]!,saved=await importDouyinResult(q.id,{reason:"Trusted epoch"},"test",tag());const [article]=await sql`SELECT published_at,backfill FROM articles WHERE id=${saved!.articleId!}`;assert.equal(article!.published_at.getTime(),stamp);assert.equal(article!.backfill,false);
+  await assert.rejects(importDouyinResult(ai.id,{reason:"No owner selection"},"test",tag()),/associated source/);
+  const imported=await importDouyinResult(ai.id,{sourceId:target,reason:"Explicit configured owner"},"test",tag());assert.equal((await sql`SELECT source_id FROM articles WHERE id=${imported!.articleId!}`)[0]!.source_id,target);
+  assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='douyin' AND id_value=${i.userId}`)[0]!.source_id,owner);
+  const stamp=Date.now()-3600_000,rankId=id+"1";fixture={...cases.find(c=>c.id==="WD6UT8DQ")!,data:[{...growth,aweme_id:rankId,author_user_id:i.userId,share_url:`https://www.iesdouyin.com/share/video/${rankId}`,create_time:stamp}]};const q=(await query()).results[0]!,saved=await importDouyinResult(q.id,{sourceId:target,reason:"Trusted epoch"},"test",tag());const [article]=await sql`SELECT published_at,backfill FROM articles WHERE id=${saved!.articleId!}`;assert.equal(article!.published_at.getTime(),stamp);assert.equal(article!.backfill,false);
   fixture=cases.find(c=>c.id==="20060017")!;await assert.rejects(importDouyinResult((await query()).results[0]!.id,{reason:"No rank identity"},"test",tag()),/ranking links/);
 });
 
@@ -111,7 +113,7 @@ test("historical article collision rolls back a new author binding, result, audi
   const i=identifiers(),id=`995${Date.now()}`,owner=await source();
   for(const address of [`https://www.douyin.com/video/${id}`,`https://www.iesdouyin.com/share/video/${id}`])await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES (${newArticleId()},${owner},${identityKeyForUrl(address)!},${address},'Synthetic historical owner',now(),now())`;
   const r=await workQuery({videoId:id,opusUrl:`https://www.douyin.com/video/${id}`,authorUid:i.userId,authorSecUid:i.secureId,content:"Synthetic collision"});
-  await assert.rejects(importDouyinResult(r.id,{reason:"Synthetic collision"},"test",tag()),{code:"conflict"});
+  await assert.rejects(importDouyinResult(r.id,{sourceId:owner,reason:"Synthetic collision"},"test",tag()),{code:"conflict"});
   assert.equal((await sql`SELECT 1 FROM sources WHERE id=${`douyin-${sha256(`uid:${i.userId}`).slice(0,24)}`}`).length,0);
   assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='douyin' AND id_value=${i.userId}`).length,0);
   assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${r.id}`)[0]!.source_id,null);
@@ -140,11 +142,11 @@ test('native URL requests reject known mismatches, preserve raw and never infer 
 });
 
 test("real wide-detail imports confirm only documented string video types",async()=>{
- const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin"),i=identifiers();
+ const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin"),i=identifiers(),owner=await source();
  for(const [videoType,confirmed] of [["0",true],["63",true],["68",false],[0,false]] as const){
   const id=`995${Date.now()}${String(videoType).replace(/[^0-9]/g,"")}`;
   const r=await workQuery({videoId:id,opusUrl:`https://www.douyin.com/video/${id}`,authorUid:i.userId,content:"Video contract",videoType});
-  const imported=await importDouyinResult(r.id,{reason:"Synthetic video contract"},"test",tag());
+  const imported=await importDouyinResult(r.id,{sourceId:owner,reason:"Synthetic video contract"},"test",tag());
   const [a]=await sql`SELECT media FROM articles WHERE id=${imported!.articleId}`;
   assert.equal(a!.media.some((m:{confirmed?:boolean})=>m.confirmed===true),confirmed);
   if(confirmed){
@@ -155,4 +157,35 @@ test("real wide-detail imports confirm only documented string video types",async
    await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));
   }
  }
+});
+
+test('Douyin collection imports authorless works into frozen RSS owner and ignores foreign author bindings',async()=>{
+ for(const hasAuthor of [false,true]){
+  const owner=await source('rss'),foreign=await source(),id=`994${Date.now()}${hasAuthor?1:0}`,identity=identifiers();
+  await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('douyin','uid',${identity.userId},${foreign},'{}')`;
+  fixture={...cases.find(c=>c.id==='OWIBYU1V')!,data:{list:[{videoId:id,opusUrl:`https://www.douyin.com/video/${id}`,content:'Synthetic collection',...(hasAuthor?{authorUid:identity.userId}:{})}]}};
+  const sub=await createPlatformSubscription({name:tag(),sourceId:owner,operationId:fixture.id,parameters:fixture.parameters,enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
+  process.env.COLLECT_ENABLED='true';const run=await startPlatformSubscription(sub.id,'test',tag());
+  try{for(let n=0;n<5&&(await sql`SELECT status FROM operation_runs WHERE id=${run.id}`)[0]!.status==='active';n++){const [r]=await sql`SELECT step_version FROM operation_runs WHERE id=${run.id}`;await executeOperationStep(run.id,r!.step_version,randomUUID());}}finally{process.env.COLLECT_ENABLED='false';}
+  const [r]=await sql`SELECT id,article_id,source_id,provenance FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;assert.ok(r!.article_id);assert.equal(r!.source_id,owner);
+  assert.equal((await sql`SELECT source_id FROM articles WHERE id=${r!.article_id}`)[0]!.source_id,owner);
+  assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='douyin' AND id_value=${identity.userId}`)[0]!.source_id,foreign);
+  const {importDouyinResult}=await import('@aihot/backend/providers/redfox/import-douyin');
+  await sql`UPDATE sources SET enabled=false,execution_version=execution_version+1 WHERE id=${owner}`;
+  await sql`UPDATE collection_subscriptions SET execution_version=execution_version+1 WHERE id=${sub.id}`;
+  assert.equal((await importDouyinResult(r!.id,{reason:'Completed replay'},'collector',r!.provenance.douyinImport.key))!.articleId,r!.article_id);
+  await assert.rejects(importDouyinResult(r!.id,{sourceId:foreign,reason:'Changed replay'},'collector',r!.provenance.douyinImport.key),{code:'conflict'});
+  await assert.rejects(importDouyinResult(r!.id,{reason:'New command'},'collector',tag()),/disabled|changed/);
+
+ }
+});
+
+test('completed legacy query import replays after source disable without guessing an owner',async()=>{
+ const {importDouyinResult}=await import('@aihot/backend/providers/redfox/import-douyin'),owner=await source(),key=tag(),id=`996${Date.now()}`;
+ const r=await workQuery({videoId:id,opusUrl:`https://www.douyin.com/video/${id}`,content:'No author'});
+ const saved=await importDouyinResult(r.id,{sourceId:owner,reason:'Selected'},'test',key);
+ await sql`UPDATE operation_results SET provenance=jsonb_set(provenance,'{douyinImport,intent,sourceId}','null') WHERE id=${r.id}`;
+ await sql`UPDATE sources SET enabled=false,execution_version=execution_version+1 WHERE id=${owner}`;
+ assert.deepEqual(await importDouyinResult(r.id,{reason:'Legacy exact replay'},'test',key),saved);
+ await assert.rejects(importDouyinResult(r.id,{sourceId:owner,reason:'Different intent'},'test',key),{code:'conflict'});
 });

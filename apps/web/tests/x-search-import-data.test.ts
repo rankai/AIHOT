@@ -20,7 +20,7 @@ test("only actual 5K X search works can import, not comments/followees/ranks/sum
 test("received decimal string IDs and valid username are mandatory, never filled by request/identity/handle", () => {
   assert.deepEqual(xSearchImportBody(result, " 本地核实 "), { reason: "本地核实" });
   for (const tweetId of [null, 123, "", "invalid", "1".repeat(31)]) assert.equal(xSearchImportState(withRecord({ tweetId })).canImport, false);
-  for (const user of [null, { userId: null, username: "handle" }, { userId: 123, username: "handle" }, { userId: huge, username: "bad handle" }, { userId: huge, username: "a".repeat(16) }]) assert.equal(xSearchImportState(withRecord({ user })).canImport, false);
+  for (const user of [null, { userId: huge, username: "bad handle" }, { userId: huge, username: "a".repeat(16) }]) assert.equal(xSearchImportState(withRecord({ user })).canImport, false);
   const missing = withRecord({ user: null }); missing.data.identity = { userId: huge }; missing.data.requestedScreenName = "received_user";
   assert.equal(xSearchImportState(missing).canImport, false);
   assert.equal(record.tweetId, huge);
@@ -64,13 +64,14 @@ test("5K subscription permits Top/Latest only, while all five ordinary queries a
 
 
 test("unsupported providers and old RF fields cannot grant AgentKey work eligibility", () => {
-  for (const patch of [{ provider: "agentkey" }, { provider: "socialdata" }, { provider: "redfox", importable: false }]) {
+  for (const patch of [{ provider: "agentkey" }, { provider: "socialdata" }]) {
     const research = { ...result, data: { ...result.data, ...patch } };
     assert.equal(xSearchImportState(research).supported, patch.provider === "agentkey");
     assert.equal(xSearchImportState(research).canImport, false);
     assert.throws(() => xSearchImportBody(research, "verified"));
   }
-  assert.equal(xSearchImportState({ ...result, data: { ...result.data, provider: "redfox" } }).canImport, true);
+  assert.equal(xSearchImportState({ ...result, data: { ...result.data, provider: "redfox", importable: false } }).canImport, true);
+  assert.equal(xSearchImportState(withRecord({ user: { username: "handle" } })).canImport, true);
 });
 
 
@@ -89,7 +90,7 @@ test("five AgentKey work routes use actual evidence despite stale hints, unknown
 });
 test("AgentKey requires ordinary role, text and consistent actual author identity, context and native URL", () => {
   const check = (patch: Record<string, unknown>) => xSearchImportState({ ...akResult, data: { ...akResult.data, requestedScope: { rest_id: "00456", screen_name: "actual_author" }, record: { ...akRecord, ...patch }, importable: true } });
-  for (const patch of [{ tweetId: 123 }, { tweetId: "1".repeat(31) }, { author: null }, { author: { rest_id: null, screen_name: "actual_author" } }, { text: "", display_text: "cannot replace" }, { role: "retweet-wrapper" }, { roleLimitations: [] }, { retweeted: null }, { retweeted_tweet: {} }, { url: "https://x.com/wrong/status/00123" }, { urlSource: "received" }]) assert.equal(check(patch).canImport, false, JSON.stringify(patch));
+  for (const patch of [{ tweetId: 123 }, { tweetId: "1".repeat(31) }, { author: null }, { text: "", display_text: "cannot replace" }, { role: "retweet-wrapper" }, { roleLimitations: [] }, { retweeted: null }, { retweeted_tweet: {} }, { url: "https://x.com/wrong/status/00123" }, { urlSource: "received" }]) assert.equal(check(patch).canImport, false, JSON.stringify(patch));
   const author = { rest_id: "00456", screen_name: null }, authorContext = { rest_id: "00456", screen_name: "actual_author", source: "received-account-context" };
   assert.equal(check({ author, authorContext }).canImport, true);
   assert.equal(check({ author, authorContext: { ...authorContext, rest_id: "other" } }).canImport, false);

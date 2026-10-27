@@ -41,7 +41,7 @@ function workResult(operation:WechatOperation,raw:unknown,itemKey:string,parentI
   if(address?.bizInfo){if(identity.bizInfo&&identity.bizInfo!==address.bizInfo)throw new RedfoxResponseError("WeChat article URL and received author identity disagree");identity.bizInfo=address.bizInfo;}
   const missing:string[]=[];
   if(!address)missing.push("缺少有效公众号原文地址，不能用供应商作品 ID 代替");
-  if(!Object.keys(identity).length)missing.push("缺少已确认作者 wxId/bizInfo");
+
   return {kind:"wechat_work",itemKey,data:{platform:"wechat",operationId:operation,title:record.articleTitle??record.title??"公众号作品",url:address?.url??null,identity,missing,record}};
 }
 export function parseWechat(operation:WechatOperation,raw:unknown,parameters:Record<string,unknown>):WechatResult[]{

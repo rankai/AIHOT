@@ -13,9 +13,12 @@ export function weiboImportFields(kind: string, data: Record<string, unknown>) {
   const receivedUrl = typeof data.opusUrl === "string" && data.opusUrl ? data.opusUrl : typeof data.url === "string" && data.url ? data.url : null;
   const exactWork = typeof data.operationId === "string" && !!workTools[data.operationId] && data.tool === workTools[data.operationId];
   const exactAccount = data.operationId === "API_1789098515117" && data.tool === "TikHub/fetch_user_info_api_v1_weibo_app_fetch_user_info_get";
-  const canonical = numericId(receivedUid) && numericId(data.opusId) && receivedUrl === `https://weibo.com/${receivedUid}/${data.opusId}`;
+  let canonical = false;
+  if (receivedUrl && numericId(data.opusId)) {
+    try { const url = new URL(receivedUrl), parts = url.pathname.split("/").filter(Boolean); canonical = ["http:", "https:"].includes(url.protocol) && ["weibo.com", "www.weibo.com"].includes(url.hostname) && !url.username && !url.password && !url.port && !url.hash && parts.length === 2 && /^\d+$/.test(parts[0]!) && (!receivedUid || parts[0] === receivedUid) && [data.opusId, data.mblogid].includes(parts[1]); } catch { /* Unsupported original. */ }
+  }
   const canImport = agentkey ? data.platform === "weibo" && (account ? exactAccount && numericId(receivedUid) : work && exactWork && data.role === "status" && canonical) : account ? !!receivedUid : work && !!data.opusId;
-  return { account, work, agentkey, receivedUid, receivedUrl, missingUid: work && !receivedUid, missingUrl: work && !receivedUrl, canImport, allowSupplement: !agentkey };
+  return { account, work, agentkey, receivedUid, receivedUrl, missingUrl: work && !receivedUrl, canImport, allowSupplement: !agentkey };
 }
 export function weiboReceivedRows(data: Record<string, unknown>): Array<[string, string]> {
   const record = researchObject(data.record);

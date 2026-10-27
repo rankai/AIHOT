@@ -1,3 +1,4 @@
+import {inheritedSourceMembers} from "../../sources/subscriptions.ts";
 import { z } from "zod";
 import { sql } from "../../db.ts";
 import { audit } from "../../admin/auth.ts";
@@ -37,10 +38,12 @@ export async function operationDetail(id: number) {
     current_receipt_id AS "receiptId", progress, limits, created_at AS "createdAt" FROM operation_runs WHERE id = ${id}`;
   if (!run) return null;
   // Inputs were authored by the server; expose only the execution parameters needed by the operator.
-  const { mode, window, parameters, fileKeys, recoveryUnavailable, operationId, platform, family } = run.input;
+  const { members:ownMembers, mode, window, parameters, fileKeys, recoveryUnavailable, operationId, platform, family } = run.input;
   const draft = mode === "preview" && run.input.commandIntent?.kind !== "saved-preview";
   const {tool,upstream}=run.input;
-  const sources = run.input.sources ?? (run.input.source ? [run.input.source] : undefined);
+  const members=(await inheritedSourceMembers(sql,run.input,run.provider,id))?.members??ownMembers;
+  const frozenSourceIds = [...new Set((members ?? []).flatMap((member: {sourceId: string | null}) => member.sourceId ? [member.sourceId] : []))] as string[];
+  const sources = run.input.sources ?? (run.input.source ? [run.input.source] : frozenSourceIds.length ? await sql`SELECT id,name FROM sources WHERE id IN ${sql(frozenSourceIds)} ORDER BY id` : undefined);
   const { polls: pollLimit, pollDeadlineSeconds } = run.limits;
   const videoDownload = run.operationKey === "subscription.video.download" ? {
     mediaRole:run.input.mediaRole??"own",workId:run.input.workId,collector:run.input.collector,resolver:run.input.resolver,resolverUsed:run.progress.resolverUsed===true,parentRunId:run.input.parentRunId,parentResultId:run.input.parentResultId,
@@ -81,7 +84,7 @@ export async function operationDetail(id: number) {
     : run.status === "stopped" || run.status === "needs_review" ? "review-or-resume"
     : ["received","completed"].includes(receipt?.status) ? "local-recovery"
     : job && ["created","retry","active"].includes(job.state) ? "wait-for-job" : "wait-for-recovery";
-  return { ...run, progress:run.progress, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { videoDownload, tool, upstream, mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
+  return { ...run, progress:run.progress, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { members, videoDownload, tool, upstream, mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
 }
 export async function operationResults(id: number, cursor = 0, limit = 100) {
   z.number().int().nonnegative().parse(cursor);

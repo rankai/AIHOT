@@ -37,6 +37,6 @@ export interface PlatformOperationDescriptor {
   collectionProviders?: readonly PlatformCollectionProvider[];
   /** One-off query variants when they differ from the schedulable providers. */
   queryProviders?: readonly PlatformCollectionProvider[];
-  collectionCapabilities?: { detailEnrichment:boolean; detailOperations?: readonly {operationId:string;label:string;fields:readonly PlatformField[];price:{amount:number|null;currency:string;basis:"estimated"}|null}[] };
+  collectionCapabilities?: { sourceRequired?:boolean; detailEnrichment:boolean; detailOperations?: readonly {operationId:string;label:string;fields:readonly PlatformField[];price:{amount:number|null;currency:string;basis:"estimated"}|null}[] };
   schedulableType: null | "search" | "trend" | "list";
 }

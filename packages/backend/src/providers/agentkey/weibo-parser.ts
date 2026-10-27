@@ -32,13 +32,14 @@ export function parseAgentKeyWeibo(response:unknown,route:AgentKeyWeiboRoute,raw
   const retweet=w.retweeted_status!==undefined&&w.retweeted_status!==null;
   if(route===weiboPostsRoute&&!retweet)scope(uid,query.uid);
   const missing:string[]=[];
-  if(!uid)missing.push('缺少实收作者 UID');if(!opusId)missing.push('缺少作品数字 ID');if(!w.text)missing.push('缺少正文');
+  if(!opusId)missing.push('缺少作品数字 ID');if(!w.text)missing.push('缺少正文');
   if(w.isLongText)missing.push('长微博仅实收片段，完整正文未证实');
   if(retweet)missing.push('转发原帖结构未验证，仅展示外层实收微博，不解析原帖作者');
   const publishedAt=weiboPublishedAt(w.created_at)?.toISOString()??null;if(!publishedAt)missing.push('发布时间未知');
-  const opusUrl=uid&&opusId?`https://weibo.com/${uid}/${opusId}`:undefined;
+  let opusUrl=uid&&opusId?`https://weibo.com/${uid}/${opusId}`:undefined;
+  if(!opusUrl&&w.scheme&&opusId){try{const u=new URL(w.scheme),parts=u.pathname.split('/').filter(Boolean);if(['http:','https:'].includes(u.protocol)&&['weibo.com','www.weibo.com'].includes(u.hostname)&&!u.username&&!u.password&&parts.length===2&&/^\d+$/.test(parts[0]!)&&[opusId,w.mblogid].includes(parts[1]!))opusUrl=w.scheme;}catch{}}
   const record={...(opusId?{opusId}:{}),...(uid?{uid}:{}),...(author?.nickname?{nickname:author.nickname}:{}),...(w.text!==undefined?{text:stripTags(w.text)}:{}),...(w.mblogid?{mblogid:w.mblogid}:{}),...(w.created_at?{publishTime:w.created_at}:{}),...(opusUrl?{opusUrl}:{}),...(w.isLongText!==undefined?{isLongText:w.isLongText}:{}),...(w.scheme?{scheme:w.scheme}:{}),...Object.fromEntries(['reposts_count','comments_count','attitudes_count'].filter(k=>w[k as keyof typeof w]!==undefined).map(k=>[k,w[k as keyof typeof w]]))};
-  add('weibo_work',{...record,record,importable:!!uid&&!!opusId&&!retweet,title:record.text??w.mblogid??opusId,publishedAt,urlSource:opusUrl?'derived-canonical-permalink':null,bodyStatus:'pending',textScope:w.isLongText?'received-excerpt':'received-text',role:retweet?'outer-status-unparsed-retweet':'status',missing});
+  add('weibo_work',{...record,record,importable:!!opusUrl&&!!opusId&&!retweet,title:record.text??w.mblogid??opusId,publishedAt,urlSource:opusUrl?(uid?'derived-canonical-permalink':'received-original-url'):null,bodyStatus:'pending',textScope:w.isLongText?'received-excerpt':'received-text',role:retweet?'outer-status-unparsed-retweet':'status',missing});
  };
  if(route===weiboSearchRoute||route===weiboPostsRoute){
   let filtered=0;const visit=(items:unknown,nested=false)=>{for(const item of rows.parse(items)){

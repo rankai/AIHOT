@@ -1,3 +1,4 @@
+import {importManualWorkResult} from "../providers/redfox/import-manual-work.ts";
 import {selectedCollectionDetail,applyCollectedDetail} from "../providers/redfox/collection-detail.ts";
 import {stableJson} from "../lib/ids.ts";
 import {queryHotResearch,parseHotResearch} from "../providers/redfox/hot-research.ts";
@@ -134,7 +135,7 @@ async function imported(tx:Tx,e:Execution,run:RunRow,result:CollectionResult,rec
     else if(result.kind==="baijiahao_work")await importBaijiahaoResult(...args);
     else if(result.kind==="x_research_work")await importXSearchResult(...args);
     else if(result.kind==="zhihu_work")await importZhihuResult(...args);
-    else throw new UnsupportedReplacement("缺少稳定作者和已确认原文；请在结果中逐条人工确认隔离来源与原文");
+    else await importManualWorkResult(...args);
   });}
   catch(error){if(!(error instanceof UnsupportedReplacement)&&!(error instanceof StaleOperationError))throw error;await tx`UPDATE operation_results SET data=data||${tx.json({pendingReason:error.message})} WHERE id=${id}`;}
   return id;
@@ -231,7 +232,7 @@ export async function executePlatformCollection(e:Execution,run:RunRow){
   if(run.step_key!=="redfox.weibo.detail")throw new Error("Unsupported Weibo collection step");
   const response=await queryWeibo("API_1789098514899",{opusId:item.data.opusId},String(run.input.window),"collect",receiptOptions(e));
   const detail=response.results[0]!;
-  if(item.data.uid && detail.data.uid!==item.data.uid)throw new Error("Detail author differs from the retained source item");
+  if(item.data.uid && detail.data.uid && detail.data.uid!==item.data.uid)throw new Error("Detail author differs from the retained source item");
   await sql.begin(async tx=>{await requireExecution(tx,e);await imported(tx,e,run,detail,response.receiptId);await nextItem(tx,e,run,{...p,detailsRead:(p.detailsRead??0)+1});});
 }
 

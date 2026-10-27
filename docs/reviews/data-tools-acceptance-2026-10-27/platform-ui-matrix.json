@@ -1,0 +1,6712 @@
+[
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.account_posts",
+      "label": "X 账号帖子"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名",
+        "type": "text"
+      },
+      {
+        "label": "用户 ID（安全整数）",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.detail",
+      "label": "X 帖子详情"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "帖子 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.account_profile",
+      "label": "X 账号资料"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名",
+        "type": "text"
+      },
+      {
+        "label": "用户 ID（安全整数）",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.followers",
+      "label": "X 粉丝列表"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.list_posts",
+      "label": "X 列表帖子"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "列表 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.community_posts",
+      "label": "X 社区帖子"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "社区 ID",
+        "type": "text"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.trending",
+      "label": "X 趋势词"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "国家",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.list_members",
+      "label": "X 列表成员"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "列表 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "x.community_members",
+      "label": "X 社区成员"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "社区 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "ABJQXHUE",
+      "label": "X(Twitter)获取评论"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "推文ID",
+        "type": "text"
+      },
+      {
+        "label": "分页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "ABJQXHUE",
+      "label": "X(Twitter)获取评论"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "会话根帖 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "5K5EG87P",
+      "label": "X(Twitter)搜索推文"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "搜索类型",
+        "type": "select-one"
+      },
+      {
+        "label": "分页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "5K5EG87P",
+      "label": "X(Twitter)搜索推文"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "API_1790063277084",
+      "label": "X（Twitter）热门账号榜（优质库）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "性别",
+        "type": "select-one"
+      },
+      {
+        "label": "行业分类",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "5QY3G5TY",
+      "label": "X(Twitter)获取用户关注列表"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号handle",
+        "type": "text"
+      },
+      {
+        "label": "分页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "x-research",
+      "label": "X 研究查询"
+    },
+    "op": {
+      "id": "5QY3G5TY",
+      "label": "X(Twitter)获取用户关注列表"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "weibo.account_posts",
+      "label": "微博账号作品"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 UID",
+        "type": "text"
+      },
+      {
+        "label": "首页",
+        "type": "number"
+      },
+      {
+        "label": "内容范围",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "weibo.comments",
+      "label": "微博评论"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品数字 ID",
+        "type": "text"
+      },
+      {
+        "label": "默认排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "weibo.following",
+      "label": "微博关注列表"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 UID",
+        "type": "text"
+      },
+      {
+        "label": "按关注时间",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "weibo.related_search",
+      "label": "微博相关搜索词"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "API_1789098514899",
+      "label": "微博作品详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品数字 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "API_1789098514899",
+      "label": "微博作品详情"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品数字 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "API_1789098515117",
+      "label": "微博用户详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 UID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "API_1789098515117",
+      "label": "微博用户详情"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 UID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "API_1789098515245",
+      "label": "微博账号搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "TXQPVGJG",
+      "label": "微博作品搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "搜索类别",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "认证类别",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "TXQPVGJG",
+      "label": "微博作品搜索"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "首页",
+        "type": "number"
+      },
+      {
+        "label": "搜索类别",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "UAQ90A1F",
+      "label": "微博热搜快照"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "weibo",
+      "label": "微博"
+    },
+    "op": {
+      "id": "UAQ90A1F",
+      "label": "微博热搜快照"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "实时热搜",
+        "type": "select-one"
+      },
+      {
+        "label": "首页",
+        "type": "number"
+      },
+      {
+        "label": "请求数量",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.typed_search",
+      "label": "B站分类型搜索（仅 video）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.comments",
+      "label": "B站视频评论首页"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "AV号",
+        "type": "text"
+      },
+      {
+        "label": "BV号",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.comment_replies",
+      "label": "B站评论回复首页"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "AV号",
+        "type": "text"
+      },
+      {
+        "label": "BV号",
+        "type": "text"
+      },
+      {
+        "label": "一级评论 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.relation_stats",
+      "label": "B站关注与粉丝统计"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.dynamics",
+      "label": "B站账号动态首页（研究）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.trending",
+      "label": "B站推荐视频（研究）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "bilibili.hot_search",
+      "label": "B站热搜词"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "返回数量",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "TIN1NMTZ",
+      "label": "B站作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "BV号",
+        "type": "text"
+      },
+      {
+        "label": "作品链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "TIN1NMTZ",
+      "label": "B站作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "AV号",
+        "type": "text"
+      },
+      {
+        "label": "BV号",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "EH53TOT7",
+      "label": "B站账号详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "EH53TOT7",
+      "label": "B站账号详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "ZXJLJQ21",
+      "label": "B站账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "LEN9QXR3",
+      "label": "B站作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "LEN9QXR3",
+      "label": "B站作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "VPA67I98",
+      "label": "B站账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      },
+      {
+        "label": "账号主页",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "bilibili",
+      "label": "B站"
+    },
+    "op": {
+      "id": "VPA67I98",
+      "label": "B站账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 MID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "xiaohongshu.comments",
+      "label": "小红书评论首页"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "笔记 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "xiaohongshu.account_profile",
+      "label": "小红书账号资料"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "稳定用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "xiaohongshu.topic_posts",
+      "label": "小红书话题笔记首页"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "话题 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "xiaohongshu.suggest",
+      "label": "小红书搜索建议"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "xiaohongshu.recommendations",
+      "label": "小红书推荐研究"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "20060016",
+      "label": "小红书热门账号推荐（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "日期类型",
+        "type": "number"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "4IVIDHEN",
+      "label": "小红书账号信息（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "展示小红书号",
+        "type": "text"
+      },
+      {
+        "label": "稳定用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "KR1LPTBF",
+      "label": "小红书作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "作品链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "KR1LPTBF",
+      "label": "小红书作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "笔记 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "439NFLBD",
+      "label": "小红书账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序（相关性 / 最新 / 最热）",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "439NFLBD",
+      "label": "小红书账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "384C6W6B",
+      "label": "小红书作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序（相关性 / 最新 / 最热）",
+        "type": "select-one"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "384C6W6B",
+      "label": "小红书作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "047JJ3UA",
+      "label": "小红书 AI 作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始时间",
+        "type": "text"
+      },
+      {
+        "label": "结束时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "3X8FGEEM",
+      "label": "小红书爆款笔记洞察（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "LBYLC5AK",
+      "label": "小红书七日爆款笔记（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "XN3ULENA",
+      "label": "小红书账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "展示小红书号",
+        "type": "text"
+      },
+      {
+        "label": "稳定用户 ID",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "发布时间起始",
+        "type": "text"
+      },
+      {
+        "label": "发布时间结束",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "XN3ULENA",
+      "label": "小红书账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "稳定用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "P3W2W18P",
+      "label": "小红书黑马爆文榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "xiaohongshu",
+      "label": "小红书"
+    },
+    "op": {
+      "id": "AEA6YE0J",
+      "label": "小红书每日爆款笔记榜单（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "toutiao.comments",
+      "label": "头条评论首页快照"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "文章 group_id",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "toutiao.account_profile",
+      "label": "头条账号资料（仅查询）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "28CFGF5I",
+      "label": "今日头条作品搜索（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "PAB6Z75Y",
+      "label": "今日头条作品详情（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "PAB6Z75Y",
+      "label": "今日头条作品详情（实时）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "文章 group_id",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "4QS1F8DE",
+      "label": "今日头条账号搜索（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "下一页游标",
+        "type": "text"
+      },
+      {
+        "label": "搜索上下文 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "R1IGR09H",
+      "label": "今日头条账号作品列表（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "内容分类",
+        "type": "select-one"
+      },
+      {
+        "label": "主页 token",
+        "type": "text"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "toutiao",
+      "label": "今日头条"
+    },
+    "op": {
+      "id": "ZMFVK589",
+      "label": "今日头条作品评论（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "原始翻页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.suggest",
+      "label": "抖音搜索建议（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.trending",
+      "label": "抖音热点榜单页快照（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.comments",
+      "label": "抖音作品评论首页快照（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "原生作品 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.comment_replies",
+      "label": "抖音评论回复首页快照（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "原生作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "父评论 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.topic_posts",
+      "label": "抖音话题作品首页快照（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "话题 ID",
+        "type": "text"
+      },
+      {
+        "label": "排序（0 综合 / 1 点赞 / 2 最新）",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "douyin.following",
+      "label": "抖音关注首页快照（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "安全用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "20060017",
+      "label": "抖音热门账号推荐（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单周期",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "P5CHB3BZ",
+      "label": "抖音账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "P5CHB3BZ",
+      "label": "抖音账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "L6OUNUN1",
+      "label": "抖音账号搜索（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "QEQLCKD6",
+      "label": "抖音账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "展示抖音号",
+        "type": "text"
+      },
+      {
+        "label": "账号主页",
+        "type": "text"
+      },
+      {
+        "label": "已确认安全 ID",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "QEQLCKD6",
+      "label": "抖音账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "已确认安全 ID",
+        "type": "text"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "排序（0 最新 / 1 最热）",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "QSL2ZSXM",
+      "label": "抖音账号作品（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 UID",
+        "type": "text"
+      },
+      {
+        "label": "展示抖音号",
+        "type": "text"
+      },
+      {
+        "label": "展示短号",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "774OBKK0",
+      "label": "抖音作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "OWIBYU1V",
+      "label": "抖音作品搜索（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "OWIBYU1V",
+      "label": "抖音作品搜索（广域库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "0OT1E306",
+      "label": "抖音作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "作品链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "FK67XDVQ",
+      "label": "抖音作品详情（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "原生作品 ID（aweme_id）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "FK67XDVQ",
+      "label": "抖音作品详情（广域库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "原生作品 ID（aweme_id）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "HUCIASU",
+      "label": "抖音每日热门作品榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "XUT4CECZ",
+      "label": "抖音账号信息（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "抖音账号标识",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "XUT4CECZ",
+      "label": "抖音账号信息（优质库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "安全用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "I8P3HTVH",
+      "label": "抖音 AI 作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始时间",
+        "type": "text"
+      },
+      {
+        "label": "结束时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "WD6UT8DQ",
+      "label": "抖音每日点赞飙升榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "douyin",
+      "label": "抖音"
+    },
+    "op": {
+      "id": "0ZB9S2FW",
+      "label": "抖音七日点赞飙升榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "类别",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "6C4A77XR",
+      "label": "公众号账号信息（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号微信号",
+        "type": "text"
+      },
+      {
+        "label": "公众号名称",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "KUQYSQNX",
+      "label": "公众号账号信息（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "展示微信号",
+        "type": "text"
+      },
+      {
+        "label": "原始 gh_ ID",
+        "type": "text"
+      },
+      {
+        "label": "账号采集 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "KUQYSQNX",
+      "label": "公众号账号信息（广域库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号 username",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "XEO0QQNF",
+      "label": "公众号作品详情（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "本接口作品 UUID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "1LDQ7E1C",
+      "label": "公众号作品详情（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "本接口作品 UUID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "DNVPQZEZ",
+      "label": "公众号账号搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "5Y84NI1D",
+      "label": "公众号账号搜索（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "PW97QFBS",
+      "label": "公众号作品搜索（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "FVQ8D4W5",
+      "label": "公众号作品搜索（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "XNV30XZ3",
+      "label": "公众号账号作品（优质库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号微信号",
+        "type": "text"
+      },
+      {
+        "label": "公众号名称",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "发布时间起始",
+        "type": "text"
+      },
+      {
+        "label": "发布时间结束",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "8IQD0BJC",
+      "label": "公众号账号作品（广域库·T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "展示微信号",
+        "type": "text"
+      },
+      {
+        "label": "原始 gh_ ID",
+        "type": "text"
+      },
+      {
+        "label": "账号采集 ID",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "8IQD0BJC",
+      "label": "公众号账号作品（广域库·T+1）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号 username",
+        "type": "text"
+      },
+      {
+        "label": "翻页游标（原样传入）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "IE0887SO",
+      "label": "公众号 AI 作品搜索（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "开始时间",
+        "type": "text"
+      },
+      {
+        "label": "结束时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "I3CIBRI2",
+      "label": "公众号原文解析（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号原文地址",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "I3CIBRI2",
+      "label": "公众号原文解析（实时）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号文章 URL",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "ZIGAGYYT",
+      "label": "公众号10W+文章推荐（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "分类",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "OFFSPQ0U",
+      "label": "公众号原创爆款推荐（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "分类",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期",
+        "type": "text"
+      },
+      {
+        "label": "结束日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "DL4YNCTQ",
+      "label": "公众号阅读增长榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "JBGBKQ4B",
+      "label": "公众号综合实力榜（T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单周期",
+        "type": "select-one"
+      },
+      {
+        "label": "榜单日期",
+        "type": "text"
+      },
+      {
+        "label": "分类",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "API_1789637464311",
+      "label": "公众号头条增长榜（周榜）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "统计周周一",
+        "type": "text"
+      },
+      {
+        "label": "作者类别",
+        "type": "select-one"
+      },
+      {
+        "label": "排序字段",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "wechat.comments",
+      "label": "公众号文章评论（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号文章 URL",
+        "type": "text"
+      },
+      {
+        "label": "文章评论 ID（可选捷径）",
+        "type": "text"
+      },
+      {
+        "label": "翻页游标（原样传入）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "wechat.comment_replies",
+      "label": "公众号评论回复（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号文章 URL",
+        "type": "text"
+      },
+      {
+        "label": "父评论 content_id",
+        "type": "text"
+      },
+      {
+        "label": "回复偏移",
+        "type": "number"
+      },
+      {
+        "label": "文章评论 ID（可选捷径）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "wechat",
+      "label": "公众号"
+    },
+    "op": {
+      "id": "wechat.article_stats",
+      "label": "公众号评论统计（TikHub）"
+    },
+    "provider": {
+      "id": "agentkey",
+      "label": "AgentKey · TikHub"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "公众号文章 URL",
+        "type": "text"
+      },
+      {
+        "label": "文章评论 ID（可选捷径）",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "6SE9WIHJ",
+      "label": "TikTok 单个作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "原生作品 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "R473NUE9",
+      "label": "TikTok 用户主页作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户安全 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "PXZXY8KQ",
+      "label": "TikTok 视频搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "text"
+      },
+      {
+        "label": "数量",
+        "type": "text"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "发布时间",
+        "type": "select-one"
+      },
+      {
+        "label": "地区",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "VBBTYLMV",
+      "label": "TikTok 用户搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "text"
+      },
+      {
+        "label": "数量",
+        "type": "text"
+      },
+      {
+        "label": "粉丝筛选",
+        "type": "number"
+      },
+      {
+        "label": "仅认证用户",
+        "type": "number"
+      },
+      {
+        "label": "按用户名相关性",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1790149158205",
+      "label": "TikTok 话题作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "话题 ID",
+        "type": "text"
+      },
+      {
+        "label": "游标",
+        "type": "text"
+      },
+      {
+        "label": "地区",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1790581450500",
+      "label": "TikTok 用户喜欢作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "收藏者安全 ID",
+        "type": "text"
+      },
+      {
+        "label": "游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1790149281139",
+      "label": "TikTok 话题搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "偏移量",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1790577699794",
+      "label": "TikTok 用户关注列表（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "数字用户 ID",
+        "type": "text"
+      },
+      {
+        "label": "安全用户 ID",
+        "type": "text"
+      },
+      {
+        "label": "原始 minTime",
+        "type": "text"
+      },
+      {
+        "label": "原始 pageToken",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1790581645603",
+      "label": "TikTok 视频评论（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "数值游标",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "tiktok",
+      "label": "TikTok"
+    },
+    "op": {
+      "id": "API_1791446025175",
+      "label": "TikTok 评论回复（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "请求评论 ID",
+        "type": "text"
+      },
+      {
+        "label": "数值游标",
+        "type": "number"
+      },
+      {
+        "label": "请求数量",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "youtube",
+      "label": "YouTube（油管）"
+    },
+    "op": {
+      "id": "GC5SC5HS",
+      "label": "YouTube 视频搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "下一页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "youtube",
+      "label": "YouTube（油管）"
+    },
+    "op": {
+      "id": "609DF2IR",
+      "label": "YouTube 视频详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "youtube",
+      "label": "YouTube（油管）"
+    },
+    "op": {
+      "id": "WULKP6JP",
+      "label": "YouTube 视频评论（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频 ID",
+        "type": "text"
+      },
+      {
+        "label": "语言偏好",
+        "type": "text"
+      },
+      {
+        "label": "地区偏好",
+        "type": "text"
+      },
+      {
+        "label": "评论排序",
+        "type": "select-one"
+      },
+      {
+        "label": "原始续页令牌",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "instagram",
+      "label": "Instagram"
+    },
+    "op": {
+      "id": "GM0TISWI",
+      "label": "Instagram 帖子搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "下一页游标",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "instagram",
+      "label": "Instagram"
+    },
+    "op": {
+      "id": "3YJT69FL",
+      "label": "Instagram 账号详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户名",
+        "type": "text"
+      },
+      {
+        "label": "用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "instagram",
+      "label": "Instagram"
+    },
+    "op": {
+      "id": "Z9M88QI8",
+      "label": "Instagram 帖子详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "帖子短码或原文链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "instagram",
+      "label": "Instagram"
+    },
+    "op": {
+      "id": "U1SGKF2G",
+      "label": "Instagram 帖子评论（只读研究）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "帖子短码或完整 URL",
+        "type": "text"
+      },
+      {
+        "label": "评论排序",
+        "type": "select-one"
+      },
+      {
+        "label": "原始分页令牌",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "shipinhao",
+      "label": "视频号"
+    },
+    "op": {
+      "id": "E7G00COY",
+      "label": "视频号作品搜索（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "精准匹配",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "shipinhao",
+      "label": "视频号"
+    },
+    "op": {
+      "id": "NL4I3533",
+      "label": "视频号账号搜索（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名称关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "shipinhao",
+      "label": "视频号"
+    },
+    "op": {
+      "id": "OE4KUEUO",
+      "label": "视频号作品详情（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "shipinhao",
+      "label": "视频号"
+    },
+    "op": {
+      "id": "OVUTOTCV",
+      "label": "视频号账号作品列表（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号昵称（精准匹配）",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "shipinhao",
+      "label": "视频号"
+    },
+    "op": {
+      "id": "MH5YA9DL",
+      "label": "视频号分享链接详情（实时）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频号分享链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "kuaishou",
+      "label": "快手"
+    },
+    "op": {
+      "id": "GU17EVLV",
+      "label": "快手账号搜索（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号名称关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "kuaishou",
+      "label": "快手"
+    },
+    "op": {
+      "id": "27DQ6SF9",
+      "label": "快手账号作品列表（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号展示号",
+        "type": "text"
+      },
+      {
+        "label": "主页定位 ID",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "kuaishou",
+      "label": "快手"
+    },
+    "op": {
+      "id": "UOM99OQI",
+      "label": "快手作品详情（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "kuaishou",
+      "label": "快手"
+    },
+    "op": {
+      "id": "ZWR31P2A",
+      "label": "快手作品搜索（广域库 · T+1）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "搜索关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "每页条数",
+        "type": "number"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "qichezhijia",
+      "label": "汽车之家"
+    },
+    "op": {
+      "id": "CI7VW144",
+      "label": "汽车之家关键词搜索作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "内容类型",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "qichezhijia",
+      "label": "汽车之家"
+    },
+    "op": {
+      "id": "LLCI8QTE",
+      "label": "汽车之家文章详情（车家号）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "qichezhijia",
+      "label": "汽车之家"
+    },
+    "op": {
+      "id": "TE6AGWAF",
+      "label": "汽车之家视频详情（原创账号+车家号）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频 ID",
+        "type": "text"
+      },
+      {
+        "label": "视频类型",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "qichezhijia",
+      "label": "汽车之家"
+    },
+    "op": {
+      "id": "4BOZ9DLE",
+      "label": "汽车之家作品列表（原创账号）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作者 ID",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "dongchedi",
+      "label": "懂车帝"
+    },
+    "op": {
+      "id": "W86F8SSK",
+      "label": "懂车帝关键词搜索作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      },
+      {
+        "label": "内容类型",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "dongchedi",
+      "label": "懂车帝"
+    },
+    "op": {
+      "id": "QQ5E3EZ9",
+      "label": "懂车帝作品详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      },
+      {
+        "label": "作品类型",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "dongchedi",
+      "label": "懂车帝"
+    },
+    "op": {
+      "id": "X16I71WV",
+      "label": "懂车帝用户搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "dongchedi",
+      "label": "懂车帝"
+    },
+    "op": {
+      "id": "API_1791793668086",
+      "label": "懂车帝账号详情+作品列表"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "yiche",
+      "label": "易车"
+    },
+    "op": {
+      "id": "3BXWEB6Y",
+      "label": "易车视频详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "作品 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "yiche",
+      "label": "易车"
+    },
+    "op": {
+      "id": "9KFOB9M2",
+      "label": "易车账号搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "yiche",
+      "label": "易车"
+    },
+    "op": {
+      "id": "YGYYT0G0",
+      "label": "易车全部作品列表"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "用户 ID",
+        "type": "text"
+      },
+      {
+        "label": "翻页时间戳",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "yiche",
+      "label": "易车"
+    },
+    "op": {
+      "id": "YIGCY5US",
+      "label": "易车关键词搜索作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      },
+      {
+        "label": "页码",
+        "type": "number"
+      },
+      {
+        "label": "内容类型",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "yiche",
+      "label": "易车"
+    },
+    "op": {
+      "id": "VYSP68M2",
+      "label": "易车文章详情V2"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "文章链接",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "baijiahao",
+      "label": "百家号"
+    },
+    "op": {
+      "id": "API_1789097000710",
+      "label": "百家号作品内容html"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "文章 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "baijiahao",
+      "label": "百家号"
+    },
+    "op": {
+      "id": "API_1789097000761",
+      "label": "百家号视频详情"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "视频 ID",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "baijiahao",
+      "label": "百家号"
+    },
+    "op": {
+      "id": "API_1789097000814",
+      "label": "百家号账号信息"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "账号 uk",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "baijiahao",
+      "label": "百家号"
+    },
+    "op": {
+      "id": "API_1789097000858",
+      "label": "百家号关键词搜索作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "baijiahao",
+      "label": "百家号"
+    },
+    "op": {
+      "id": "API_1789097000885",
+      "label": "百家号账号关键词搜索"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "hot-research",
+      "label": "热点研究"
+    },
+    "op": {
+      "id": "9Y4EX7RW",
+      "label": "全网聚合热点TOP10列表"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "开始日期/时间",
+        "type": "text"
+      },
+      {
+        "label": "结束日期/时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "hot-research",
+      "label": "热点研究"
+    },
+    "op": {
+      "id": "W94P1QH1",
+      "label": "全网热搜查询（关键词）"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": null,
+        "type": "checkbox"
+      },
+      {
+        "label": "关键词列表",
+        "type": "textarea"
+      },
+      {
+        "label": "开始日期/时间",
+        "type": "text"
+      },
+      {
+        "label": "结束日期/时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "hot-research",
+      "label": "热点研究"
+    },
+    "op": {
+      "id": "S28Q6HUD",
+      "label": "各平台热点榜"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "平台",
+        "type": "number"
+      },
+      {
+        "label": "开始日期/时间",
+        "type": "text"
+      },
+      {
+        "label": "结束日期/时间",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "redfox-account",
+      "label": "Redfox 账户积分"
+    },
+    "op": {
+      "id": "API_1792036841619",
+      "label": "用户余额查询"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "redfox-account",
+      "label": "Redfox 账户积分"
+    },
+    "op": {
+      "id": "API_1792043329817",
+      "label": "接口调用记录查询"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "页码",
+        "type": "text"
+      },
+      {
+        "label": "每页条数",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  },
+  {
+    "platform": {
+      "id": "zhihu",
+      "label": "知乎"
+    },
+    "op": {
+      "id": "API_1789095347662",
+      "label": "知乎关键词搜索作品"
+    },
+    "provider": {
+      "id": "redfox",
+      "label": "Redfox"
+    },
+    "fields": [
+      {
+        "label": "平台",
+        "type": "select-one"
+      },
+      {
+        "label": "查询内容",
+        "type": "select-one"
+      },
+      {
+        "label": "供应商",
+        "type": "select-one"
+      },
+      {
+        "label": "翻页偏移量",
+        "type": "text"
+      },
+      {
+        "label": "排序",
+        "type": "select-one"
+      },
+      {
+        "label": "时间范围",
+        "type": "select-one"
+      },
+      {
+        "label": "内容类型",
+        "type": "select-one"
+      },
+      {
+        "label": "关键词",
+        "type": "text"
+      }
+    ],
+    "submit": true,
+    "error": []
+  }
+]

@@ -17,5 +17,5 @@ export function kuaishouDescriptors():PlatformOperationDescriptor[]{
  UOM99OQI:[{name:"photoId",label:"作品 ID",type:"string",required:true,hint:"从列表复制原始 photoId；详情未必回显"}],
  ZWR31P2A:[{name:"keyword",label:"搜索关键词",type:"string",required:true},...paging,{name:"sort",label:"排序",type:"select",required:false,default:"综合",options:["综合","最新","最多点赞","最多收藏"].map(value=>({value,label:value}))}],
  };
- return (Object.keys(kuaishouOperations) as KuaishouOperation[]).map(id=>({id,platform:"kuaishou",label:kuaishouOperations[id].label,fields:fields[id],purpose:"只读查询与结果查看；缺少稳定作者和原文证据，不能自动材料入库；省略分页时发送文档默认值",schedulableType:["27DQ6SF9", "ZWR31P2A"].includes(id)?(["27DQ6SF9"].includes(id)?"list":"search"):null}));
+ return (Object.keys(kuaishouOperations) as KuaishouOperation[]).map(id=>({id,platform:"kuaishou",label:kuaishouOperations[id].label,fields:fields[id],purpose:"作品按所属信源导入；缺少作品或原文证据时保留待处理；省略分页时发送文档默认值",schedulableType:["27DQ6SF9", "ZWR31P2A"].includes(id)?(["27DQ6SF9"].includes(id)?"list":"search"):null}));
 }

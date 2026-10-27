@@ -33,20 +33,19 @@ export function youtubeImportFields(kind: string, data: Record<string, unknown>,
   const receivedNative = youtubeNativeVideo(receivedUrl);
   const blockedReason = work && receivedUrl && !receivedNative ? "已收到的地址不是受支持的 YouTube 原生 watch 原文，不能直接替换。请显式查询同视频详情核实；不解析 youtu.be、Shorts 或图片地址。"
     : work && receivedNative && workId && receivedNative.id !== workId ? "已收到视频 ID 与原文中的 v 不一致，不能导入或替换；请显式查询详情核实。" : null;
-  return { work, channelId, workId, receivedUrl, receivedNative, native, blockedReason, canImport: work && !blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !channelId };
+  return { work, channelId, workId, receivedUrl, receivedNative, native, blockedReason, canImport: work && !blockedReason, needsUrl: work && !receivedUrl};
 }
 
-type Supplement = { channelId?: string; url?: string; evidence: string };
-export function youtubeImportSupplement(fields: ReturnType<typeof youtubeImportFields>, draft: { channelId: string; url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
+type Supplement = { url?: string; evidence: string };
+export function youtubeImportSupplement(fields: ReturnType<typeof youtubeImportFields>, draft: { url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
   if (!fields.canImport) return { error: fields.blockedReason ?? "此结果不能导入作品" };
-  if (!fields.needsUrl && !fields.needsIdentity) return {};
+  if (!fields.needsUrl) return {};
   if (fields.needsUrl) {
     const native = youtubeNativeVideo(draft.url.trim());
     if (!native) return { error: "请填写仅含一个有效 v 的 youtube.com/watch 原文；不接受短链、shorts、图片、凭证、端口或片段" };
     if (fields.workId && fields.workId !== native.id) return { error: "补充原文中的视频 ID 必须与已收到的视频 ID 一致" };
   }
-  const channelId = draft.channelId.trim(), evidence = draft.evidence.trim();
-  if (fields.needsIdentity && !/^[A-Za-z0-9_-]+$/.test(channelId)) return { error: "请填写已核实的 channelId 原串，不接受频道名称、handle 或主页地址" };
+  const evidence = draft.evidence.trim();
   if (!evidence || evidence.length > 1000) return { error: "请填写缺失字段的核实依据（最多 1000 字）" };
-  return { supplement: { ...(fields.needsUrl ? { url: draft.url.trim() } : {}), ...(fields.needsIdentity ? { channelId } : {}), evidence } };
+  return { supplement: { ...(fields.needsUrl ? { url: draft.url.trim() } : {}), evidence } };
 }

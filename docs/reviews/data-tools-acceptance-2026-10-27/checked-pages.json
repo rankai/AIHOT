@@ -1,0 +1,132 @@
+[
+  {
+    "path": "/admin/content",
+    "title": "内容诊断 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/content/xn132q66q288gb7sz6nfbc04u",
+    "title": "本地合成抖音作品 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/columns",
+    "title": "栏目管理 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/sources",
+    "title": "信源 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/sources/new",
+    "title": "新建信源 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/sources/data-tools-source",
+    "title": "数据工具合成信源 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/sources?view=collections",
+    "title": "信源 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/operations",
+    "title": "执行记录 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/operations/45",
+    "title": "执行记录 #45 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/operations/8",
+    "title": "执行记录 #8 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/operations/38",
+    "title": "执行记录 #38 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/runs",
+    "title": "运行 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/models",
+    "title": "模型与评测 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/selectbench",
+    "title": "SelectBench · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/feedback",
+    "title": "反馈 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/monitor",
+    "title": "Codex 重置 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/settings",
+    "title": "设置 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/audit",
+    "title": "审计记录 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=x",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=platforms",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=ai-search",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=images",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=videos",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=tools",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=assets",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  },
+  {
+    "path": "/admin/data-tools?view=costs",
+    "title": "数据工具 · MyHOT 后台",
+    "alerts": []
+  }
+]

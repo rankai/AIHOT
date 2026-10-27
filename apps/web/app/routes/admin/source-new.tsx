@@ -98,7 +98,7 @@ export default function NewSource() {
             </div>
           </div>
           <div className="mt-4">
-            <Field label="采集配置（JSON）">
+            <Field label="采集配置（JSON）" hint={form.kind === "x_search" ? "X 账号查询可在配置中提供目标采集器接受的 restId（完整数字字符串）；保存与切换无需先购买预览。" : form.kind === "mp_account" ? "公众号按目标采集器要求配置 ghid / wxid；保存与切换无需先购买预览。" : undefined}>
               <Textarea className="font-mono !text-[12px]" rows={10} value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} />
             </Field>
             {["x_search", "mp_account"].includes(form.kind) && <NativeVideoDownloadSetting json={config} disabled={!!pending} onChange={setConfig} />}

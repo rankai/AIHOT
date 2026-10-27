@@ -40,44 +40,44 @@ test('received uid and secUid remain independent; account import binds only rece
  const missing=await query('4QS1F8DE',{nickname:'Display only'});await assert.rejects(imported(Number(missing.id)),/verified uid/);
  await assert.rejects(imported(Number(missing.id),{reason:'No received ID',supplement:{uid,evidence:'Unverified account'}}),/received uid/);
  const id=digit(),work=await query('R1IGR09H',{workId:id,secUid:uid,title:'Not a uid relation',workUrl:url(id)});
- const b=await imported(Number(work.id));assert.notEqual(b!.sourceId,owner);assert.equal((await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${b!.sourceId}`)[0]!.participation_mode,'isolated');
- const bindings=await sql`SELECT id_kind,source_id FROM source_account_bindings WHERE platform='toutiao' AND id_value=${uid}`;assert.equal(bindings.length,2);
+ const b=await imported(Number(work.id),{sourceId:await source(),reason:"Selected independent owner"});assert.notEqual(b!.sourceId,owner);assert.equal((await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${b!.sourceId}`)[0]!.participation_mode,'isolated');
+ const bindings=await sql`SELECT id_kind,source_id FROM source_account_bindings WHERE platform='toutiao' AND id_value=${uid}`;assert.equal(bindings.length,1);
 });
 test('manual cross-kind association requires evidence and isolated source; same-kind conflict is atomic',async()=>{
  const owner=await source(),uid=digit();await bind(owner,'uid',uid);
  const sec='Sec_'+tag(),id=digit(),work=await query('R1IGR09H',{workId:id,secUid:sec,title:'Same manually verified author',workUrl:url(id)});
- await assert.rejects(imported(Number(work.id),{reason:'Missing evidence',sourceId:owner}),/isolated source with evidence/);
+ await assert.rejects(imported(Number(work.id),{reason:'Missing selection'}),/associated source/);
  const input={reason:'Verified cross-kind relation',sourceId:owner,supplement:{evidence:'Operator checked original author against existing account'}};
  const a=await imported(Number(work.id),input);assert.equal(a!.sourceId,owner);
- assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='toutiao' AND id_kind='secUid' AND id_value=${sec}`)[0]!.source_id,owner);
+ assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='toutiao' AND id_kind='secUid' AND id_value=${sec}`).length,0);
  assert.equal((await sql`SELECT provenance FROM operation_results WHERE id=${work.id}`)[0]!.provenance.toutiaoImport.intent.supplement.evidence,input.supplement.evidence);
  const otherId=digit(),otherSec='Other_'+tag(),other=await query('R1IGR09H',{workId:otherId,secUid:otherSec,title:'Different same kind',workUrl:url(otherId)});
- await assert.rejects(imported(Number(other.id),input),{code:'conflict'});assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='toutiao' AND id_value=${otherSec}`).length,0);assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${other.id}`)[0]!.source_id,null);
+ assert.equal((await imported(Number(other.id),input))!.sourceId,owner);assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='toutiao' AND id_value=${otherSec}`).length,0);assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${other.id}`)[0]!.source_id,owner);
 });
 test('manual identities cannot inherit editorial permission; received identities honor current disabled and kind',async()=>{
  const uid=digit(),editorial=await source('editorial');await bind(editorial,'uid',uid);
  const id=digit(),w=await query('28CFGF5I',{opusId:id,uid,title:'Current rights',opusUrl:url(id)});
- await assert.rejects(imported(Number(w.id),{reason:'Manual extra kind',supplement:{secUid:'Extra_'+tag(),evidence:'Manual'}}),/Manual identity/);
+ await assert.rejects(imported(Number(w.id),{reason:'Manual extra kind',supplement:{secUid:'Extra_'+tag(),evidence:'Manual'}}),/associated source/);
  const otherId=digit(),sec='Unbound_'+tag(),other=await query('R1IGR09H',{workId:otherId,secUid:sec,title:'No permission from chosen target',workUrl:url(otherId)});
- await assert.rejects(imported(Number(other.id),{reason:'Wrong target',sourceId:editorial,supplement:{evidence:'Manual'}}),/isolated/);
- await sql`UPDATE sources SET enabled=false WHERE id=${editorial}`;await assert.rejects(imported(Number(w.id)),/disabled/);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${w.id}`)[0]!.article_id,null);
+ assert.equal((await imported(Number(other.id),{reason:'Selected editorial source',sourceId:editorial}))!.sourceId,editorial);
+ await sql`UPDATE sources SET enabled=false WHERE id=${editorial}`;await assert.rejects(imported(Number(w.id),{sourceId:editorial,reason:'Disabled selected source'}),/disabled/);assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${w.id}`)[0]!.article_id,null);
  const wrong=await source('isolated','rss'),a=await query('4QS1F8DE',{uid:digit(),nickname:'Account'});await assert.rejects(imported(Number(a.id),{reason:'Wrong kind',sourceId:wrong}),/external source/);
 });
 test('conflicting owners and forged normalized identity do not leave partial mappings',async()=>{
  const one=await source(),two=await source(),uid=digit(),sec='Bound_'+tag();await bind(one,'uid',uid);await bind(two,'secUid',sec);
  const id=digit(),w=await query('28CFGF5I',{opusId:id,uid,title:'Conflict',opusUrl:url(id)});
- await assert.rejects(imported(Number(w.id),{reason:'Conflicting IDs',supplement:{secUid:sec,evidence:'Cannot join owners'}}),{code:'conflict'});
+ await assert.rejects(imported(Number(w.id),{reason:'No selected owner',supplement:{secUid:sec,evidence:'Bindings do not select owner'}}),/associated source/);
  await sql`UPDATE operation_results SET data=jsonb_set(data,'{identity}',${sql.json({uid:digit()})}) WHERE id=${w.id}`;
- const a=await imported(Number(w.id));assert.equal(a!.sourceId,one);assert.equal((await sql`SELECT count(*)::int AS count FROM source_account_bindings WHERE platform='toutiao' AND source_id=${one}`)[0]!.count,1);
+ const a=await imported(Number(w.id),{sourceId:one,reason:"Explicit owner"});assert.equal(a!.sourceId,one);assert.equal((await sql`SELECT count(*)::int AS count FROM source_account_bindings WHERE platform='toutiao' AND source_id=${one}`)[0]!.count,1);
 });
 test('manual native originals only fill missing fields and always respect fixed detail request scope',async()=>{
  const uid=digit(),id=digit(),w=await query('PAB6Z75Y',{title:'No echo, only requested ID'},{opusId:id});
  await assert.rejects(imported(Number(w.id),{reason:'Wrong work',supplement:{uid,url:url(digit()),evidence:'Wrong URL'}}),{code:'conflict'});
  await assert.rejects(imported(Number(w.id),{reason:'Short link',supplement:{uid,url:'https://t.toutiao.com/example',evidence:'Short'}}));
- const a=await imported(Number(w.id),{reason:'Verified same work',supplement:{uid,url:url(id),evidence:'Verified original page'}});assert.ok(a!.articleId);assert.equal((await sql`SELECT data FROM operation_results WHERE id=${w.id}`)[0]!.data.record.workId,undefined);
+ const a=await imported(Number(w.id),{sourceId:await source(),reason:'Verified same work',supplement:{uid,url:url(id),evidence:'Verified original page'}});assert.ok(a!.articleId);assert.equal((await sql`SELECT data FROM operation_results WHERE id=${w.id}`)[0]!.data.record.workId,undefined);
  const next=digit(),bad=await query('28CFGF5I',{opusId:next,uid,title:'Already has URL',opusUrl:'https://example.com/not-a-native-original'});
  await assert.rejects(imported(Number(bad.id),{reason:'Cannot replace received URL',supplement:{url:url(next),evidence:'Replacement'}}),{code:'conflict'});
- const missing=await query('28CFGF5I',{title:'Missing work and author'}),newId=digit();const b=await imported(Number(missing.id),{reason:'Manual missing fields',supplement:{uid:digit(),url:url(newId),evidence:'Confirmed author and original'}});assert.equal((await material(b!.articleId!)).identity_key,`toutiao:workId:${newId}`);
+ const missing=await query('28CFGF5I',{title:'Missing work and author'}),newId=digit();const b=await imported(Number(missing.id),{sourceId:await source(),reason:'Manual missing fields',supplement:{uid:digit(),url:url(newId),evidence:'Confirmed author and original'}});assert.equal((await material(b!.articleId!)).identity_key,`toutiao:workId:${newId}`);
 });
 
 test('publication time uses original result discovery; unknown and future claims backfill, media and sanitized body survive',async()=>{
@@ -85,7 +85,7 @@ test('publication time uses original result discovery; unknown and future claims
   ['28CFGF5I',String(Math.floor(Date.now()/1000)),'fresh'],['28CFGF5I','1700000000','old'],['PAB6Z75Y','2020-01-01 12:00:00','unknown'],['PAB6Z75Y','invalid','unknown'],['PAB6Z75Y','2099-01-01T00:00:00Z','unknown'],['PAB6Z75Y',new Date().toISOString(),'fresh'],
  ] as const){
   const id=digit(),uid=digit(),record={...(op==='28CFGF5I'?{opusId:id,uid,opusUrl:url(id)}:{workId:id,workUrl:url(id),content:'<p>Actual <strong>body</strong></p><script>bad()</script>',imageList:['https://example.com/img.jpg','javascript:bad'],downloadUrl:['https://example.com/video.mp4']}),title:'Timeline',publishTime:published};
-  const r=await query(op,record),a=await imported(Number(r.id),{reason:'Time evidence',...(op==='PAB6Z75Y'?{supplement:{uid,evidence:'Missing detail author confirmed'}}:{})}),row=await material(a!.articleId!);
+  const r=await query(op,record),a=await imported(Number(r.id),{sourceId:await source(),reason:'Time evidence',...(op==='PAB6Z75Y'?{supplement:{uid,evidence:'Missing detail author confirmed'}}:{})}),row=await material(a!.articleId!);
   assert.equal(row.discovered_at.toISOString(),r.created_at.toISOString());assert.equal(row.backfill,expected!=='fresh');if(expected==='unknown')assert.equal(row.published_at,null);if(expected==='old')assert.equal(row.backfill_reason,'stale-on-discovery');
   if(op==='PAB6Z75Y'){assert.equal(row.body_text,'Actual body');assert.ok(!row.body_html.includes('script'));assert.equal(row.media.length,2);assert.equal(row.body_status,'ok');}
  }
@@ -98,13 +98,13 @@ test('HTTP origin import reuses original discovery, is idempotent and local; pen
  process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;const before=hits;
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Synthetic import admin'};
  try{
-  const endpoint=`/api/admin/operations/results/${result!.id}/import`,headers={'x-csrf-token':'dev','idempotency-key':tag()},payload={reason:'Verified origin'};
+  const endpoint=`/api/admin/operations/results/${result!.id}/import`,headers={'x-csrf-token':'dev','idempotency-key':tag()},payload={sourceId:owner,reason:'Verified origin'};
   const response=await app.inject({method:'POST',url:endpoint,headers,payload});assert.equal(response.statusCode,200,response.body);assert.deepEqual((await app.inject({method:'POST',url:endpoint,headers,payload})).json(),response.json());
   assert.equal((await sql`SELECT count(*)::int AS n FROM audit_log WHERE subject=${'result:'+result!.id} AND action='material.import'`)[0]!.n,1);
   assert.equal((await app.inject({method:'POST',url:endpoint,headers,payload:{...payload,supplement:{evidence:'Changed intent'}}})).statusCode,409);
   const a=await material(response.json().articleId);assert.equal(a.source_id,owner);assert.equal(a.discovered_at.toISOString(),(run.input.origin as {discoveredAt:string}).discoveredAt);assert.equal(a.body_text,'Explicit detail body');
   assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${r.id}`)[0]!.article_id,null);
-  const bare=await imported(Number(pending.id),{reason:'Original supplied',supplement:{url:url(pendingId),evidence:'Verified original'}});assert.equal((await material(bare!.articleId!)).body_status,'pending');
+  const bare=await imported(Number(pending.id),{sourceId:owner,reason:'Original supplied',supplement:{url:url(pendingId),evidence:'Verified original'}});assert.equal((await material(bare!.articleId!)).body_status,'pending');
   // Keep even a regressed fallback inside the local stub, never the real native host.
   await sql`UPDATE articles SET url=${process.env.REDFOX_TEST_BASE_URL!+'/body'} WHERE id=${bare!.articleId!}`;
   assert.equal(await extractArticleBody(bare!.articleId!,false),'unconfirmed');assert.equal((await material(bare!.articleId!)).body_status,'unconfirmed');assert.equal(hits,before);
@@ -114,7 +114,7 @@ test('legacy ownership conflict rolls back new author binding, source, result an
  const id=digit(),one=await source(),two=await source();
  for(const [owner,path] of [[one,'article'],[two,'video']]){const original=`https://toutiao.com/${path}/${id}?token=${tag()}`;await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES(${newArticleId()},${owner},${identityKeyForUrl(original)!},${original},'Legacy',now(),now())`;}
  const uid=digit(),r=await query('28CFGF5I',{opusId:id,uid,title:'Conflicting history',opusUrl:url(id)});
- await assert.rejects(imported(Number(r.id)),{code:'conflict'});assert.equal((await sql`SELECT 1 FROM sources WHERE id=${'toutiao-'+sha256('uid:'+uid).slice(0,24)}`).length,0);assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='toutiao' AND id_kind='uid' AND id_value=${uid}`).length,0);assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${r.id}`)[0]!.source_id,null);
+ await assert.rejects(imported(Number(r.id),{sourceId:one,reason:'Existing article conflict'}),{code:'conflict'});assert.equal((await sql`SELECT 1 FROM sources WHERE id=${'toutiao-'+sha256('uid:'+uid).slice(0,24)}`).length,0);assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='toutiao' AND id_kind='uid' AND id_value=${uid}`).length,0);assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${r.id}`)[0]!.source_id,null);
 });
 
 test('concurrent account imports share one received owner; receipt proof and summaries cannot be imported',async()=>{
@@ -130,5 +130,23 @@ test('concurrent account imports share one received owner; receipt proof and sum
 
 test('verified Toutiao article body source is confirmed independently of top-level work type',async()=>{
  const id=digit(),uid=digit(),r=await query('PAB6Z75Y',{workId:id,uid,workUrl:url(id),title:'Body video',workType:false,content:'<p>Body</p><video><source type="video/mp4" src="/v.mp4"></video>'});
- const a=await imported(r.id,{reason:"Verified raw body",supplement:{uid,evidence:"Confirmed author"}}),row=await material(a!.articleId!);assert.equal(row.media.some((m:any)=>m.confirmed===true),true);assert.equal(row.body_html.includes('<source'),false);
+ const a=await imported(r.id,{sourceId:await source(),reason:"Verified raw body",supplement:{uid,evidence:"Confirmed author"}}),row=await material(a!.articleId!);assert.equal(row.media.some((m:any)=>m.confirmed===true),true);assert.equal(row.body_html.includes('<source'),false);
+});
+
+test('explicit detail inherits its subscription source and rejects a different chosen owner',async()=>{
+ const {createPlatformSubscription,startPlatformSubscription}=await import('@aihot/backend/sources/platform-subscriptions');
+ const {operationDetail}=await import('@aihot/backend/providers/operations/read');
+ const owner=await source('isolated','rss'),other=await source(),id=digit(),[budget]=await sql`SELECT * FROM budgets WHERE service='redfox.collect'`;
+ await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.collect'`;
+ process.env.COLLECT_ENABLED='true';operation='28CFGF5I';data=[{opusId:id,opusUrl:url(id),title:'Authorless collected work'}];
+ const sub=await createPlatformSubscription({name:tag(),sourceId:owner,operationId:operation,parameters:{keyword:'synthetic',offset:'0'},enabled:true,limits:{pages:1,items:1,details:0}},actor,tag());
+ try{
+  const parent=await startPlatformSubscription(sub.id,actor,tag());for(let n=0;n<5&&(await sql`SELECT status FROM operation_runs WHERE id=${parent.id}`)[0]!.status==='active';n++)await step(parent.id);
+  const [original]=await sql`SELECT id FROM operation_results WHERE run_id=${parent.id} AND kind='toutiao_work'`;
+  const detail=await createSynchronousQuery({operationId:'PAB6Z75Y',parameters:{opusId:id},sourceResultId:original!.id},actor,tag());operation='PAB6Z75Y';data={workId:id,workUrl:url(id),title:'Explicit detail',content:'Same work'};await step(detail.id);
+  const [item]=await sql`SELECT id FROM operation_results WHERE run_id=${detail.id} AND kind='toutiao_work'`;
+  await assert.rejects(imported(item!.id,{sourceId:other,reason:'Cannot redirect inherited source'}),/associated source/);
+  const importedWork=await imported(item!.id,{reason:'Inherited once'});assert.equal(importedWork!.sourceId,owner);
+  const view=await operationDetail(detail.id);assert.equal(view!.inputs.mode,'query');assert.equal(view!.inputs.members[0].sourceId,owner);assert.equal((await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`)[0]!.active_run_id,null);
+ }finally{process.env.COLLECT_ENABLED='false';await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;await sql`UPDATE budgets SET per_minute=${budget!.per_minute},per_hour=${budget!.per_hour},per_day=${budget!.per_day} WHERE service='redfox.collect'`;}
 });

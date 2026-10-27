@@ -10,17 +10,10 @@ import type {WechatCandidate} from './wechat-parser.ts';
 export async function checkWechatSource(tx:Tx,run:RunRow,item?:WechatCandidate){
   const source=run.input.source as {id:string},mapping=run.input.mapping as {identity:Record<string,string|null>};
   if(!source?.id||!mapping?.identity)throw new AgentKeyPayloadError('Missing frozen MP source identity');
-  let proved=false;
   for(const kind of ['wxId','bizInfo']){
-    const value=mapping.identity[kind];if(!value)continue;
-    const [binding]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind=${kind} AND id_value=${value}`;
-    if(binding?.source_id!==source.id)throw new AgentKeyPayloadError('MP author binding changed');
-    if(item){const actual=(item.data.identity as Record<string,string>)[kind];if(actual&&actual!==value)throw new AgentKeyPayloadError('MP returned author differs');if(actual===value)proved=true;}
-  }
-  if(item&&!proved)throw new AgentKeyPayloadError('MP returned author lacks same-source identity proof');
-  if(item)for(const [kind,value] of Object.entries(item.data.identity as Record<string,string>)){
-    const [owner]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind=${kind} AND id_value=${value}`;
-    if(owner&&owner.source_id!==source.id)throw new AgentKeyPayloadError('MP returned identity has another owner');
+    const value=mapping.identity[kind];if(!value||!item)continue;
+    const actual=(item.data.identity as Record<string,string>)[kind];
+    if(actual&&actual!==value)throw new AgentKeyPayloadError('MP returned author differs');
   }
 }
 export async function finishWechatCollection(tx:Tx,e:Execution,run:RunRow){

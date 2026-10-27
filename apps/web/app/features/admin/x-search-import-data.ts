@@ -2,10 +2,10 @@ import type { OperationResult } from "./operation-types.ts";
 import { researchObject } from "./research-platform-data.ts";
 
 export function isXSearchWork(kind: string, data: Record<string, unknown>) {
-  return (data.provider === undefined || data.provider === "redfox") && data.importable !== false && kind === "x_research_work" && data.platform === "x-research" && data.operationId === "5K5EG87P";
+  return (data.provider === undefined || data.provider === "redfox") && kind === "x_research_work" && data.platform === "x-research" && data.operationId === "5K5EG87P";
 }
 export function isXDetailWork(kind: string, data: Record<string, unknown>) {
-  return (data.provider === undefined || data.provider === "redfox") && data.importable !== false && kind === "x_detail_work" && data.platform === "x" && data.operationId === "QCP75W33";
+  return (data.provider === undefined || data.provider === "redfox") && kind === "x_detail_work" && data.platform === "x" && data.operationId === "QCP75W33";
 }
 const validXId = (value: unknown): value is string => typeof value === "string" && /^\d{1,30}$/.test(value);
 const validXHandle = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_]{1,15}$/.test(value);
@@ -17,8 +17,8 @@ export function isAgentKeyXImportWork(kind: string, data: Record<string, unknown
 function agentKeyXPostIssue(value: unknown): string | null {
   const record = researchObject(value), author = researchObject(record.user_info ?? record.author), context = researchObject(record.authorContext);
   if (record.role !== "post" || record.roleLimitations !== undefined || record.retweeted !== undefined || record.retweeted_tweet !== undefined) return "转发或未核实角色仅供研究";
-  const username = author.screen_name ?? (context.source === "received-account-context" && context.rest_id === author.rest_id ? context.screen_name : undefined);
-  if (!validXId(record.tweetId) || !validXId(author.rest_id) || !validXHandle(username)) return "缺少实收帖子 ID、稳定作者 ID 或合法账号名，不能用请求范围补齐";
+  const username = author.screen_name ?? (context.source === "received-account-context" && (author.rest_id === undefined || context.rest_id === undefined || context.rest_id === author.rest_id) ? context.screen_name : undefined);
+  if (!validXId(record.tweetId) || !validXHandle(username)) return "缺少实收帖子 ID 或合法账号名，不能用请求范围补齐";
   if (record.urlSource !== "derived-canonical-permalink" || record.url !== `https://x.com/${username}/status/${record.tweetId}`) return "原文地址与实收帖子及作者身份不一致";
   if (typeof record.text !== "string" || !record.text.trim()) return "缺少实收文本";
   return null;
@@ -47,9 +47,8 @@ export function xSearchImportState(result: Pick<OperationResult, "kind" | "data"
   const username = detail && user.username == null ? researchObject(result.data.context).username : user.username;
   const validId = (value: unknown) => typeof value === "string" && /^\d{1,30}$/.test(value);
   if (supported) {
-    if (detail && (result.data.workId !== record.tweetId || researchObject(result.data.identity).userId !== user.userId)) issues.push("详情作品或作者身份与实收记录不一致，请核对后台结果");
+    if (detail && (result.data.workId !== record.tweetId || researchObject(result.data.identity).userId != null && user.userId != null && researchObject(result.data.identity).userId !== user.userId)) issues.push("详情作品或作者身份与实收记录不一致，请核对后台结果");
     if (!validId(record.tweetId)) issues.push("缺少合法的实收 tweetId");
-    if (!validId(user.userId)) issues.push(`缺少 ${detail ? "author" : "user"}.userId 稳定作者身份，不能用请求或 handle 补齐`);
     if (typeof username !== "string" || !/^[A-Za-z0-9_]{1,15}$/.test(username)) issues.push(detail ? "缺少合法的实收 username 或后台核实的同作者上下文" : "缺少合法的实收 username");
     const text = record.text ?? record.content;
     if (typeof text !== "string" || !text.trim()) issues.push("缺少实收正文");

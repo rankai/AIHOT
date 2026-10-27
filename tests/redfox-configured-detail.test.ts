@@ -55,7 +55,7 @@ function secondFixture(platform:string):Fixture{
 const fixture=(platform:string)=>["weibo","qichezhijia","dongchedi","yiche"].includes(platform)?secondFixture(platform):({...firstFixture(platform),sourceCode:2000,targetCode:2000});
 async function start(f:ReturnType<typeof fixture>,details=1){
  on();data=f.page;code=f.sourceCode;
- const sub=await createPlatformSubscription({name:tag(),operationId:f.source,parameters:f.parameters,enabled:true,enrichDetails:true,detailOperationId:f.target,limits:{pages:1,items:10,details}},'detail-collection',tag());
+ const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),operationId:f.source,parameters:f.parameters,enabled:true,enrichDetails:true,detailOperationId:f.target,limits:{pages:1,items:10,details}},'detail-collection',tag());
  const run=await startPlatformSubscription(sub.id,'detail-collection',tag());await step(run.id);assert.equal((await row(run.id)).status,'active',(await row(run.id)).wait_reason);
  await sql`UPDATE operation_results SET created_at='2020-02-03T04:05:06Z' WHERE run_id=${run.id} AND kind='query_summary'`;
  return {sub,run};
@@ -71,10 +71,10 @@ for(const platform of ['douyin','xiaohongshu','wechat','tiktok','bilibili','weib
 });
 test('configured targets/page must be explicit and scope-correct, limits leave pending without another call',async()=>{
  const f=fixture('qichezhijia'),base={name:tag(),operationId:f.source,parameters:f.parameters,enrichDetails:true,enabled:false,limits:{pages:1,items:1,details:1}};
- await assert.rejects(createPlatformSubscription(base,'detail-collection',tag()),/Select/);
- await assert.rejects(createPlatformSubscription({...base,detailOperationId:'LLCI8QTE'},'detail-collection',tag()));
- await assert.rejects(createPlatformSubscription({...base,parameters:{...f.parameters,sourceType:'article'},detailOperationId:'LLCI8QTE'},'detail-collection',tag()),/page/);
- await assert.rejects(createPlatformSubscription({...base,enrichDetails:false,detailOperationId:f.target},'detail-collection',tag()),/requires enrichment/);
+ await assert.rejects(createPlatformSubscription({...base,sourceId:await selectedSource()},'detail-collection',tag()),/Select/);
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),...base,detailOperationId:'LLCI8QTE'},'detail-collection',tag()));
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),...base,parameters:{...f.parameters,sourceType:'article'},detailOperationId:'LLCI8QTE'},'detail-collection',tag()),/page/);
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),...base,enrichDetails:false,detailOperationId:f.target},'detail-collection',tag()),/requires enrichment/);
  const {sub,run}=await start(f,0),n=hits;await finish(run.id);assert.equal((await row(run.id)).status,'completed');assert.equal(hits,n);const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='qichezhijia_work'`;assert.match(r!.data.pendingReason,/limit/);assert.equal(r!.article_id,null);await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;
 });
 test('detail budget wait retains exact page/item; received response recovers without key or outbound',async()=>{
@@ -130,7 +130,7 @@ test('legacy Weibo unique detail target is execution-equivalent on name/period e
  const {updatePlatformSubscription}=await import('@aihot/backend/sources/platform-subscriptions');
  for(const status of ['active','waiting']){
   const input={name:tag(),operationId:'TXQPVGJG',parameters:{searchType:'1',page:'1',keyword:tag()},enabled:true,enrichDetails:true,intervalMinutes:15,limits:{pages:1,items:8,details:2}};
-  const sub=await createPlatformSubscription(input,'legacy-detail',tag()),run=await startPlatformSubscription(sub.id,'legacy-detail',tag());
+  const sub=await createPlatformSubscription({...input,sourceId:await selectedSource()},'legacy-detail',tag()),run=await startPlatformSubscription(sub.id,'legacy-detail',tag());
   await sql`UPDATE operation_runs SET status=${status},wait_reason=${status==='waiting'?'fixture budget wait':null} WHERE id=${run.id}`;
   const [before]=await sql`SELECT * FROM collection_subscriptions WHERE id=${sub.id}`,beforeRun=await row(run.id);
   const config={...input,name:'Renamed legacy subscription',intervalMinutes:30,detailOperationId:'API_1789098514899'};
@@ -144,3 +144,6 @@ test('legacy Weibo unique detail target is execution-equivalent on name/period e
   await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;
  }
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

@@ -152,7 +152,7 @@ export const douyinSnapshotVariants=[
   {operationId:"douyin.trending",operationLabel:"抖音热点榜单页快照（TikHub）",fields:[],purpose:"仅默认热点榜，每轮一次；保留上游顺序，不推断排名，不导入新闻"},
   {operationId:"douyin.comments",operationLabel:"抖音作品评论首页快照（TikHub）",fields:[idField("aweme_id","原生作品 ID")],purpose:"固定首页 20 条；评论研究，不导入新闻或绑定作者，不连续翻页"},
   {operationId:"douyin.comment_replies",operationLabel:"抖音评论回复首页快照（TikHub）",fields:[idField("item_id","原生作品 ID"),idField("comment_id","父评论 ID")],purpose:"固定首页 20 条；回复研究，不导入新闻或绑定作者"},
-  {operationId:"douyin.topic_posts",operationLabel:"抖音话题作品首页快照（TikHub）",fields:[idField("ch_id","话题 ID"),{name:"sort_type",label:"排序（0 综合 / 1 点赞 / 2 最新）",type:"integer" as const,required:false,default:0,constraints:{min:0,max:2}}],purpose:"固定首页 10 条；有稳定作品及作者身份才导入，时间单位未核实，不追加详情或翻页"},
+  {operationId:"douyin.topic_posts",operationLabel:"抖音话题作品首页快照（TikHub）",fields:[idField("ch_id","话题 ID"),{name:"sort_type",label:"排序（0 综合 / 1 点赞 / 2 最新）",type:"integer" as const,required:false,default:0,constraints:{min:0,max:2}}],purpose:"固定首页 10 条；有作品及原文证据时按所属信源导入，时间单位未核实，不追加详情或翻页"},
   {operationId:"douyin.following",operationLabel:"抖音关注首页快照（TikHub）",fields:[idField("sec_user_id","安全用户 ID")],purpose:"固定 source_type=2 首页 20 条；空页仅表示本次未返回成员，不自动请求第二页或绑定成员"},
   {operationId:"XUT4CECZ",operationLabel:"抖音账号资料（TikHub · 仅注销态）",fields:[idField("sec_user_id","安全用户 ID")],purpose:"仅已核实的注销账号特殊态；活跃资料待核，不支持订阅或来源绑定"},
 ].map(v=>({...v,id:"agentkey" as const,label:"AgentKey · TikHub",collectionPrice:creditPrice,collectionCapabilities:{detailEnrichment:false,detailOperations:[]}}));

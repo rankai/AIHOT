@@ -61,13 +61,13 @@ test('article import revalidates receipt, isolates actual uid and deduplicates w
   const run=await createAgentKeyQuery({provider:'agentkey',operationId:'PAB6Z75Y',parameters:{group_id:g}},'test',tag());assert.equal((await step(run.id)).status,'completed');
   const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='toutiao_work'`;
   await assert.rejects(importToutiaoResult(r!.id,{reason:'bad override',supplement:{url:`https://www.toutiao.com/group/1/`,evidence:'manual'}},'test',tag()));
-  const imported=await importToutiaoResult(r!.id,{reason:'test import'},'test',tag());assert.ok(imported?.articleId);
+  const imported=await importToutiaoResult(r!.id,{sourceId:await selectedSource(),reason:'test import'},'test',tag());assert.ok(imported?.articleId);
   const [s]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${imported!.sourceId}`;assert.deepEqual({...s},{participation_mode:'isolated',site_fulltext:false,syndicate_fulltext:false});
   const [a]=await sql`SELECT published_at,body_status,body_text,backfill,raw FROM articles WHERE id=${imported!.articleId}`;assert.equal(a!.published_at,null);assert.equal(a!.body_status,'pending');assert.equal(a!.body_text,null);assert.equal(a!.backfill,true);assert.equal(a!.raw.provider,'agentkey');
-  assert.equal((await importToutiaoResult(r!.id,{reason:'repeat'},'test',tag()))!.articleId,imported!.articleId);
+  assert.equal((await importToutiaoResult(r!.id,{sourceId:await selectedSource(),reason:'repeat'},'test',tag()))!.articleId,imported!.articleId);
   const q=await createAgentKeyQuery({provider:'agentkey',operationId:'PAB6Z75Y',parameters:{group_id:g}},'test',tag());await step(q.id);const [r2]=await sql`SELECT * FROM operation_results WHERE run_id=${q.id} AND kind='toutiao_work'`;
   await sql`UPDATE operation_results SET data=jsonb_set(data,'{title}','"forged"') WHERE id=${r2!.id}`;await assert.rejects(importToutiaoResult(r2!.id,{reason:'tamper'},'test',tag()),/differs/);
-  await sql`UPDATE operation_results SET data=${sql.json(r2!.data)} WHERE id=${r2!.id}`;assert.equal((await importToutiaoResult(r2!.id,{reason:'dedup'},'test',tag()))!.articleId,imported!.articleId);
+  await sql`UPDATE operation_results SET data=${sql.json(r2!.data)} WHERE id=${r2!.id}`;assert.equal((await importToutiaoResult(r2!.id,{sourceId:await selectedSource(),reason:'dedup'},'test',tag()))!.articleId,imported!.articleId);
  });
 });
 test('received mobile article import reuses a pre-upgrade URL row and preserves its source history',async()=>{
@@ -82,26 +82,26 @@ test('received mobile article import reuses a pre-upgrade URL row and preserves 
   const run=await createAgentKeyQuery({provider:'agentkey',operationId:'PAB6Z75Y',parameters:{group_id:g}},'test',tag());assert.equal((await step(run.id)).status,'completed');
   const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='toutiao_work'`;
   process.env.AGENTKEY_CALLS_ENABLED='false';
-  const imported=await importToutiaoResult(r!.id,{reason:'legacy mobile import'},'test',tag());assert.equal(imported!.articleId,oldId);
+  const imported=await importToutiaoResult(r!.id,{sourceId:await selectedSource(),reason:'legacy mobile import'},'test',tag());assert.equal(imported!.articleId,oldId);
   const [a]=await sql`SELECT identity_key,url,source_id,title,body_text,revision FROM articles WHERE id=${oldId}`;
   assert.deepEqual({...a},{identity_key:`url:${url}`,url,source_id:oldSource,title:'Legacy title',body_text:'Legacy body',revision:1});
   const [s]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${oldSource}`;assert.deepEqual({...s},{participation_mode:'isolated',site_fulltext:false,syndicate_fulltext:false});
   assert.equal((await sql`SELECT 1 FROM article_revisions WHERE article_id=${oldId}`).length,1);
   assert.equal((await sql`SELECT 1 FROM article_discoveries WHERE article_id=${oldId} AND source_id=${imported!.sourceId}`).length,1);
-  assert.equal((await importToutiaoResult(r!.id,{reason:'repeat legacy import'},'test',tag()))!.articleId,oldId);assert.equal(calls.length,1);
+  assert.equal((await importToutiaoResult(r!.id,{sourceId:await selectedSource(),reason:'repeat legacy import'},'test',tag()))!.articleId,oldId);assert.equal(calls.length,1);
  });
 });
 test('comments S is one homepage, respects item limit, releases active subscription and schedules next round',async()=>{
  await withStub(comments(),async calls=>{
- const sub=await createPlatformSubscription({name:'头条评论快照',provider:'agentkey',operationId:'toutiao.comments',parameters:{group_id:group},enabled:true,limits:{pages:9,items:3,details:9}},'test',tag());
+ const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'头条评论快照',provider:'agentkey',operationId:'toutiao.comments',parameters:{group_id:group},enabled:true,limits:{pages:9,items:3,details:9}},'test',tag());
  try{await schedulePlatformSubscriptions();const [s]=await sql`SELECT active_run_id,limits FROM collection_subscriptions WHERE id=${sub.id}`;assert.deepEqual(s!.limits,{pages:1,items:3,details:0});const state=await step(s!.active_run_id);assert.equal(state.status,'completed',JSON.stringify(state));assert.equal(calls.length,1);
  const [done]=await sql`SELECT active_run_id,next_run_at>now() AS scheduled FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(done!.active_run_id,null);assert.equal(done!.scheduled,true);
  const rows=await sql`SELECT * FROM operation_results WHERE run_id=${state.id}`,summary=rows.find(r=>r.kind==='query_summary')!;assert.equal(summary.data.count,20);assert.equal(summary.data.selectedCount,3);assert.equal(summary.data.unprocessedDueToLimit,17);assert.equal(summary.data.nextParameters,null);assert.equal(summary.data.stopReason,'single-request');assert.deepEqual(summary.data.returnedPage,{has_more:true,offset:20,total_number:50});assert.ok(rows.every(r=>r.source_id===null&&r.article_id===null));
  const bindings=await sql`SELECT id_value FROM source_account_bindings WHERE evidence->>'reference' IN ${sql(rows.map(r=>String(r.id)))}`;assert.equal(bindings.length,0);
  }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
  });
- for(const operationId of ['PAB6Z75Y','toutiao.account_profile','toutiao.video'])await assert.rejects(createPlatformSubscription({name:'invalid',provider:'agentkey',operationId,parameters:{}},'test',tag()));
- await assert.rejects(createPlatformSubscription({name:'invalid',provider:'agentkey',operationId:'toutiao.comments',parameters:{group_id:group,offset:'20'}},'test',tag()));
+ for(const operationId of ['PAB6Z75Y','toutiao.account_profile','toutiao.video'])await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'invalid',provider:'agentkey',operationId,parameters:{}},'test',tag()));
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'invalid',provider:'agentkey',operationId:'toutiao.comments',parameters:{group_id:group,offset:'20'}},'test',tag()));
 });
 test('unknown scope retains received evidence; local resume with valves closed never repurchases',async()=>{
  await withStub({...comments(),group:{group_id:'1'}},async calls=>{
@@ -132,3 +132,6 @@ test('admin API advertises exact variants and freezes accepted query through com
   for(const parameters of [{group_id:group,offset:'20'},{group_id:group,offset:0}]){const reply=await app.inject({method:'POST',url:'/api/admin/redfox/queries',headers:{...headers,'idempotency-key':tag()},payload:{provider:'agentkey',operationId:'toutiao.comments',parameters}});assert.equal(reply.statusCode,400,reply.body);}
  }finally{backendConfig.devAdmin=previous;await app.close();}
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext,syndicate_fulltext) VALUES (${chosenWorkSource},'Synthetic chosen source','external','isolated',false,false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

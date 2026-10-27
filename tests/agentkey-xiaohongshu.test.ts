@@ -109,18 +109,18 @@ test('I revalidates original receipt, preserves signed URL/body/unknown time, hi
   result=await queryResult(2,{note_id:nid});
   await assert.rejects(importXiaohongshuResult(result.id,{reason:'manual',supplement:{url:`https://xiaohongshu.com/explore/${nid}`,evidence:'manual'}},'test',tag()),/supplements/);
   await sql`UPDATE operation_results SET data=jsonb_set(data,'{importable}','false') WHERE id=${result.id}`;
-  imported=await importXiaohongshuResult(result.id,{reason:'test import'},'test',tag());assert.ok(imported?.articleId);
+  imported=await importXiaohongshuResult(result.id,{sourceId:await selectedSource(),reason:'test import'},'test',tag());assert.ok(imported?.articleId);
   const [s]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${imported.sourceId}`;assert.deepEqual({...s},{participation_mode:'isolated',site_fulltext:false,syndicate_fulltext:false});
   const [a]=await sql`SELECT url,body_text,body_status,published_at,backfill,raw FROM articles WHERE id=${imported.articleId}`;assert.equal(a!.url,url.replace(noteId,nid));assert.equal(a!.body_text,'原生描述');assert.equal(a!.body_status,'ok');assert.equal(a!.published_at,null);assert.equal(a!.backfill,true);assert.equal(a!.raw.provider,'agentkey');
-  assert.equal((await importXiaohongshuResult(result.id,{reason:'repeat'},'test',tag()))!.articleId,imported.articleId);
+  assert.equal((await importXiaohongshuResult(result.id,{sourceId:await selectedSource(),reason:'repeat'},'test',tag()))!.articleId,imported.articleId);
   const other=await queryResult(2,{note_id:nid});await sql`UPDATE operation_results SET data=jsonb_set(data,'{title}','"tampered"') WHERE id=${other.id}`;await assert.rejects(importXiaohongshuResult(other.id,{reason:'tampered'},'test',tag()),/differs/);
-  await sql`UPDATE operation_results SET data=${sql.json(other.data)} WHERE id=${other.id}`;assert.equal((await importXiaohongshuResult(other.id,{reason:'same note'},'test',tag()))!.articleId,imported.articleId);
+  await sql`UPDATE operation_results SET data=${sql.json(other.data)} WHERE id=${other.id}`;assert.equal((await importXiaohongshuResult(other.id,{sourceId:await selectedSource(),reason:'same note'},'test',tag()))!.articleId,imported.articleId);
  });
- await withStub(uniqueBody(bodies()[6],nid,user),async()=>{const r=await queryResult(6,{page_id:'topic1'});assert.equal((await importXiaohongshuResult(r.id,{reason:'topic dedup'},'test',tag()))!.articleId,imported.articleId);});
+ await withStub(uniqueBody(bodies()[6],nid,user),async()=>{const r=await queryResult(6,{page_id:'topic1'});assert.equal((await importXiaohongshuResult(r.id,{sourceId:await selectedSource(),reason:'topic dedup'},'test',tag()))!.articleId,imported.articleId);});
  for(const i of [0,1,8])await withStub(uniqueBody(bodies()[i],nid,user),async()=>{const r=await queryResult(i,i===1?{user_id:user}:params[i]);await assert.rejects(importXiaohongshuResult(r.id,{reason:'not importable',supplement:{url:url.replace(noteId,nid),userId:user,evidence:'manual'}},'test',tag()));});
- await withStub(uniqueBody(bodies()[4],nid,user),async()=>{const r=await queryResult(4,params[4]);const bound=await importXiaohongshuResult(r.id,{reason:'bind actual account'},'test',tag());assert.equal(bound!.sourceId,imported.sourceId);assert.equal(bound!.articleId,null);const [b]=await sql`SELECT id_value FROM source_account_bindings WHERE source_id=${imported.sourceId} AND platform='xiaohongshu'`;assert.equal(b!.id_value,user);});
+ await withStub(uniqueBody(bodies()[4],nid,user),async()=>{const r=await queryResult(4,params[4]);const bound=await importXiaohongshuResult(r.id,{sourceId:await selectedSource(),reason:'bind actual account'},'test',tag());assert.equal(bound!.sourceId,imported.sourceId);assert.equal(bound!.articleId,null);const [b]=await sql`SELECT id_value FROM source_account_bindings WHERE source_id=${imported.sourceId} AND platform='xiaohongshu'`;assert.equal(b!.id_value,user);});
 });
-async function subscription(i:number,enrich=false,items=3,details=1){const sub=await createPlatformSubscription({name:'XHS test',provider:'agentkey',operationId:ops[i]!.operationId,parameters:params[i],enabled:true,enrichDetails:enrich,...(enrich?{detailOperationId:'KR1LPTBF'}:{}),limits:{pages:5,items,details}},'test',tag());testSubscriptions.push(sub.id);return sub;}
+async function subscription(i:number,enrich=false,items=3,details=1){const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'XHS test',provider:'agentkey',operationId:ops[i]!.operationId,parameters:params[i],enabled:true,enrichDetails:enrich,...(enrich?{detailOperationId:'KR1LPTBF'}:{}),limits:{pages:5,items,details}},'test',tag());testSubscriptions.push(sub.id);return sub;}
 test('five S homepage routes retain every selected item, release and schedule without extra calls',async()=>{
  for(const i of [0,1,3,6,8])await withStub(bodies()[i],async calls=>{
   process.env.COLLECT_ENABLED='true';const sub=await subscription(i),run=await startPlatformSubscription(sub.id,'test',tag());assert.equal((await step(run.id)).status,'completed');assert.equal(calls.length,1);
@@ -145,7 +145,7 @@ test('bounded same-run list/detail chain imports only selected details and keeps
   const receipts=await sql`SELECT status FROM receipts WHERE subject=${`operation:${run.id}`}`;assert.ok(receipts.every(r=>r.status==='completed'));
  });
 });
-for(const i of [0,1])test(`${i===0?'search':'account_posts'} detail without received author stays pending and advances without repurchasing`,async()=>{
+for(const i of [0,1])test(`${i===0?'search':'account_posts'} detail without received author imports to its frozen source and advances without repurchasing`,async()=>{
  const first='missing-author-'+randomUUID(),second='next-detail-'+randomUUID(),user='user-'+randomUUID();
  const notes=[first,second].map(id=>({...n(),id,user:{userid:user,nickname:'列表作者'}}));
  const list={code:0,success:true,data:i===0?{items:notes.map(note=>({model_type:'note',note}))}:{notes,has_more:false}};
@@ -155,7 +155,7 @@ for(const i of [0,1])test(`${i===0?'search':'account_posts'} detail without rece
   return {code:0,success:true,data:[{model_type:'note',note_list:[{...n(),id,user:id===first?{id:user,nickname:'详情未证实作者'}:{userid:user,id:user},share_info:{link:url.replace(noteId,id)}}],user:{userid:user}}]};
  },async calls=>{
   process.env.COLLECT_ENABLED='true';
-  const sub=await createPlatformSubscription({name:'XHS missing detail author',provider:'agentkey',operationId:ops[i]!.operationId,parameters:i===0?{keyword:'缺作者详情'}:{user_id:user},enabled:true,enrichDetails:true,detailOperationId:'KR1LPTBF',limits:{pages:1,items:2,details:2}},'test',tag());testSubscriptions.push(sub.id);
+  const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'XHS missing detail author',provider:'agentkey',operationId:ops[i]!.operationId,parameters:i===0?{keyword:'缺作者详情'}:{user_id:user},enabled:true,enrichDetails:true,detailOperationId:'KR1LPTBF',limits:{pages:1,items:2,details:2}},'test',tag());testSubscriptions.push(sub.id);
   const run=await startPlatformSubscription(sub.id,'test',tag());let state=await step(run.id);assert.equal(state.status,'active');assert.equal(state.progress.detailItems.length,2);
   const listVersion=state.step_version-1,detailVersion=state.step_version;
   const execution=await sql.begin(tx=>claimRun(tx,{runId:run.id,stepVersion:state.step_version,generation:state.generation},randomUUID()));
@@ -165,10 +165,10 @@ for(const i of [0,1])test(`${i===0?'search':'account_posts'} detail without rece
   const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND step_version=${detailVersion}`;
   assert.equal(rows.length,2);const summary=rows.find(r=>r.kind==='query_summary')!,item=rows.find(r=>r.kind==='xiaohongshu_work')!;
   assert.equal(summary.data.count,1);assert.equal(summary.data.selectedCount,1);assert.equal(summary.receipt_id,received.receiptId);assert.equal(item.receipt_id,received.receiptId);
-  assert.equal(item.data.workId,first);assert.deepEqual(item.data.identity,{});assert.equal((item.data.record as any).userId,undefined);assert.equal(item.data.importable,false);assert.match(item.data.pendingReason,/received native URL and author identity/);assert.equal(item.source_id,null);assert.equal(item.article_id,null);
+  assert.equal(item.data.workId,first);assert.deepEqual(item.data.identity,{});assert.equal((item.data.record as any).userId,undefined);assert.equal(item.data.importable,true);assert.equal(item.data.pendingReason,undefined);assert.equal(item.source_id,await selectedSource());assert.ok(item.article_id);
   const [origin]=await sql`SELECT * FROM operation_results WHERE id=${summary.data.originResultId}`;assert.equal(origin!.step_version,listVersion);assert.equal(origin!.data.identity.userId,user);
-  await assert.rejects(importXiaohongshuResult(item.id,{reason:'missing received author'},'test',tag()),/received native URL and author identity/);
-  await assert.rejects(importXiaohongshuResult(item.id,{reason:'cannot copy list author',supplement:{userId:user,evidence:'list author'}},'test',tag()),/received native URL and author identity/);
+  assert.equal((await importXiaohongshuResult(item.id,{reason:'missing received author'},'test',tag()))!.articleId,item.article_id);
+  await assert.rejects(importXiaohongshuResult(item.id,{reason:'cannot copy list author',supplement:{userId:user,evidence:'list author'}},'test',tag()),/received native URL and work identity/);
   assert.equal((await sql`SELECT id_value FROM source_account_bindings WHERE platform='xiaohongshu' AND id_value=${user}`).length,0);
   assert.equal((await sql`SELECT status FROM receipts WHERE id=${received.receiptId}`)[0]!.status,'completed');
   const [occupied]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(occupied!.active_run_id,run.id);
@@ -177,7 +177,7 @@ for(const i of [0,1])test(`${i===0?'search':'account_posts'} detail without rece
   const [next]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='xiaohongshu_work' AND data->>'workId'=${second} AND step_version>${detailVersion}`;assert.ok(next!.article_id);assert.ok(next!.source_id);
   const [finished]=await sql`SELECT active_run_id,progress,next_run_at>now() AS scheduled FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(finished!.active_run_id,null);assert.equal(finished!.progress.details,2);assert.equal(finished!.scheduled,true);
   const receipts=await sql`SELECT status FROM receipts WHERE subject=${`operation:${run.id}`}`;assert.equal(receipts.length,3);assert.ok(receipts.every(r=>r.status==='completed'));
-  const [pending]=await sql`SELECT source_id,article_id,data FROM operation_results WHERE id=${item.id}`;assert.equal(pending!.source_id,null);assert.equal(pending!.article_id,null);assert.deepEqual(pending!.data.identity,{});
+  const [pending]=await sql`SELECT source_id,article_id,data FROM operation_results WHERE id=${item.id}`;assert.equal(pending!.source_id,await selectedSource());assert.equal(pending!.article_id,item.article_id);assert.deepEqual(pending!.data.identity,{});
  });
 });
 test('detail interruption reuses receipt with valves closed; invalidated list run cannot buy or import',async()=>{
@@ -191,7 +191,7 @@ test('detail interruption reuses receipt with valves closed; invalidated list ru
  });
 });
 test('XHS provider preflight preserves original requirements and blocks unproved material equivalence',async()=>{
- const sub=await createPlatformSubscription({name:'RF XHS',provider:'redfox',operationId:'384C6W6B',parameters:{keyword:'x',exactMatch:true},enabled:false,limits:{pages:3,items:5,details:0}},'test',tag());
+ const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'RF XHS',provider:'redfox',operationId:'384C6W6B',parameters:{keyword:'x',exactMatch:true},enabled:false,limits:{pages:3,items:5,details:0}},'test',tag());
  const p=await preflightPlatformSubscriptionProvider(sub.id,{editVersion:1,targetProvider:'agentkey'});assert.equal(p!.supported,false);assert.ok(p!.checks.some(c=>c.key==='parameters'&&c.conclusion==='unsupported'&&c.evidence.includes('首页')));assert.ok(p!.checks.some(c=>c.key==='execution'&&c.evidence.includes('原文 URL')));
  await assert.rejects(switchPlatformSubscriptionProvider(sub.id,{editVersion:1,targetProvider:'agentkey',reason:'not compatible'},'test'));const [same]=await sql`SELECT provider,config,limits FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(same!.provider,'redfox');assert.equal(same!.config.parameters.exactMatch,true);assert.equal(same!.limits.pages,3);
 });
@@ -210,3 +210,6 @@ test('detail cannot import when received author contradicts retained discovery',
   process.env.COLLECT_ENABLED='true';const sub=await subscription(1,true),run=await startPlatformSubscription(sub.id,'test',tag());assert.equal((await step(run.id)).status,'active');const state=await step(run.id);assert.equal(state.status,'needs_review');assert.equal((await sql`SELECT status FROM receipts WHERE id=${state.current_receipt_id}`)[0]!.status,'received');assert.equal(calls.length,2);assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`).length,0);
  });
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext,syndicate_fulltext) VALUES (${chosenWorkSource},'Synthetic chosen source','external','isolated',false,false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

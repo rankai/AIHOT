@@ -1,0 +1,50 @@
+[
+  {
+    "article_id": "efqx17hqe5swbn46audtjwmum",
+    "source_id": "ownership-ui-editorial",
+    "visibility": "public",
+    "eligible": true,
+    "selected": false,
+    "body_mode": "full",
+    "category": "ai-models",
+    "tags": [
+      "闭环验收"
+    ]
+  },
+  {
+    "article_id": "kvfvg8t6al1vilvc55zp5n7ow",
+    "source_id": "ownership-ui-editorial",
+    "visibility": "public",
+    "eligible": true,
+    "selected": false,
+    "body_mode": "full",
+    "category": "ai-models",
+    "tags": [
+      "其他标签"
+    ]
+  },
+  {
+    "article_id": "x6l410e852mp71cj2xn2erbvf",
+    "source_id": "ownership-ui-editorial",
+    "visibility": "public",
+    "eligible": true,
+    "selected": false,
+    "body_mode": "full",
+    "category": "ai-models",
+    "tags": [
+      "闭环验收"
+    ]
+  },
+  {
+    "article_id": "x8upewelijw69gz95nooirbzs",
+    "source_id": "ownership-ui-isolated",
+    "visibility": "withdrawn",
+    "eligible": false,
+    "selected": false,
+    "body_mode": "summary",
+    "category": "ai-models",
+    "tags": [
+      "闭环验收"
+    ]
+  }
+]

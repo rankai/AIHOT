@@ -20,9 +20,10 @@ const searchBody=(t= tweet())=>({timeline:[{...t,author:undefined,user_info:t.au
 const saved=async(n:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${n}`)[0]!;
 const step=async(n:number)=>{const r=await saved(n);await executeOperationStep(n,r.step_version,randomUUID());return saved(n);};
 let budgets:any[]=[];const subscriptions:number[]=[];
-before(async()=>{const [d]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(d!.name,d!.port);budgets=await sql`SELECT * FROM budgets WHERE service IN ('agentkey.query','agentkey.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('agentkey.query','agentkey.collect')`;});
+const chosenWorkSource=tag();
+before(async()=>{await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Chosen X collection source','rss','isolated',false)`;const [d]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(d!.name,d!.port);budgets=await sql`SELECT * FROM budgets WHERE service IN ('agentkey.query','agentkey.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('agentkey.query','agentkey.collect')`;});
 after(async()=>{for(const n of subscriptions)await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${n}`;for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
-async function create(operationId='5K5EG87P',parameters:Record<string,unknown>={keyword:'plain test'},extra:Record<string,unknown>={}){const sub=await createPlatformSubscription({name:'Synthetic X homepage',provider:'agentkey',operationId,parameters,enabled:true,limits:{pages:1,items:10,details:0},...extra},'test',tag());subscriptions.push(sub.id);return sub;}
+async function create(operationId='5K5EG87P',parameters:Record<string,unknown>={keyword:'plain test'},extra:Record<string,unknown>={}){const sub=await createPlatformSubscription({sourceId:chosenWorkSource,name:'Synthetic X homepage',provider:'agentkey',operationId,parameters,enabled:true,limits:{pages:1,items:10,details:0},...extra},'test',tag());subscriptions.push(sub.id);return sub;}
 async function withStub(body:unknown|(()=>Promise<unknown>),run:(calls:any[])=>Promise<void>){
  const calls:any[]=[];const server=await stub(async(_hit,req)=>{const q=JSON.parse(req.body);if(q.method?.startsWith('notifications/'))return {};if(q.method==='initialize')return {jsonrpc:'2.0',id:q.id,result:{protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fake',version:'1'}}};calls.push(q.params.arguments);return {jsonrpc:'2.0',id:q.id,result:{content:[],structuredContent:{provider:'TikHub',credits_charged:.2,data:{code:200,data:typeof body==='function'?await body():body}}}};});
  const old={...process.env};Object.assign(process.env,{AGENTKEY_API_KEY:'fake-x-subscriptions',AGENTKEY_MCP_URL:server.url,AGENTKEY_CALLS_ENABLED:'true',COLLECT_ENABLED:'true',REDFOX_API_KEY:'fake-x-switch',REDFOX_CALLS_ENABLED:'false'});
@@ -47,12 +48,12 @@ test('ten exact homepage subscription routes; basic keywords preserve bytes and 
   });
  }
 });
-test('actual account scope gates collection import; missing scope stays research, contradictions retain receipt for review',async()=>{
- for(const mode of ['missing','missingUid','missingHandle','match','numeric','wrongHandle','wrongUid','wrongAuthor']){
-  const t=tweet(author('44196397')),scope={profile:'sample',rest_id:t.author.rest_id},body={timeline:[t],...(mode==='missing'?{}:{user:mode==='missingUid'?{profile:'sample'}:mode==='missingHandle'?{rest_id:t.author.rest_id}:mode==='wrongHandle'?{...scope,profile:'other'}:mode==='wrongUid'?{...scope,rest_id:'2'}:scope})};if(mode==='wrongAuthor')body.timeline=[{...t,author:author('2')}];
+test('actual account scope gates collection import; missing optional scope still imports with the configured source, contradictions retain receipt for review',async()=>{
+ for(const mode of ['missing','missingUid','missingHandle','match','numeric','wrongHandle','wrongUid','wrongAuthor','wrongHandleOnly','matchHandleOnly']){
+  const t=tweet(author('44196397')),scope={profile:'sample',rest_id:t.author.rest_id},body={timeline:[t],...(mode==='missing'?{}:{user:mode==='missingUid'?{profile:'sample'}:mode==='missingHandle'?{rest_id:t.author.rest_id}:mode==='wrongHandle'?{...scope,profile:'other'}:mode==='wrongUid'?{...scope,rest_id:'2'}:scope})};if(mode.endsWith('HandleOnly')){delete (body as any).user;(body as any).timeline=[{...t,author:{screen_name:mode==='wrongHandleOnly'?'other':'sample'}}];}if(mode==='wrongAuthor')body.timeline=[{...t,author:author('2')}];
   await withStub(body,async calls=>{const sub=await create('x.account_posts',mode==='numeric'?{rest_id:44196397}:{screen_name:'sample'}),run=await startPlatformSubscription(sub.id,'test',tag()),done=await step(run.id),contradiction=mode.startsWith('wrong');assert.equal(done.status,contradiction?'needs_review':'completed',done.wait_reason);assert.equal(calls.length,1);
    const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;if(contradiction){assert.equal(rows.length,0);assert.equal((await sql`SELECT status FROM receipts WHERE id=${done.current_receipt_id}`)[0]!.status,'received');}
-   else{const work=rows.find(r=>r.kind==='x_research_work')!;if(mode.startsWith('missing')){assert.equal(work.article_id,null);assert.equal(work.data.importable,false);assert.match(work.data.pendingReason,/scope/);await assert.rejects(importXSearchResult(work.id,{reason:'still missing'},'test',tag()),/scope/);}else assert.ok(work.article_id);}
+   else{const work=rows.find(r=>r.kind==='x_research_work')!;assert.ok(work.article_id);assert.equal(work.source_id,chosenWorkSource);}
   });
  }
 });

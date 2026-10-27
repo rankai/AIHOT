@@ -38,7 +38,7 @@ export function ServiceResearchResult({ result: r, bindingSources }: { result: O
       {(isAgentKeyWeiboResearch(r.data) || isAgentKeyBilibiliHotspot(r.data) || isAgentKeyDouyinHotspot(r.data)) && <p className="text-[12px] text-ink-3">保留上游词条顺序；本接口未确认排名，不把列表位置当作榜单名次。</p>}
       <p className="text-[12px] text-ink-4">热点与搜索落点仅用于研究，不自动成为文章。响应时间字段保留原串。</p>
     </> : <>
-      <ResearchFacts items={[["实际收到的身份字段", xSearch ? "用于作品归属，后台重新核实；无独立账号绑定动作" : "只展示，不提供账号绑定"], ...researchScalarRows(r.data.identity), ...serviceRecordRows(record, ["tweetId", "userId", "username", "displayName", "fullName", "rankNo", "typologie", "verified", "followers", "following", "mediaCount", "tweetCount", "createdAt", "likeCount", "retweetCount", "replyCount", "quoteCount", "bookmarkCount", "viewCount"])]} />
+      <ResearchFacts items={[["实际收到的身份字段", xSearch ? "仅保留为作者溯源；作品沿用已确认的所属信源" : "只展示，不提供账号绑定"], ...researchScalarRows(r.data.identity), ...serviceRecordRows(record, ["tweetId", "userId", "username", "displayName", "fullName", "rankNo", "typologie", "verified", "followers", "following", "mediaCount", "tweetCount", "createdAt", "likeCount", "retweetCount", "replyCount", "quoteCount", "bookmarkCount", "viewCount"])]} />
       {r.kind === "x_account_rank" && <div className="space-y-2"><p className="text-[12px] text-ink-3">榜单实际指标与说明（未提供的字段不推算）</p><ResearchFacts items={serviceRecordRows(record, ["xFollowerCount", "xScore", "growthAbsolute", "growthPercentage", "statDate", "biography", "countryName", "gender"])} /><FactLink value={record.pictureUrl} label="榜单账号图片媒体（仅链接）" /></div>}
       {Object.hasOwn(record, "replyCount") && <p className="text-[12px] text-ink-4">此条响应的 replyCount 是上游记录指标，与查询摘要中的本页实际回复条数分别保留。</p>}
       {typeof r.data.requestedScreenName === "string" && <ResearchFacts items={[["请求关注范围 handle（不是本条账号 ID）", r.data.requestedScreenName]]} />}
@@ -96,7 +96,7 @@ function AgentKeyXResearchResult({ result: r, bindingSources }: { result: Operat
     </>}
     {agentKeyXScopeRows(r.data.requestedScope ?? r.data.query).length > 0 && <div className="space-y-2"><p className="text-[12px] text-ink-3">请求范围（不代表响应回显的作者或容器身份）</p><ResearchFacts items={agentKeyXScopeRows(r.data.requestedScope ?? r.data.query)} /></div>}
     {communityMembers && <p className="text-[12px] text-amber">官方仅返回首页约 19 位社区成员；游标不可用于分页，不保证完整名单。</p>}
-    <p className="text-[12px] text-ink-3">仅展示本次首页或单对象实收结果与游标，不自动请求下一页。评论、关系成员和趋势词仅供研究；单次查询的普通帖与账号资料可按下方条件显式导入或绑定，不自动执行。首页订阅仅普通作品按实收证据入库，缺范围或身份保留待核实；不代表原生 X 连续主采集。</p>
+    <p className="text-[12px] text-ink-3">仅展示本次首页或单对象实收结果与游标，不自动请求下一页。评论、关系成员和趋势词仅供研究；单次查询的普通帖与账号资料可按下方条件显式导入或绑定，不自动执行。首页订阅仅普通作品按实收证据入库，缺作品身份或原文保留待核实；不代表原生 X 连续主采集。</p>
     <XSearchImport result={r} />
     {account && r.sourceId && <Link className="text-accent text-[13px]" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>查看信源</Link>}
     {agentKeyXAccountUsername(r.kind, r.data) && <XAccountBinding result={r} bindingSources={bindingSources} />}
@@ -110,8 +110,8 @@ function AgentKeyXPost({ record: value }: { record: unknown }) {
     <ResearchFacts items={agentKeyXRecordRows(record, "work")} />
     {["text", "display_text"].map(key => Object.hasOwn(record, key) ? <div key={key}><p className="mb-1 text-[12px] text-ink-3">实收 {key}</p><p className="whitespace-pre-wrap break-words text-[13px] text-ink-2">{researchFactText(record[key])}</p></div> : null)}
     {["author", "user_info"].map(key => Object.hasOwn(record, key) ? <div className="space-y-2 rounded-control bg-bg-sunk p-3" key={key}><p className="text-[12px] text-ink-3">本帖实收 {key} 作者字段</p>{record[key] === null ? <p className="text-[12px] text-ink-3">null（上游为空）</p> : <ResearchFacts items={agentKeyXRecordRows(record[key], "author")} />}<FactLink value={researchObject(record[key]).avatar} label="实收作者头像（仅链接）" /><FactLink value={researchObject(record[key]).image} label="实收作者图片（仅链接）" /></div> : null)}
-    {context.length > 0 && <div className="space-y-2 rounded-control bg-bg-sunk p-3"><p className="text-[12px] text-ink-3">同一 rest_id 的实收账号上下文（保留 author 原始空值）</p><ResearchFacts items={context} /></div>}
-    <FactLink value={record.url} label="由实收帖子和作者身份组成的原文链接" />
+    {context.length > 0 && <div className="space-y-2 rounded-control bg-bg-sunk p-3"><p className="text-[12px] text-ink-3">实收账号上下文（保留 author 原始字段）</p><ResearchFacts items={context} /></div>}
+    <FactLink value={record.url} label="与实收帖子对应的原文链接" />
     <p className="text-[12px] text-ink-4">text 与 display_text 分别展示，不声明完整长文或 Article 正文。作者、转发外层、内层原帖与引用帖分别保留；不自动加载媒体。</p>
   </div>;
 }

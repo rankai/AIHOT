@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { candidateSelectionValid } from "../app/features/admin/candidate-selection.ts";
 import { defaultPlatformValues, platformParameters, type PlatformOperation } from "../app/features/admin/platform-types.ts";
-import { toutiaoDetailRequest, toutiaoImportFields, toutiaoImportSupplement, toutiaoMediaLinks, toutiaoNativeWork, toutiaoPageFacts, toutiaoQueryParameters, toutiaoTargetCandidates, toutiaoWorkFacts } from "../app/features/admin/toutiao-result-data.ts";
+import { toutiaoDetailRequest, toutiaoImportFields, toutiaoImportSupplement, toutiaoMediaLinks, toutiaoNativeWork, toutiaoPageFacts, toutiaoQueryParameters, toutiaoWorkFacts } from "../app/features/admin/toutiao-result-data.ts";
 
 const id = "987654321098765432109876543210", uid = "123456789012345678901234567890";
 const url = `https://www.toutiao.com/article/${id}/?share=a%2Fb`;
@@ -22,7 +22,8 @@ test("received mobile article permalink is preserved while other mobile paths an
   assert.deepEqual(toutiaoNativeWork(mobile), { id, url: mobile });
   for (const address of [`http://m.toutiao.com/article/${id}/`, `https://m.toutiao.com/video/${id}/`, `https://m.toutiao.com.evil.test/article/${id}/`, `https://@m.toutiao.com/article/${id}/`, `${mobile}#part`]) assert.equal(toutiaoNativeWork(address), null, address);
   assert.equal(toutiaoImportFields("toutiao_work", work({provider:"agentkey",operationId:"PAB6Z75Y",url:mobile})).canImport,true);
-  for (const extra of [{identity:{}},{workId:null},{url:null}]) assert.equal(toutiaoImportFields("toutiao_work",work({provider:"agentkey",...extra})).canImport,false);
+  assert.equal(toutiaoImportFields("toutiao_work",work({provider:"agentkey",identity:{}})).canImport,true);
+  for (const extra of [{workId:null},{url:null}]) assert.equal(toutiaoImportFields("toutiao_work",work({provider:"agentkey",...extra})).canImport,false);
   assert.equal(toutiaoImportFields("toutiao_account",{provider:"agentkey",identity:{uid}}).canImport,false);
 });
 
@@ -41,7 +42,7 @@ test("account requires received uid; display names, token and raw record IDs are
   for (const data of [{ identity: { secUid: "safe-id" } }, { identity: {}, record: { uid, nickname: "name", token: uid } }, { identity: { uid: "nickname" } }]) {
     const fields = toutiaoImportFields("toutiao_account", data);
     assert.equal(fields.canImport, false);
-    assert.equal(fields.needsIdentity, false);
+    assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
     assert.ok(toutiaoImportSupplement(fields, draft).error);
   }
   assert.equal(toutiaoImportFields("query_summary", work()).canImport, false);
@@ -51,11 +52,11 @@ test("uid and secUid remain distinct received author types, including same-work 
   const numeric = toutiaoImportFields("toutiao_work", work());
   assert.equal(numeric.uid, uid); assert.equal(numeric.secUid, null);
   const secure = toutiaoImportFields("toutiao_work", work({ operationId: "R1IGR09H", identity: { secUid: "opaque%2B+/_-==" } }));
-  assert.equal(secure.uid, null); assert.equal(secure.secUid, "opaque%2B+/_-=="); assert.equal(secure.needsIdentity, false);
+  assert.equal(secure.uid, null); assert.equal(secure.secUid, "opaque%2B+/_-=="); assert.equal(Object.hasOwn(secure, "needsIdentity"), false);
   const origin = toutiaoImportFields("toutiao_work", work({ operationId: "PAB6Z75Y", identity: { uid, secUid: "safe-id" }, originResultId: 12 }));
   assert.equal(origin.uid, uid); assert.equal(origin.secUid, "safe-id");
   const missing = toutiaoImportFields("toutiao_work", work({ identity: {}, record: { uid, secUid: "safe-id", token: "locator" } }));
-  assert.equal(missing.needsIdentity, true);
+  assert.equal(Object.hasOwn(missing, "needsIdentity"), false);
 });
 
 test("manual original must agree with both received/derived ID and detail request ID", () => {
@@ -69,38 +70,32 @@ test("manual original must agree with both received/derived ID and detail reques
 
 test("complete received fields are not overwritten by hidden or stale supplement drafts", () => {
   const fields = toutiaoImportFields("toutiao_work", work());
-  assert.deepEqual(toutiaoImportSupplement(fields, { uid: "other", secUid: "other", url: "https://example.com/replace", evidence: "stale", manualTarget: false }), {});
-  assert.deepEqual(toutiaoImportSupplement(fields, { ...draft, uid: "other", secUid: "other", manualTarget: true }), { supplement: { evidence: draft.evidence } });
-  assert.deepEqual(toutiaoImportSupplement(toutiaoImportFields("toutiao_account", { identity: { uid } }), { ...draft, manualTarget: true }), {});
+  assert.deepEqual(toutiaoImportSupplement(fields, { url: "https://example.com/replace", evidence: "stale" }), {});
+  assert.deepEqual(toutiaoImportSupplement(fields, draft), {});
+  assert.deepEqual(toutiaoImportSupplement(toutiaoImportFields("toutiao_account", { identity: { uid } }), draft), {});
 });
 
-test("missing author accepts verified numeric uid or opaque secUid with evidence, never a guessed name", () => {
+test("missing work author is optional and never emits author supplements", () => {
   const fields = toutiaoImportFields("toutiao_work", work({ identity: {} }));
-  assert.deepEqual(toutiaoImportSupplement(fields, draft), { supplement: { uid, evidence: draft.evidence } });
-  assert.deepEqual(toutiaoImportSupplement(fields, { ...draft, uid: "", secUid: "verified-safe-id" }), { supplement: { secUid: "verified-safe-id", evidence: draft.evidence } });
-  for (const bad of [{ uid: "", secUid: "" }, { uid: "@nickname", secUid: "" }, { uid: "1e20", secUid: "" }, { uid: "", secUid: "x".repeat(501) }]) assert.ok(toutiaoImportSupplement(fields, { ...draft, ...bad }).error);
-  assert.ok(toutiaoImportSupplement(fields, { ...draft, evidence: " " }).error);
-  assert.ok(toutiaoImportSupplement(fields, { ...draft, evidence: "x".repeat(1001) }).error);
+  assert.equal(fields.canImport, true); assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
+  assert.deepEqual(toutiaoImportSupplement(fields, { url: "", evidence: "" }), {});
+  const missing = toutiaoImportFields("toutiao_work", work({ identity: {}, url: null }));
+  assert.deepEqual(toutiaoImportSupplement(missing, { url, evidence: draft.evidence }), { supplement: { url, evidence: draft.evidence } });
 });
 
-test("manual target requires evidence even with complete received identity and native original", () => {
+test("complete received work does not require author relation evidence", () => {
   const fields = toutiaoImportFields("toutiao_work", work());
-  assert.ok(toutiaoImportSupplement(fields, { ...draft, manualTarget: true, evidence: "" }).error);
-  assert.deepEqual(toutiaoImportSupplement(fields, { ...draft, manualTarget: true }), { supplement: { evidence: draft.evidence } });
+  assert.deepEqual(toutiaoImportSupplement(fields, { url: "", evidence: "" }), {});
+  assert.deepEqual(toutiaoImportSupplement(fields, draft), {});
   const missing = toutiaoImportFields("toutiao_work", work({ identity: {} }));
-  assert.ok(toutiaoImportSupplement(missing, { ...draft, uid: "", secUid: "", manualTarget: true }).error);
+  assert.deepEqual(toutiaoImportSupplement(missing, { url: "", evidence: "" }), {});
 });
 
-test("work manual target must be an isolated candidate on the current idle page; account retains explicit candidates", () => {
-  const candidates = [{ id: "isolated-current", participation_mode: "isolated" }, { id: "editorial", participation_mode: "editorial" }];
-  const works = toutiaoTargetCandidates(candidates, true);
-  assert.deepEqual(works.map(row => row.id), ["isolated-current"]);
-  assert.deepEqual(toutiaoTargetCandidates(candidates, false), candidates);
-  assert.equal(candidateSelectionValid("isolated-current", "idle", "external", "external", works), true);
-  assert.equal(candidateSelectionValid("editorial", "idle", "external", "external", works), false);
-  assert.equal(candidateSelectionValid("isolated-current", "loading", "external", "external", works), false);
-  assert.equal(candidateSelectionValid("isolated-current", "idle", "external", "external", []), false);
-  assert.equal(candidateSelectionValid("isolated-current", "idle", "external", "mp_account", works), false);
+test("account candidate selection still requires the current completed candidate page", () => {
+  const rows = [{ id: "editorial", participation_mode: "editorial" }];
+  assert.equal(candidateSelectionValid("editorial", "idle", "external", "external", rows), true);
+  for (const state of ["loading", "submitting"]) assert.equal(candidateSelectionValid("editorial", state, "external", "external", rows), false);
+  assert.equal(candidateSelectionValid("editorial", "idle", "external", "external", []), false);
 });
 
 test("explicit same-work detail uses only numeric work ID and actual result PK", () => {

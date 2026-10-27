@@ -24,7 +24,7 @@ const server=http.createServer((req,res)=>{hits++;let body='';req.on('data',c=>b
  if(req.url?.endsWith('/accountInfo'))return void res.end(JSON.stringify({code:2000,data:accountWxOnly?{account:account.account,wxId:account.wxId}:accountBizOnly?{account:account.account,bizInfo:account.bizInfo}:account}));
  if(disconnect){req.socket.destroy();return;}
  const wide=req.url?.includes('/gzh/data/');
- if(req.url?.endsWith('/queryWorkList')){assert.equal(p.offset,0);assert.equal(p.sortType,wide?'2':'_2');assert.equal(wide?(p.wxId??p.bizInfo):p.account,wide?(p.wxId?account.wxId:account.bizInfo):account.account);return void res.end(JSON.stringify({code:2000,data:{list:listed,total:listed.length}}));}
+ if(req.url?.endsWith('/queryWorkList')){assert.equal(p.offset,0);assert.equal(p.sortType,wide?'2':'_2');assert.equal(wide?(p.wxId??p.bizInfo??p.account):p.account,wide?(p.wxId?account.wxId:p.bizInfo?account.bizInfo:account.account):account.account);return void res.end(JSON.stringify({code:2000,data:{list:listed,total:listed.length}}));}
  assert.ok(req.url?.endsWith('/workDetail')||req.url?.endsWith('/queryWork'));
  const item=listed.find(v=>v.workUuid===p.workUuid)!;res.end(JSON.stringify({code:2000,data:{...item,...(badAuthor?{bizInfo:'WrongBiz'}:{}),content:bodyContent,publishTime:item.publishTime??'2026-10-01 12:00:00',coverUrl:'https://example.com/synthetic-cover.png'}}));
  });});
@@ -45,8 +45,8 @@ test('both libraries run list/detail/material; switches preserve source, subscri
  }}
  await switchTo(s.id,'dajiala');const [sub]=await sql`SELECT * FROM collection_subscriptions WHERE id=${s.sub}`;const [src]=await sql`SELECT * FROM sources WHERE id=${s.id}`;assert.equal(sub!.provider,'dajiala');assert.equal(sub!.interval_minutes,73);assert.equal(src!.site_fulltext,true);assert.equal(src!.participation_mode,'editorial');assert.equal(sub!.progress.pageReceiptId,undefined);
 });
-test('missing evidence blocks only Redfox; PATCH preserves library and permission edits are not X Article restrictions',async()=>{
- const empty=await source(false,false);assert.equal((await preflightMpReplacement(empty.id,'redfox'))!.supported,false);assert.equal((await preflightMpReplacement(empty.id,'dajiala'))!.supported,true);await assert.rejects(preflightMpReplacement(empty.id,'redfox','invalid'));
+test('configured account works without bindings; PATCH preserves library and permission edits are not X Article restrictions',async()=>{
+ const empty=await source(false,false);assert.equal((await preflightMpReplacement(empty.id,'redfox'))!.supported,true);assert.equal((await preflightMpReplacement(empty.id,'dajiala'))!.supported,true);await assert.rejects(preflightMpReplacement(empty.id,'redfox','invalid'));
  const s=await source();await switchTo(s.id,'redfox','premium');let [src]=await sql`SELECT * FROM sources WHERE id=${s.id}`;await updateSource(s.id,{version:src!.updated_at.toISOString(),patch:{config:{ghid:account.wxId,wxid:account.account,nickname:'New label'}}},'mp-test');assert.equal((await sql`SELECT config FROM collection_subscriptions WHERE id=${s.sub}`)[0]!.config.redfoxLibrary,'premium');[src]=await sql`SELECT * FROM sources WHERE id=${s.id}`;await assert.rejects(updateSource(s.id,{version:src!.updated_at.toISOString(),patch:{config:{ghid:account.wxId,redfoxLibrary:'wide'}}},'mp-test'),{code:'unsupported_configuration'});await updateSource(s.id,{version:src!.updated_at.toISOString(),patch:{participation_mode:'hot_signal',site_fulltext:false,interval_minutes:91}},'mp-test');assert.equal((await sql`SELECT interval_minutes FROM collection_subscriptions WHERE id=${s.sub}`)[0]!.interval_minutes,91);
 });
 test('received page/detail replay locally; switching fences an old retained page before new purchase or material',async()=>{
@@ -86,17 +86,17 @@ test('HTTP preflight/switch dispatch is local, rejects stale/unsupported input, 
  const run=await createRedfoxMpCollection(bounded.id,{actor:'mp-test',key:tag(),reason:'manual'});for(let i=0;i<9;i++)await step(run.id);
  assert.equal((await row(run.id)).status,'completed');assert.equal(hits-before,9);assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`).length,8);
 });
-test('wxId-only binding accepts a newly observed unowned bizInfo by account context, never binds it, and rejects a foreign owner',async()=>{
+test('wxId-only binding accepts a newly observed unowned bizInfo by account context, never binds it, and keeps foreign author bindings separate from the selected source',async()=>{
  accountWxOnly=true;let s;try{s=await source();}finally{accountWxOnly=false;}
  await switchTo(s.id,'redfox');listed=[post()];const biz=account.bizInfo,run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);await step(run.id);assert.equal((await row(run.id)).status,'completed');assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='wechat' AND id_kind='bizInfo' AND id_value=${biz}`).length,0);
- accountWxOnly=true;let foreign;try{foreign=await source();}finally{accountWxOnly=false;}
+ accountWxOnly=true;let selected;try{selected=await source();}finally{accountWxOnly=false;}
  const owner=tag();await sql`INSERT INTO sources(id,name,kind) VALUES (${owner},'Other verified author','external')`;await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('wechat','bizInfo',${account.bizInfo},${owner},'{}')`;
- await switchTo(foreign.id,'redfox');listed=[post()];const bad=await createRedfoxMpCollection(foreign.id,{actor:'mp-test',key:tag(),reason:'manual'}),before=hits;await step(bad.id);assert.equal((await row(bad.id)).status,'needs_review');assert.equal(hits,before+1);assert.equal((await sql`SELECT 1 FROM operation_results WHERE run_id=${bad.id} AND article_id IS NOT NULL`).length,0);
+ await switchTo(selected.id,'redfox');listed=[post()];const bad=await createRedfoxMpCollection(selected.id,{actor:'mp-test',key:tag(),reason:'manual'}),before=hits;await step(bad.id);await step(bad.id);assert.equal((await row(bad.id)).status,'completed');assert.equal(hits,before+2);assert.equal((await sql`SELECT source_id FROM operation_results WHERE run_id=${bad.id} AND article_id IS NOT NULL`)[0]!.source_id,selected.id);assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind='bizInfo' AND id_value=${account.bizInfo}`)[0]!.source_id,owner);
 });
 
 test('bizInfo-only evidence constructs a wide request from a verified display account without inventing wxId',async()=>{
  accountBizOnly=true;let s;try{s=await source();}finally{accountBizOnly=false;}
- const p=(await preflightMpReplacement(s.id,'redfox'))!;assert.equal(p.supported,true);assert.deepEqual(p.mapping.parameters,{bizInfo:account.bizInfo});
+ const p=(await preflightMpReplacement(s.id,'redfox'))!;assert.equal(p.supported,true);assert.deepEqual(p.mapping.parameters,{account:account.account});
  await switchTo(s.id,'redfox');listed=[post()];const run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);await step(run.id);assert.equal((await row(run.id)).status,'completed');assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${s.id} AND id_kind='wxId'`).length,0);
 });
 test('scheduled mapping rejection is observable per source and does not prevent a healthy native MP run',async()=>{
@@ -105,7 +105,7 @@ test('scheduled mapping rejection is observable per source and does not prevent 
  const saved=await sql`SELECT c.id,c.enabled FROM collection_subscriptions c JOIN sources s ON s.id=c.control_source_id WHERE s.kind='mp_account'`;
  await sql`UPDATE collection_subscriptions c SET enabled=false FROM sources s WHERE s.id=c.control_source_id AND s.kind='mp_account'`;
  try{
-  const blocked=await source();await switchTo(blocked.id,'redfox');await sql`DELETE FROM source_account_bindings WHERE source_id=${blocked.id}`;
+  const blocked=await source();await switchTo(blocked.id,'redfox');await sql`DELETE FROM source_account_bindings WHERE source_id=${blocked.id}`;await sql`UPDATE collection_subscriptions SET config='{}' WHERE id=${blocked.sub}`;
   const native=await source(true,false),initial=hits;
   const result=await scheduleMpReconcile();
   assert.ok('blocked' in result && result.blocked?.some(b=>b.sourceId===blocked.id));assert.ok('blockedCount' in result && (result.blockedCount??0)>=1);
@@ -134,4 +134,14 @@ test('first-import reuse preserves the existing material owner, times and backfi
  const {upsertMaterial}=await import('@aihot/backend/content/materials');const s=await source(false);await switchTo(s.id,'redfox');listed=[{...post(),publishTime:new Date().toISOString()}];const run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);
  const existing=await upsertMaterial({sourceId:s.id,url:listed[0]!.workUrl,title:listed[0]!.title,publishedAt:new Date(),bodyText:'Original body',bodyStatus:'ok',via:'import'});
  const fields=async()=> (await sql`SELECT source_id,url,published_at,published_at_claim,discovered_at,timeline_at,backfill,backfill_reason FROM articles WHERE id=${existing.articleId}`)[0];const before=await fields();await step(run.id);assert.equal((await row(run.id)).status,'completed');assert.deepEqual(await fields(),before);
+});
+
+test('empty ghid uses configured wxid without binding or extra requests',async()=>{
+ const s=await source(false,false),initial=hits;
+ await sql`UPDATE collection_subscriptions SET config=config||'{"ghid":""}' WHERE id=${s.sub}`;
+ const p=(await preflightMpReplacement(s.id,'redfox'))!;
+ assert.equal(p.supported,true);assert.deepEqual(p.mapping.parameters,{account:account.account});assert.equal(hits,initial);
+ process.env.AGENTKEY_API_KEY='fake-unused';try{const a=(await preflightMpReplacement(s.id,'agentkey'))!;assert.equal(a.supported,true);assert.equal((a.mapping.parameters as {username?:string}).username,account.account);}finally{delete process.env.AGENTKEY_API_KEY;}
+ await switchTo(s.id,'redfox');listed=[post()];const run=await createRedfoxMpCollection(s.id,{actor:'mp-test',key:tag(),reason:'manual'});await step(run.id);await step(run.id);assert.equal((await row(run.id)).status,'completed');
+ assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE source_id=${s.id}`).length,0);
 });

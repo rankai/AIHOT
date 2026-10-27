@@ -1,3 +1,4 @@
+import {importSource} from "../../sources/subscriptions.ts";
 import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {agentKeyWechatEvidence} from "../agentkey/wechat-evidence.ts";
@@ -47,6 +48,9 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
     if(address?.bizInfo){if(identity.bizInfo&&identity.bizInfo!==address.bizInfo)throw new StaleOperationError("Article URL disagrees with account identity");identity.bizInfo=address.bizInfo;}
     if(!account&&!address)throw new UnsupportedReplacement("A valid original WeChat article URL is required");
     const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
+    const primary=identity.wxId?`wxId:${identity.wxId}`:`bizInfo:${identity.bizInfo}`;
+    let sourceId:string,source;
+    if(account){
     if(!ids.length)throw new UnsupportedReplacement("A verified wxId or bizInfo is required");
     // Serialize each confirmed typed identity before resolving its single owner. Then subscription → source → result.
     for(const [kind,value] of ids)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`wechat:${kind}:${value}`},0))`;
@@ -54,12 +58,10 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
     for(const [kind,value] of ids){const [binding]=await tx`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind=${kind} AND id_value=${value}`;if(binding)bindings.push(binding.source_id as string);}
     const owners=[...new Set(bindings)];
     if(owners.length>1)throw new StaleOperationError("Received account identities belong to different sources");
-    const primary=identity.wxId?`wxId:${identity.wxId}`:`bizInfo:${identity.bizInfo}`;
-    const sourceId=input.sourceId??owners[0]??`wechat-${sha256(primary).slice(0,24)}`;
+    sourceId=input.sourceId??owners[0]??`wechat-${sha256(primary).slice(0,24)}`;
     if(owners.length&&owners[0]!==sourceId)throw new StaleOperationError("Account identity already belongs to another source");
-    if(!account&&input.sourceId&&owners[0]!==input.sourceId)throw new UnsupportedReplacement("Work imports use the confirmed author binding");
     const [sub]=await tx`SELECT * FROM collection_subscriptions WHERE control_source_id=${sourceId} FOR UPDATE`;
-    let [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
+    [source]=await tx`SELECT * FROM sources WHERE id=${sourceId} FOR UPDATE`;
     if(!source&&input.sourceId)return null;
     if(source&&!['external','mp_account'].includes(source.kind))throw new UnsupportedReplacement("WeChat accounts require a matching公众号 or external source");
     const manuallyIdentified=ids.some(([kind])=>!received[kind as keyof WechatIdentity]);
@@ -70,14 +72,24 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
     }
     const priorBindings=await tx`SELECT id_kind,id_value FROM source_account_bindings WHERE platform='wechat' AND source_id=${sourceId}`;
     if(priorBindings.some(b=>identity[b.id_kind as keyof WechatIdentity]&&identity[b.id_kind as keyof WechatIdentity]!==b.id_value))throw new StaleOperationError("Source is already bound to a different identity of this type");
+    }else{
+      if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.wechatImport?.key===commandKey){
+        const [completed]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
+        requireLiveResult(completed,snapshot.kind);
+        if(!completed!.article_id||!completed!.source_id||completed!.provenance?.wechatImport?.key!==commandKey||stableJson(completed!.provenance.wechatImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
+        return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
+      }
+      source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin&&"resultId" in origin?{resultId:Number(origin.resultId),provider:snapshot.provider,runId:snapshot.run_id}:undefined);
+      if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
+      sourceId=source.id;
+    }
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
     requireLiveResult(result,snapshot.kind);
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.wechatImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${String(parsed.data.title).slice(0,200)},'external',${tx.json({platform:"wechat"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!account&&!source!.enabled&&!(snapshot.provider==="agentkey"&&snapshot.input.mode==="collection"&&snapshot.input.forceSourceId===sourceId))throw new UnsupportedReplacement("Author source is disabled; material import is paused");
-    for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"wechat",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
+    if(account&&!source){[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${String(parsed.data.title).slice(0,200)},'external',${tx.json({platform:"wechat"})},'isolated',false,false,true,NULL) RETURNING *`;}
+    if(account)for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"wechat",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
       const body=record.articleContent??record.content,publishTime=record.publishDate??record.publishTime??record.publicTime;

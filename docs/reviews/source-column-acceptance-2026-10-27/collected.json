@@ -1,0 +1,77 @@
+{
+  "hits": 1,
+  "requests": [
+    {
+      "path": "/story/api/dy/data/searchWork",
+      "body": {
+        "keyword": "栏目闭环隔离",
+        "exactMatch": false,
+        "pageNum": 1,
+        "pageSize": 10
+      }
+    }
+  ],
+  "results": [
+    {
+      "subscriptionId": 9,
+      "runId": 25,
+      "sourceId": "ownership-ui-editorial",
+      "rows": [
+        {
+          "id": "kvfvg8t6al1vilvc55zp5n7ow",
+          "source_id": "ownership-ui-editorial",
+          "title": "栏目闭环：不匹配标签视频",
+          "media": [
+            {
+              "kind": "video",
+              "confirmed": true
+            }
+          ],
+          "revision": 1,
+          "receipt_id": 26
+        },
+        {
+          "id": "x6l410e852mp71cj2xn2erbvf",
+          "source_id": "ownership-ui-editorial",
+          "title": "栏目闭环：公开视频",
+          "media": [
+            {
+              "kind": "video",
+              "confirmed": true
+            }
+          ],
+          "revision": 1,
+          "receipt_id": 26
+        },
+        {
+          "id": "efqx17hqe5swbn46audtjwmum",
+          "source_id": "ownership-ui-editorial",
+          "title": "栏目闭环：普通图文",
+          "media": [],
+          "revision": 1,
+          "receipt_id": 26
+        }
+      ]
+    },
+    {
+      "subscriptionId": 10,
+      "runId": 26,
+      "sourceId": "ownership-ui-isolated",
+      "rows": [
+        {
+          "id": "x8upewelijw69gz95nooirbzs",
+          "source_id": "ownership-ui-isolated",
+          "title": "栏目闭环：隔离视频",
+          "media": [
+            {
+              "kind": "video",
+              "confirmed": true
+            }
+          ],
+          "revision": 1,
+          "receipt_id": 27
+        }
+      ]
+    }
+  ]
+}

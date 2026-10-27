@@ -35,22 +35,21 @@ export function instagramImportFields(kind: string, data: Record<string, unknown
   const receivedNative = instagramNativePost(receivedUrl);
   const blockedReason = work && receivedUrl && !receivedNative ? "已收到的地址不是受支持的 Instagram 帖子原文，不能直接替换。请显式查询帖子详情核实；只接受 /p/ 或 /reel/ 原文，不解析短链、主页、Stories 或媒体地址。"
     : work && receivedNative && workId && receivedNative.id !== workId ? "已收到帖子短码与原文中的短码不一致，不能导入或替换；请显式查询详情核实。" : null;
-  return { account, work, userId, workId, receivedUrl, receivedNative, native, blockedReason, canImport: account ? !!userId : work && !blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !userId };
+  return { account, work, userId, workId, receivedUrl, receivedNative, native, blockedReason, canImport: account ? !!userId : work && !blockedReason, needsUrl: work && !receivedUrl};
 }
 
-type Supplement = { userId?: string; url?: string; evidence: string };
-export function instagramImportSupplement(fields: ReturnType<typeof instagramImportFields>, draft: { userId: string; url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
+type Supplement = { url?: string; evidence: string };
+export function instagramImportSupplement(fields: ReturnType<typeof instagramImportFields>, draft: { url: string; evidence: string }): { error: string; supplement?: never } | { error?: undefined; supplement?: Supplement } {
   if (!fields.canImport) return { error: fields.blockedReason ?? "此结果暂不能导入，请显式查询并核实稳定身份" };
-  if (!fields.needsUrl && !fields.needsIdentity) return {};
+  if (!fields.needsUrl) return {};
   if (fields.needsUrl) {
     const native = instagramNativePost(draft.url.trim());
     if (!native) return { error: "请填写 Instagram /p/ 或 /reel/ 原生原文，不接受短链、主页、Stories、媒体、凭证、端口或片段" };
     if (fields.workId && fields.workId !== native.id) return { error: "补充原文中的帖子短码必须与已收到的短码一致" };
   }
-  const userId = draft.userId.trim(), evidence = draft.evidence.trim();
-  if (fields.needsIdentity && !/^[0-9]+$/.test(userId)) return { error: "请填写已核实作者 userId 的完整数字字符串，不使用用户名或显示名称" };
+  const evidence = draft.evidence.trim();
   if (!evidence || evidence.length > 1000) return { error: "请填写缺失字段的核实依据（最多 1000 字）" };
-  return { supplement: { ...(fields.needsUrl ? { url: draft.url.trim() } : {}), ...(fields.needsIdentity ? { userId } : {}), evidence } };
+  return { supplement: { ...(fields.needsUrl ? { url: draft.url.trim() } : {}), evidence } };
 }
 
 /** Only links are displayed; video and carousel fields may coexist. */

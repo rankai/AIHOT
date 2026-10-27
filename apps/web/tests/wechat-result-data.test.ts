@@ -12,24 +12,24 @@ test("work imports do not request an unnecessary alternate identity; only missin
   for (const identity of [{ wxId: "gh_verified" }, { bizInfo: "confirmed-biz" }]) {
     const fields = wechatImportFields("wechat_work", { identity, url: address });
     assert.equal(fields.canImport, true);
-    assert.equal(fields.needsIdentity, false);
+    assert.equal(Object.hasOwn(fields, "needsIdentity"), false);
     assert.equal(fields.needsUrl, false);
   }
   const long = "https://mp.weixin.qq.com/s?__biz=confirmed-biz&mid=123&idx=1";
   const received = wechatImportFields("wechat_work", { identity: {}, url: long });
-  assert.equal(received.needsIdentity, false);
+  assert.equal(Object.hasOwn(received, "needsIdentity"), false);
   assert.equal(received.needsUrl, false);
   const supplied = wechatImportFields("wechat_work", { identity: {}, url: null }, long);
-  assert.equal(supplied.needsIdentity, false);
+  assert.equal(Object.hasOwn(supplied, "needsIdentity"), false);
   assert.equal(supplied.needsUrl, true, "the supplied URL and evidence still need to be sent");
 });
 test("article link hints reject credentialed or wrong-host URLs without replacing backend article verification", () => {
   for (const value of ["https://user:secret@mp.weixin.qq.com/s/a", "https://mp.weixin.qq.com.evil.test/s/a", "javascript:alert(1)", "https://mp.weixin.qq.com:8443/s/a"]) assert.equal(wechatArticleLink(value), null);
   assert.equal(wechatArticleLink("https://mp.weixin.qq.com/s/article"), "https://mp.weixin.qq.com/s/article");
 });
-test("AgentKey article imports require received URL and identity rather than manual supplement", () => {
+test("AgentKey article imports require received original while author identity is optional and manual supplements remain closed", () => {
   const data = { provider: "agentkey", identity: {}, url: "https://mp.weixin.qq.com/s/short" };
-  assert.equal(wechatImportFields("wechat_work", data).canImport, false);
+  assert.equal(wechatImportFields("wechat_work", data).canImport, true);
   assert.equal(wechatImportFields("wechat_work", { ...data, identity: { wxId: "gh_verified@app" } }).canImport, true);
   assert.equal(wechatImportFields("wechat_work", { ...data, url: "https://mp.weixin.qq.com/s?__biz=verified&mid=123&idx=1" }).canImport, true);
   assert.equal(wechatImportFields("wechat_work", { ...data, url: null, identity: { wxId: "gh_verified" } }).canImport, false);

@@ -57,7 +57,7 @@ test('documented dynamic null branches retain current AV and forwarded text with
 });
 test('Q retains meaningful search and detail when optional author or description is absent',()=>{
  for(const route of [bilibiliSearchRoute,bilibiliTypedSearchRoute]){const item={...video(),av:{title:'仅标题的视频'}};const data=route===bilibiliSearchRoute?{item:[item]}:{items:[item]};const p=parseAgentKeyBilibili(response(data),route,{keyword:'测试'});assert.equal(p.candidates.length,1);assert.deepEqual(p.candidates[0]!.data.identity,{});assert.equal(p.candidates[0]!.data.avId,av);assert.equal(p.candidates[0]!.data.importable,false);}
- for(const change of [{owner:undefined,desc:undefined},{owner:{name:'仅作者称呼'},desc:undefined},{owner:{mid:Number(mid)},desc:undefined}]){const p=parseAgentKeyBilibili(response({...detail(),...change}),bilibiliDetailRoute,{av_id:av});assert.equal(p.candidates.length,1);assert.equal(p.candidates[0]!.data.workId,bv);assert.equal((p.candidates[0]!.data.record as any).description,undefined);assert.equal(p.candidates[0]!.data.importable,!!change.owner?.mid);}
+ for(const change of [{owner:undefined,desc:undefined},{owner:{name:'仅作者称呼'},desc:undefined},{owner:{mid:Number(mid)},desc:undefined}]){const p=parseAgentKeyBilibili(response({...detail(),...change}),bilibiliDetailRoute,{av_id:av});assert.equal(p.candidates.length,1);assert.equal(p.candidates[0]!.data.workId,bv);assert.equal((p.candidates[0]!.data.record as any).description,undefined);assert.equal(p.candidates[0]!.data.importable,true);}
  assert.throws(()=>parseAgentKeyBilibili(response({...detail(),owner:{mid:Number.MAX_SAFE_INTEGER+1}}),bilibiliDetailRoute,{av_id:av}));
 });
 test('eleven exact schemas and distinct projections retain only witnessed identities and roles',()=>{
@@ -128,13 +128,13 @@ test('I detail uses received MID/BV, isolates source and preserves unknown time,
  try{
   await assert.rejects(importBilibiliResult(r.id,{reason:'manual not allowed',supplement:{mid:r.data.identity.mid,evidence:'same received value'}},'test',tag()),/supplements/);
   await assert.rejects(importBilibiliResult(r.id,{reason:'manual not allowed',supplement:{url:r.data.url,evidence:'same received URL'}},'test',tag()),/supplements/);
-  const imported=await importBilibiliResult(r.id,{reason:'synthetic detail import'},'test',key);assert.ok(imported?.articleId);
+  const imported=await importBilibiliResult(r.id,{sourceId:await selectedSource(),reason:'synthetic detail import'},'test',key);assert.ok(imported?.articleId);
   const [a]=await sql`SELECT * FROM articles WHERE id=${imported!.articleId}`;assert.equal(a!.identity_key,`bilibili:bvId:${r.data.workId}`);assert.equal(a!.url,r.data.url);assert.equal(a!.published_at,null);assert.equal(a!.backfill,true);assert.equal(a!.body_text,'合成视频说明');assert.equal(a!.body_status,'ok');assert.equal(a!.raw.provider,'agentkey');assert.equal(a!.raw.descriptionRole,'video_description');
   const [source]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id=${imported!.sourceId}`;assert.deepEqual({...source},{participation_mode:'isolated',site_fulltext:false,syndicate_fulltext:false,enabled:true});
-  assert.equal((await sql`SELECT id_value FROM source_account_bindings WHERE source_id=${imported!.sourceId} AND platform='bilibili' AND id_kind='mid'`)[0]!.id_value,r.data.identity.mid);
+  assert.equal((await sql`SELECT id_value FROM source_account_bindings WHERE source_id=${imported!.sourceId} AND platform='bilibili' AND id_kind='mid'`).length,0);
   const [result]=await sql`SELECT provenance FROM operation_results WHERE id=${r.id}`;assert.equal(result!.provenance.bilibiliImport.key,key);
-  assert.equal((await importBilibiliResult(r.id,{reason:'repeat'},'test',key))!.articleId,imported!.articleId);
-  const pending=await receivedDetail(uniqueMid(),uniqueBV(),{desc:undefined});const pendingImport=await importBilibiliResult(pending.id,{reason:'missing description is pending'},'test',tag());const [p]=await sql`SELECT body_text,body_status,published_at,backfill FROM articles WHERE id=${pendingImport!.articleId}`;assert.deepEqual({...p},{body_text:null,body_status:'pending',published_at:null,backfill:true});
+  assert.equal((await importBilibiliResult(r.id,{sourceId:await selectedSource(),reason:'repeat'},'test',key))!.articleId,imported!.articleId);
+  const pending=await receivedDetail(uniqueMid(),uniqueBV(),{desc:undefined});const pendingImport=await importBilibiliResult(pending.id,{sourceId:await selectedSource(),reason:'missing description is pending'},'test',tag());const [p]=await sql`SELECT body_text,body_status,published_at,backfill FROM articles WHERE id=${pendingImport!.articleId}`;assert.deepEqual({...p},{body_text:null,body_status:'pending',published_at:null,backfill:true});
  }finally{if(beforeCalls===undefined)delete process.env.AGENTKEY_CALLS_ENABLED;else process.env.AGENTKEY_CALLS_ENABLED=beforeCalls;}
 });
 test('I validates projection, same-step summary and original receipt identity before any write',async()=>{
@@ -155,37 +155,37 @@ test('I validates projection, same-step summary and original receipt identity be
  await sql`UPDATE receipts SET model=${receipt!.model} WHERE id=${r.receipt_id}`;
  const other=await receivedDetail();await sql`UPDATE operation_results SET receipt_id=${other.receipt_id} WHERE id=${r.id}`;await assert.rejects(importBilibiliResult(r.id,{reason:'wrong run receipt'},'test',tag()));await sql`UPDATE operation_results SET receipt_id=${r.receipt_id} WHERE id=${r.id}`;
  const [untouched]=await sql`SELECT source_id,article_id FROM operation_results WHERE id=${r.id}`;assert.deepEqual({...untouched},{source_id:null,article_id:null});
- assert.ok((await importBilibiliResult(r.id,{reason:'restored exact evidence'},'test',tag()))?.articleId);
+ assert.ok((await importBilibiliResult(r.id,{sourceId:await selectedSource(),reason:'restored exact evidence'},'test',tag()))?.articleId);
 });
 test('I profile binds actual MID explicitly, preserves permissions and rejects identity conflicts or missing authors',async()=>{
  const uid=uniqueMid(),p=await receivedProfile(uid),bound=await importBilibiliResult(p.id,{reason:'explicit profile binding'},'test',tag());assert.ok(bound?.sourceId);assert.equal(bound!.articleId,null);
  const second=await receivedProfile(uid);assert.equal((await importBilibiliResult(second.id,{sourceId:bound!.sourceId,reason:'same MID'},'test',tag()))!.sourceId,bound!.sourceId);
  const conflicting=await receivedProfile(uniqueMid());await assert.rejects(importBilibiliResult(conflicting.id,{sourceId:bound!.sourceId,reason:'different MID'},'test',tag()),/another identity/);
  await sql`UPDATE sources SET participation_mode='editorial',site_fulltext=true,syndicate_fulltext=false WHERE id=${bound!.sourceId}`;
- const work=await receivedDetail(uid);assert.equal((await importBilibiliResult(work.id,{reason:'same received author'},'test',tag()))!.sourceId,bound!.sourceId);const [permission]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${bound!.sourceId}`;assert.deepEqual({...permission},{participation_mode:'editorial',site_fulltext:true,syndicate_fulltext:false});
- await sql`UPDATE sources SET enabled=false WHERE id=${bound!.sourceId}`;const paused=await receivedDetail(uid);await assert.rejects(importBilibiliResult(paused.id,{reason:'disabled source'},'test',tag()),/disabled/);
- const missing=await receivedDetail(uniqueMid(),uniqueBV(),{owner:undefined});assert.equal(missing.data.importable,false);await assert.rejects(importBilibiliResult(missing.id,{reason:'no actual MID'},'test',tag()),/received author MID/);
+ const work=await receivedDetail(uid);assert.equal((await importBilibiliResult(work.id,{sourceId:bound!.sourceId,reason:'same received author'},'test',tag()))!.sourceId,bound!.sourceId);const [permission]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${bound!.sourceId}`;assert.deepEqual({...permission},{participation_mode:'editorial',site_fulltext:true,syndicate_fulltext:false});
+ await sql`UPDATE sources SET enabled=false WHERE id=${bound!.sourceId}`;const paused=await receivedDetail(uid);await assert.rejects(importBilibiliResult(paused.id,{sourceId:bound!.sourceId,reason:'disabled source'},'test',tag()),/disabled/);
+ const missing=await receivedDetail(uniqueMid(),uniqueBV(),{owner:undefined});assert.equal(missing.data.importable,true);await assert.rejects(importBilibiliResult(missing.id,{reason:'no selected source'},'test',tag()),/associated source/);assert.ok((await importBilibiliResult(missing.id,{sourceId:await selectedSource(),reason:'author optional'},'test',tag()))?.articleId);
  await assert.rejects(importBilibiliResult(missing.id,{reason:'cannot supplement missing author',supplement:{mid:uid,evidence:'manual'}},'test',tag()),/supplements/);
 });
 test('I reuses historical Q evidence and deduplicates Redfox and generic native URL materials',async()=>{
  const uid=uniqueMid(),videoId=uniqueBV(),r=await receivedDetail(uid,videoId);
  // Retained Q-only capability hints are not content/identity authority.
  await sql`UPDATE operation_results SET data=${sql.json({...r.data,importable:false,missing:['本阶段仅查询，不导入材料']})} WHERE id=${r.id}`;
- const imported=await importBilibiliResult(r.id,{reason:'historical received detail'},'test',tag());assert.ok(imported?.articleId);
+ const imported=await importBilibiliResult(r.id,{sourceId:await selectedSource(),reason:'historical received detail'},'test',tag());assert.ok(imported?.articleId);
  const server=await stub(()=>({code:2000,data:{bvId:videoId,title:'可导入的合成视频',description:'合成视频说明',authorId:uid,author:'合成详情作者'}}));const saved={...process.env},privateFetch=backendConfig.allowPrivateNetworkFetch;
  Object.assign(process.env,{REDFOX_API_KEY:'fake-bili-import-key',REDFOX_TEST_BASE_URL:server.url,REDFOX_CALLS_ENABLED:'true'});backendConfig.allowPrivateNetworkFetch=true;
- try{const run=await createSynchronousQuery({operationId:'TIN1NMTZ',parameters:{bvId:videoId}},'bili-cross-provider-test',tag());const state=await step(run.id);assert.equal(state.status,'completed',state.wait_reason);const [redfox]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='bilibili_work'`;const redfoxImport=await importBilibiliResult(redfox!.id,{reason:'same cross-provider video'},'test',tag());assert.equal(redfoxImport!.articleId,imported!.articleId);assert.equal(redfoxImport!.sourceId,imported!.sourceId);}
+ try{const run=await createSynchronousQuery({operationId:'TIN1NMTZ',parameters:{bvId:videoId}},'bili-cross-provider-test',tag());const state=await step(run.id);assert.equal(state.status,'completed',state.wait_reason);const [redfox]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='bilibili_work'`;const redfoxImport=await importBilibiliResult(redfox!.id,{sourceId:await selectedSource(),reason:'same cross-provider video'},'test',tag());assert.equal(redfoxImport!.articleId,imported!.articleId);assert.equal(redfoxImport!.sourceId,imported!.sourceId);}
  finally{await server.close();backendConfig.allowPrivateNetworkFetch=privateFetch;for(const k of Object.keys(process.env))if(!(k in saved))delete process.env[k];Object.assign(process.env,saved);}
  const nativeBV=uniqueBV(),nativeURL=`https://www.bilibili.com/video/${nativeBV}/?p=1`;
  const material=await upsertMaterial({sourceId:imported!.sourceId,url:nativeURL,identityKey:identityKeyForUrl(nativeURL)!,title:'既有原生链接材料',bodyStatus:'pending',publishedAt:null,via:'import'});
- const native=await receivedDetail(uid,nativeBV);assert.equal((await importBilibiliResult(native.id,{reason:'same canonical BV'},'test',tag()))!.articleId,material.articleId);
+ const native=await receivedDetail(uid,nativeBV);assert.equal((await importBilibiliResult(native.id,{sourceId:await selectedSource(),reason:'same canonical BV'},'test',tag()))!.articleId,material.articleId);
  const [count]=await sql`SELECT count(*)::int AS count FROM articles WHERE id IN ${sql([imported!.articleId,material.articleId])}`;assert.equal(count!.count,2);
 });
 
 test('S nine single-request subscriptions persist bounded research facts and release occupancy for next run',async()=>{
  for(const f of fixtures.filter(f=>![bilibiliDetailRoute,bilibiliProfileRoute].some(r=>r===f.route)))await withStub(f,async calls=>{
   process.env.COLLECT_ENABLED='true';const operationId=agentKeyBilibiliOperations.find(o=>o.route===f.route)!.operationId;
-  const sub=await createPlatformSubscription({name:'Bili synthetic snapshot',provider:'agentkey',operationId,parameters:f.params,enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
+  const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'Bili synthetic snapshot',provider:'agentkey',operationId,parameters:f.params,enabled:true,limits:{pages:1,items:1,details:0}},'test',tag());
   try{const run=await startPlatformSubscription(sub.id,'test',tag());assert.equal((await step(run.id)).status,'completed');assert.equal(calls.length,1);
    const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`,summary=rows.find(r=>r.kind==='query_summary')!,selected=rows.filter(r=>r.kind!=='query_summary');
    assert.equal(summary.data.selectedCount,selected.length);assert.equal(summary.data.unprocessedDueToLimit,f.route===bilibiliDynamicsRoute?1:0);assert.equal(summary.data.nextParameters,null);assert.equal(summary.data.stopReason,'single-request');assert.ok(rows.every(r=>r.article_id===null&&r.source_id===null));
@@ -193,8 +193,8 @@ test('S nine single-request subscriptions persist bounded research facts and rel
    const [state]=await sql`SELECT active_run_id,progress,next_run_at>now() AS scheduled FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(state!.active_run_id,null);assert.equal(state!.scheduled,true);assert.deepEqual(state!.progress,{pages:1,items:selected.length,details:0,stopReason:'single-request',nextParameters:null});
   }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
  });
- for(const operationId of ['TIN1NMTZ','EH53TOT7'])await assert.rejects(createPlatformSubscription({name:'invalid independent S',provider:'agentkey',operationId,parameters:{}},'test',tag()));
- await assert.rejects(createPlatformSubscription({name:'not multi-page',provider:'agentkey',operationId:'LEN9QXR3',parameters:{keyword:'a'},limits:{pages:2,items:3,details:0}},'test',tag()),/one homepage/);
+ for(const operationId of ['TIN1NMTZ','EH53TOT7'])await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'invalid independent S',provider:'agentkey',operationId,parameters:{}},'test',tag()));
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'not multi-page',provider:'agentkey',operationId:'LEN9QXR3',parameters:{keyword:'a'},limits:{pages:2,items:3,details:0}},'test',tag()),/one homepage/);
 });
 
 function collectionFixture(operationId:string,uid=uniqueMid()){
@@ -211,7 +211,7 @@ test('S search, typed video and account posts buy only bounded explicit details 
  for(const operationId of ['LEN9QXR3','bilibili.typed_search','VPA67I98']){
   const f=collectionFixture(operationId);
   await withStub({route:f.route,data:(q:any)=>q.name===bilibiliDetailRoute.tool?f.full:f.list},async calls=>{
-   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription(f.config,'test',tag());
+   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({...f.config,sourceId:await selectedSource()},'test',tag());
    try{const run=await startPlatformSubscription(sub.id,'test',tag());const listed=await step(run.id);assert.equal(listed.status,'active',listed.wait_reason);assert.equal(listed.step_key,bilibiliDetailRoute.stepKey);assert.equal(calls.length,1);assert.equal(listed.progress.detailItems.length,1);
     const [source]=await sql`SELECT * FROM operation_results WHERE id=${listed.progress.detailItems[0]}`;const discovery=new Date(Date.now()-3600_000);await sql`UPDATE receipts SET received_at=${discovery} WHERE id=${source!.receipt_id}`;
     const done=await step(run.id);assert.equal(done.status,'completed',done.wait_reason);assert.equal(calls.length,2);assert.deepEqual(calls[1].params,operationId==='VPA67I98'?{bv_id:f.bv1}:{av_id:f.av1});
@@ -224,13 +224,13 @@ test('S search, typed video and account posts buy only bounded explicit details 
   });
  }
 });
-test('S detail checks both received aliases and actual author, while missing MID remains a pending research item',async()=>{
+test('S detail checks both received aliases and actual author, while missing MID imports to the frozen source',async()=>{
  for(const problem of ['wrongAV','wrongMID','missingMID'] as const){const f=collectionFixture('VPA67I98');const full=problem==='wrongAV'?{...f.full,aid:'999'}:problem==='wrongMID'?{...f.full,owner:{mid:uniqueMid(),name:'different actual author'}}:{...f.full,owner:undefined};
   await withStub({route:f.route,data:(q:any)=>q.name===bilibiliDetailRoute.tool?full:f.list},async calls=>{
-   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription(f.config,'test',tag());
+   process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({...f.config,sourceId:await selectedSource()},'test',tag());
    try{const run=await startPlatformSubscription(sub.id,'test',tag());await step(run.id);const done=await step(run.id);assert.equal(calls.length,2);assert.equal(done.status,problem==='missingMID'?'completed':'needs_review',done.wait_reason);
-    const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;assert.ok(rows.every(r=>r.article_id===null&&r.source_id===null));
-    if(problem==='missingMID'){const pending=rows.find(r=>r.data.operationId==='TIN1NMTZ'&&r.kind==='bilibili_work')!;assert.deepEqual(pending.data.identity,{});assert.match(pending.data.pendingReason,/received author MID/);}
+    const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id}`;if(problem!=='missingMID')assert.ok(rows.every(r=>r.article_id===null&&r.source_id===null));
+    if(problem==='missingMID'){const pending=rows.find(r=>r.data.operationId==='TIN1NMTZ'&&r.kind==='bilibili_work')!;assert.deepEqual(pending.data.identity,{});assert.equal(pending.data.pendingReason,undefined);assert.ok(pending.article_id);assert.equal(pending.source_id,await selectedSource());}
     else{assert.equal((await sql`SELECT status FROM receipts WHERE id=${done.current_receipt_id}`)[0]!.status,'received');assert.equal(rows.some(r=>r.data.operationId==='TIN1NMTZ'),false);}
    }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
   });
@@ -238,7 +238,7 @@ test('S detail checks both received aliases and actual author, while missing MID
 });
 test('S received detail resumes with outbound valves closed and configuration change stops stale work without new material',async()=>{
  for(const stop of [false,true]){const f=collectionFixture('LEN9QXR3');await withStub({route:f.route,data:(q:any)=>q.name===bilibiliDetailRoute.tool?f.full:f.list},async calls=>{
-  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription(f.config,'test',tag());
+  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({...f.config,sourceId:await selectedSource()},'test',tag());
   try{const run=await startPlatformSubscription(sub.id,'test',tag());const listed=await step(run.id);
    const execution=await sql.begin(tx=>claimRun(tx,{runId:run.id,stepVersion:listed.step_version,generation:listed.generation},randomUUID()));await requestAgentKey(execution,listed as any,bilibiliDetailRoute,listed.progress.parameters);
    process.env.AGENTKEY_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';
@@ -252,7 +252,7 @@ test('S received detail resumes with outbound valves closed and configuration ch
 test('S in-flight detail configuration change retains received evidence but cannot import or advance stale execution',async()=>{
  const f=collectionFixture('LEN9QXR3'),entered=gate(),release=gate();
  await withStub({route:f.route,data:async(q:any)=>{if(q.name!==bilibiliDetailRoute.tool)return f.list;entered.open();await release.promise;return f.full;}},async calls=>{
-  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription(f.config,'test',tag());
+  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({...f.config,sourceId:await selectedSource()},'test',tag());
   try{const run=await startPlatformSubscription(sub.id,'test',tag());await step(run.id);const executing=step(run.id);await entered.promise;
    await updatePlatformSubscription(sub.id,{editVersion:1,config:{...f.config,enabled:false}},'test');release.open();const done=await executing;assert.equal(done.status,'stopped');assert.equal(calls.length,2);
    const [receipt]=await sql`SELECT status FROM receipts WHERE id=${done.current_receipt_id}`;assert.equal(receipt!.status,'received');assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND article_id IS NOT NULL`).length,0);
@@ -261,12 +261,15 @@ test('S in-flight detail configuration change retains received evidence but cann
 });
 test('S defaults buy no details, and X blocks incompatible saved Bilibili semantics without modifying the subscription',async()=>{
  const f=collectionFixture('LEN9QXR3');await withStub({route:f.route,data:f.list},async calls=>{
-  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({name:'default snapshot',provider:'agentkey',operationId:'LEN9QXR3',parameters:f.parameters,enabled:true},'test',tag());
+  process.env.COLLECT_ENABLED='true';const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'default snapshot',provider:'agentkey',operationId:'LEN9QXR3',parameters:f.parameters,enabled:true},'test',tag());
   try{const run=await startPlatformSubscription(sub.id,'test',tag());assert.equal((await step(run.id)).status,'completed');assert.equal(calls.length,1);const [s]=await sql`SELECT limits FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(s!.limits.pages,1);assert.equal(s!.limits.details,0);}finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
  });
- const legacy=await createPlatformSubscription({name:'original multi-page',provider:'redfox',operationId:'LEN9QXR3',parameters:{keyword:'original',page:'1',exactMatch:true,order:'play'},enabled:false,limits:{pages:3,items:25,details:5}},'test',tag());
+ const legacy=await createPlatformSubscription({sourceId:await selectedSource(),name:'original multi-page',provider:'redfox',operationId:'LEN9QXR3',parameters:{keyword:'original',page:'1',exactMatch:true,order:'play'},enabled:false,limits:{pages:3,items:25,details:5}},'test',tag());
  const [before]=await sql`SELECT * FROM collection_subscriptions WHERE id=${legacy.id}`;
  const preflight=await preflightPlatformSubscriptionProvider(legacy.id,{editVersion:1,targetProvider:'agentkey'});assert.equal(preflight!.supported,false);assert.match(preflight!.checks.map(c=>c.evidence).join(' '),/多页/);assert.match(preflight!.checks.map(c=>c.evidence).join(' '),/材料/);
  await assert.rejects(switchPlatformSubscriptionProvider(legacy.id,{editVersion:1,targetProvider:'agentkey',reason:'unsupported switch'},'test'));
  const [after]=await sql`SELECT * FROM collection_subscriptions WHERE id=${legacy.id}`;assert.deepEqual(after,before);
 });
+
+const chosenWorkSource=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext,syndicate_fulltext) VALUES (${chosenWorkSource},'Synthetic chosen source','external','isolated',false,false) ON CONFLICT(id) DO NOTHING`;return chosenWorkSource;}

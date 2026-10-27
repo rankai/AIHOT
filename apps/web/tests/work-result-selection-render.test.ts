@@ -12,13 +12,14 @@ import { rolldown } from "rolldown";
 import type { OperationResult } from "../app/features/admin/operation-types.ts";
 test("actual current-page toolbar renders only qualified work checkboxes; pure research/linked/expired pages have no toolbar", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aihot-work-selection-")), require = createRequire(import.meta.url);
-  const bundle = await rolldown({ input: new URL("../app/features/admin/work-result-selection.tsx", import.meta.url).pathname, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
+  const bundle = await rolldown({ input: { view: new URL("../app/features/admin/work-result-selection.tsx", import.meta.url).pathname, ownership: new URL("../app/features/admin/source-ownership.tsx", import.meta.url).pathname }, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
   try {
-    await bundle.write({ file: join(directory, "view.mjs"), format: "esm" });
+    await bundle.write({ dir: directory, entryFileNames: "[name].mjs", format: "esm" });
+    const { WorkSourceProvider } = await import(pathToFileURL(join(directory, "ownership.mjs")).href);
     const { WorkResultSelection } = await import(pathToFileURL(join(directory, "view.mjs")).href);
     const base: OperationResult = { id: 1, kind: "weibo_work", data: { platform: "weibo", uid: "123", opusId: "42", url: "https://weibo.com/123/received", record: { title: "收到标题<script>plain</script>🦊" } }, sourceId: null, articleId: null, receiptId: 1, fileKey: null, file: null, imported: false };
     const render = (results: OperationResult[]) => {
-      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(WorkResultSelection, { results }) }], { initialEntries: ["/admin/operations/200?cursor=12"] });
+      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(WorkSourceProvider, { inputs: { members: [{ sourceId: "test-source" }], sources: [{ id: "test-source", name: "已有所属信源" }] }, results, children: createElement(WorkResultSelection, { results }) }) }], { initialEntries: ["/admin/operations/200?cursor=12"] });
       try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); }
     };
     const unqualified = [
@@ -29,7 +30,7 @@ test("actual current-page toolbar renders only qualified work checkboxes; pure r
       { ...base, id: 6, kind: "kuaishou_work" },
       { ...base, id: 7, kind: "qichezhijia_work" },
       { ...base, id: 8, kind: "query_summary" },
-      { ...base, id: 9, data: { ...base.data, uid: null } },
+      { ...base, id: 9, data: { ...base.data, opusId: null } },
       { ...base, id: 10, kind: "image" },
     ];
     const html = render([base, ...unqualified]);
@@ -49,13 +50,14 @@ test("actual current-page toolbar renders only qualified work checkboxes; pure r
 
 test("AgentKey Weibo actual result cards distinguish derived work, unknown retweet, nested researchers and zero metrics", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aihot-weibo-results-")), require = createRequire(import.meta.url);
-  const bundle = await rolldown({ input: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
+  const bundle = await rolldown({ input: { view: new URL("../app/features/admin/operation-result.tsx", import.meta.url).pathname, ownership: new URL("../app/features/admin/source-ownership.tsx", import.meta.url).pathname }, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
   try {
-    await bundle.write({ file: join(directory, "view.mjs"), format: "esm" });
+    await bundle.write({ dir: directory, entryFileNames: "[name].mjs", format: "esm" });
+    const { WorkSourceProvider } = await import(pathToFileURL(join(directory, "ownership.mjs")).href);
     const { OperationResultItem } = await import(pathToFileURL(join(directory, "view.mjs")).href);
     const render = (kind: string, data: Record<string, unknown>) => {
       const result: OperationResult = { id: 1, kind, data, sourceId: null, articleId: null, receiptId: 1, fileKey: null, file: null, imported: false };
-      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(OperationResultItem, { result }) }], { initialEntries: ["/admin/operations/200"] });
+      const router = createMemoryRouter([{ path: "/admin/operations/200", element: createElement(WorkSourceProvider, { inputs: { members: [{ sourceId: "test-source" }], sources: [{ id: "test-source", name: "已有所属信源" }] }, results: [result], children: createElement(OperationResultItem, { result }) }) }], { initialEntries: ["/admin/operations/200"] });
       try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); }
     };
     const common = { provider: "agentkey", platform: "weibo" };
@@ -67,7 +69,7 @@ test("AgentKey Weibo actual result cards distinguish derived work, unknown retwe
     assert(html.includes("由实收身份组成的规范原文")); assert(html.includes('href="https://weibo.com/123/456"')); assert(html.includes("收到的链接 ID（mblogid）")); assert(html.includes("实收长微博片段")); assert(html.includes("已按原始时区转换的时间")); assert(html.includes("+0800")); assert(html.includes("attitudes_count"));
     assert(html.includes("实收片段&lt;script&gt;plain&lt;/script&gt;")); assert(!html.includes("<script>plain</script>"));
     assert.match(html, /<button(?![^>]*\sdisabled(?:\s|=|>))[^>]*>本地导入材料<\/button>/);
-    for (const patch of [{ uid: null }, { opusId: null }, { role: "outer-status-unparsed-retweet" }, { opusUrl: "sinaweibo://status?id=456" }]) {
+    for (const patch of [{ opusId: null }, { role: "outer-status-unparsed-retweet" }, { opusUrl: "sinaweibo://status?id=456" }]) {
       const blocked = render("weibo_work", { ...work, ...patch, importable: true });
       assert.match(blocked, /<button[^>]*disabled=""[^>]*>本地导入材料<\/button>/);
       assert(blocked.includes("不能人工补 ID 或地址")); assert(!blocked.includes('aria-label="补充已核实作者 UID"')); assert(!blocked.includes('aria-label="补充已核实原文地址"'));

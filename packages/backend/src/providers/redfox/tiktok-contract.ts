@@ -18,7 +18,7 @@ export const tiktokOperations={
 } as const;
 export type TiktokOperation=keyof typeof tiktokOperations;
 export const TiktokOperationId=z.enum(Object.keys(tiktokOperations) as [TiktokOperation,...TiktokOperation[]]);
-export function tiktokDescriptors():PlatformOperationDescriptor[]{return Object.entries(tiktokOperations).map(([id,d])=>({id,platform:"tiktok",label:d.label,fields:d.fields,purpose:d.shape==="topics"?"话题研究；不导入文章":"只读查询；稳定身份与原文缺项保留待处理",schedulableType:["R473NUE9", "PXZXY8KQ", "API_1790149158205", "API_1790581450500"].includes(id)?(["R473NUE9", "API_1790149158205", "API_1790581450500"].includes(id)?"list":"search"):null}));}
+export function tiktokDescriptors():PlatformOperationDescriptor[]{return Object.entries(tiktokOperations).map(([id,d])=>({id,platform:"tiktok",label:d.label,fields:d.fields,purpose:d.shape==="topics"?"话题研究；不导入文章":"只读查询；作品身份或原文缺项保留待处理",schedulableType:["R473NUE9", "PXZXY8KQ", "API_1790149158205", "API_1790581450500"].includes(id)?(["R473NUE9", "API_1790149158205", "API_1790581450500"].includes(id)?"list":"search"):null}));}
 export function tiktokWireInput(operation:TiktokOperation,input:Record<string,unknown>){
   const keys=operation==="API_1790149158205"?["ch_id","cursor"]:operation==="API_1790581450500"?["max_cursor"]:operation==="API_1790149281139"?["offset"]:[];
   return Object.fromEntries(Object.entries(input).map(([key,value])=>[key,keys.includes(key)?(JSON as JSON & {rawJSON(value:string):unknown}).rawJSON(IntegerText.parse(value)):value]));

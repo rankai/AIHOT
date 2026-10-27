@@ -36,7 +36,14 @@ export async function weiboResultEvidence(db:Db,s:any):Promise<{parsed:WeiboCand
  const parsed=selected.find(c=>c.itemKey===s.item_key);
  // Capability hints changed after Q. They do not authorize import and are not content evidence.
  const projection=(data:Record<string,unknown>)=>({...data,querySummaryId:undefined,importable:undefined,missing:undefined,pendingReason:undefined});
- if(!parsed||parsed.kind!==s.kind||stableJson(projection(s.data))!==stableJson(projection(parsed.data)))throw new UnsupportedReplacement('Weibo result differs from received response');
+ let matches=!!parsed&&stableJson(projection(s.data))===stableJson(projection(parsed.data));
+ // Older authorless projections retained the scheme but did not expose its native URL.
+ if(parsed&&!matches&&s.data.uid===undefined&&s.data.opusUrl===undefined&&parsed.data.urlSource==='received-original-url'){
+  const record={...(parsed.data.record as Record<string,unknown>)};delete record.opusUrl;
+  const legacy={...parsed.data,record,opusUrl:undefined,urlSource:null};
+  matches=stableJson(projection(s.data))===stableJson(projection(legacy));
+ }
+ if(!parsed||parsed.kind!==s.kind||!matches)throw new UnsupportedReplacement('Weibo result differs from received response');
  let sourceDiscoveredAt=new Date(s.received_at??s.created_at);
  if(detail){
   const parentId=summary.data.originResultId;
@@ -57,9 +64,8 @@ export async function agentKeyWeiboEvidence(db:Db,s:any){
  const op=agentKeyWeiboOperations.find(o=>o.operationId===parsed.data.operationId)!;
  if(![weiboSearchRoute,weiboPostsRoute,weiboDetailRoute,weiboProfileRoute].some(r=>r===op.route))throw new UnsupportedReplacement('Weibo research is not importable');
  const uid=parsed.data.uid;
- if(typeof uid!=='string'||!/^\d+$/.test(uid))throw new UnsupportedReplacement('A received Weibo author UID is required');
  if(op.route===weiboProfileRoute){
-  if(parsed.kind!=='weibo_account'||uid!==s.input.parameters.uid)throw new UnsupportedReplacement('Weibo profile does not prove the requested UID');
- }else if(parsed.kind!=='weibo_work'||parsed.data.role!=='status'||typeof parsed.data.opusId!=='string'||!/^\d+$/.test(parsed.data.opusId)||parsed.data.opusUrl!==`https://weibo.com/${uid}/${parsed.data.opusId}`||parsed.data.urlSource!=='derived-canonical-permalink')throw new UnsupportedReplacement('Received native Weibo status and author identity are required; retweets remain research-only');
+  if(parsed.kind!=='weibo_account'||typeof uid!=='string'||!/^\d+$/.test(uid)||uid!==s.input.parameters.uid)throw new UnsupportedReplacement('Weibo profile does not prove the requested UID');
+ }else if(parsed.kind!=='weibo_work'||parsed.data.role!=='status'||typeof parsed.data.opusId!=='string'||!/^\d+$/.test(parsed.data.opusId)||typeof parsed.data.opusUrl!=='string'||!['derived-canonical-permalink','received-original-url'].includes(String(parsed.data.urlSource)))throw new UnsupportedReplacement('Received native Weibo status and original URL are required; retweets remain research-only');
  return verified;
 }

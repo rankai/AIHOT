@@ -73,12 +73,13 @@ test('native config is boolean, subscription-owned, defaults false; disabling in
  xId=String(BigInt(Date.now())*10000n+2n);assert.equal(await child((await collect(id)).id),undefined);
 });
 
-async function platformCollect(operationId:string,parameters:Record<string,unknown>,response:unknown){
- collectionData=response;const sub=await createPlatformSubscription({name:tag(),operationId,parameters,autoDownloadVideo:true,enabled:true,limits:{pages:1,items:10,details:0}},'test',tag());
+async function platformCollect(operationId:string,parameters:Record<string,unknown>,response:unknown,sourceId?:string){
+ if(!sourceId){sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Selected subscription source','external','isolated')`;}
+ collectionData=response;const sub=await createPlatformSubscription({sourceId,name:tag(),operationId,parameters,autoDownloadVideo:true,enabled:true,limits:{pages:1,items:10,details:0}},'test',tag());
  const run=await startPlatformSubscription(sub.id,'test',tag());for(let n=0;n<8&&(await state(run.id)).status==='active';n++)await step(run.id);
- assert.equal((await state(run.id)).status,'completed',(await state(run.id)).wait_reason);return {run,sub,results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};
+ assert.equal((await state(run.id)).status,'completed',(await state(run.id)).wait_reason);return {run,sub,sourceId,results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};
 }
-test('TikTok topic and favorite real imports use verified authors and direct download; XHS creates fixed resolver intent',async()=>{
+test('TikTok topic and favorite real imports use configured sources and direct download; XHS creates fixed resolver intent',async()=>{
  for(const operationId of ['API_1790149158205','API_1790581450500']){
   const workId=String(BigInt(Date.now())*10000n+BigInt(Math.floor(Math.random()*1000))),userId=workId+'1';
   const record={workId,content:'Synthetic work',shareLink:`https://www.tiktok.com/@synthetic/video/${workId}`,mediaType:'video',authorData:{userId,secUserId:'sec-'+userId},videoData:{downloadNoMarkAddress:mediaUrl+'/tiktok'}};
@@ -90,25 +91,27 @@ test('TikTok topic and favorite real imports use verified authors and direct dow
  await sql`UPDATE operation_runs SET status='needs_review' WHERE id=${save.id}`;const authorSource=(await sourceDetail(save.input.sourceId))!.source;await updateSource(authorSource.id,{version:new Date(authorSource.updated_at).toISOString(),patch:{enabled:false}},'test');assert.equal((await state(save.id)).status,'stopped');assert.equal((await state(save.id)).generation,save.generation+1);
 });
 test('verified collection manual import is atomic, fills old material video facts, and independent query has no download effect',async()=>{
- const workId=String(BigInt(Date.now())*10000n+7n),url=`https://www.tiktok.com/@synthetic/video/${workId}`,record={workId,content:'Synthetic needs author',shareLink:url,mediaType:'video',videoData:{downloadAddress:mediaUrl+'/manual-tiktok'}};
+ const workId=String(BigInt(Date.now())*10000n+7n),url=`https://www.tiktok.com/@synthetic/video/${workId}`,record={workId,content:'Synthetic needs original',mediaType:'video',videoData:{downloadAddress:mediaUrl+'/manual-tiktok'}};
  const collected=await platformCollect('API_1790149158205',{ch_id:workId,cursor:'0'},{nextCursor:'0',hasMore:0,workList:[record]});const result=collected.results.find(r=>r.kind==='tiktok_work')!;assert.equal(result.article_id,null);assert.equal(await child(collected.run.id),undefined);
- const input={reason:'Synthetic verified author',supplement:{userId:workId+'1',evidence:'Synthetic independently checked author'}};
+ const sourceId=collected.sourceId;
+ const input={sourceId,reason:'Synthetic verified original',supplement:{url,evidence:'Synthetic independently checked original'}};
  await assert.rejects(sql.begin(async tx=>{await importTiktokResult(result.id,input,'test',tag(),tx);const [child]=await tx`SELECT id FROM operation_runs WHERE input->>'parentResultId'=${String(result.id)}`;assert.ok(child);throw new Error('rollback verified intent');}),/rollback verified intent/);
  assert.equal((await sql`SELECT article_id FROM operation_results WHERE id=${result.id}`)[0]!.article_id,null);assert.equal(await child(collected.run.id),undefined);
- const sourceId='tiktok-rollback-'+tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic','external','isolated')`;
+
  // The native identity already exists; filling media must still register when content does not change.
- const old=await upsertMaterial({sourceId,url,identityKey:`tiktok:workId:${workId}`,title:'Synthetic needs author',bodyText:'Synthetic needs author',via:'import'});
+ const old=await upsertMaterial({sourceId,url,identityKey:`tiktok:workId:${workId}`,title:'Synthetic needs original',bodyText:'Synthetic needs original',via:'import'});
  await sql`INSERT INTO source_account_bindings(platform,id_kind,id_value,source_id,evidence) VALUES ('tiktok','userId',${workId+'1'},${sourceId},'{"kind":"manual","reference":"synthetic"}')`;
  const imported=await importTiktokResult(result.id,input,'test',tag());assert.equal(imported!.articleId,old.articleId);assert.ok(await child(collected.run.id));assert.ok((await sql`SELECT media FROM articles WHERE id=${old.articleId}`)[0]!.media.some((m:any)=>m.confirmed));
  collectionData=record;const query=await createSynchronousQuery({operationId:'6SE9WIHJ',parameters:{awemeId:workId}},'test',tag());await step(query.id);const [q]=await sql`SELECT id FROM operation_results WHERE run_id=${query.id} AND kind='tiktok_work'`;await importTiktokResult(q!.id,input,'test',tag());assert.equal(await child(query.id),undefined);
 });
-test('Kuaishou collection requires manual verified attribution before registration; query and non-video remain inert',async()=>{
- const photoId=tag(),record={photoId,caption:'Synthetic verified video',workType:'1',videoUrl:mediaUrl+'/ks'};
- const collected=await platformCollect('ZWR31P2A',{keyword:tag()},{list:[record]}),result=collected.results.find(r=>r.kind==='kuaishou_work')!;assert.equal(await child(collected.run.id),undefined);
+test('Kuaishou collection requires manual original evidence before registration; query and non-video remain inert',async()=>{
  const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic','external','isolated')`;
+ const photoId=tag(),record={photoId,caption:'Synthetic verified video',workType:'1',videoUrl:mediaUrl+'/ks'};
+ const collected=await platformCollect('ZWR31P2A',{keyword:tag()},{list:[record]},sourceId),result=collected.results.find(r=>r.kind==='kuaishou_work')!;assert.equal(await child(collected.run.id),undefined);
+
  const input={sourceId,reason:'Synthetic checked identity',supplement:{url:`https://www.kuaishou.com/short-video/${photoId}`,evidence:'Verified original and author'}};
  await importManualWorkResult(result.id,input,'test',tag());const run=await child(collected.run.id);assert.ok(run);assert.equal((await step(run.id)).status,'completed');
- collectionData={...record,photoId:tag(),workType:'2'};const next=await platformCollect('ZWR31P2A',{keyword:tag()},{list:[collectionData]});const r=next.results.find(r=>r.kind==='kuaishou_work')!;await importManualWorkResult(r.id,{...input,supplement:{...input.supplement,url:`https://www.kuaishou.com/short-video/${tag()}`}},'test',tag());assert.equal(await child(next.run.id),undefined);
+ collectionData={...record,photoId:tag(),workType:'2'};const next=await platformCollect('ZWR31P2A',{keyword:tag()},{list:[collectionData]},sourceId);const r=next.results.find(r=>r.kind==='kuaishou_work')!;await importManualWorkResult(r.id,{...input,supplement:{...input.supplement,url:`https://www.kuaishou.com/short-video/${tag()}`}},'test',tag());assert.equal(await child(next.run.id),undefined);
  const [file]=await sql`SELECT file_key FROM operation_results WHERE run_id=${run.id} AND file_key IS NOT NULL`;await sql`UPDATE stored_files SET expires_at=now()-interval '1 second' WHERE key=${file!.file_key}`;
  assert.equal((await assetMetadata(file!.file_key)).expired,true);assert.ok((await listAssets()).items.every(a=>!('candidate' in a)));await assert.rejects(getAsset(file!.file_key),/expired/);
 });
@@ -149,7 +152,7 @@ test('Shipinhao lists with or without received IDs confirm and save only after m
  for(const operationId of ['E7G00COY','OVUTOTCV'])for(const withId of [true,false]){
   const original=`https://weixin.qq.com/sph/${tag()}`,record={...(withId?{videoId:tag()}:{}),description:'Verified list video',videoUrl:mediaUrl+'/shipinhao'};
   const parameters=operationId==='E7G00COY'?{keyword:tag()}:{nickname:tag()};
-  const collected=await platformCollect(operationId,parameters,{list:[record]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+  const collected=await platformCollect(operationId,parameters,{list:[record]},sourceId),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
   assert.equal(await child(collected.run.id),undefined);
   const input={sourceId,reason:'Checked list work',supplement:{url:original,evidence:'Verified this original and its author'}};
   const imported=await importManualWorkResult(result.id,input,'test',tag());
@@ -160,7 +163,7 @@ test('Shipinhao lists with or without received IDs confirm and save only after m
   const [file]=await sql`SELECT f.* FROM stored_files f JOIN operation_results r ON r.file_key=f.key WHERE r.run_id=${run.id}`;
   assert.equal((await getAsset(file!.key)).bytes,bytes.length);
   await importManualWorkResult(result.id,input,'test',tag());assert.equal((await child(collected.run.id)).id,run.id);
-  const again=await platformCollect(operationId,parameters,{list:[record]});await importManualWorkResult(again.results.find(r=>r.kind==='shipinhao_work')!.id,input,'test',tag());
+  const again=await platformCollect(operationId,parameters,{list:[record]},sourceId);await importManualWorkResult(again.results.find(r=>r.kind==='shipinhao_work')!.id,input,'test',tag());
   const reused=await child(again.run.id),beforeReuse=gets.length;assert.equal((await step(reused.id)).status,'completed');assert.equal(gets.length,beforeReuse);
   const [reuseFile]=await sql`SELECT file_key FROM operation_results WHERE run_id=${reused.id} AND file_key IS NOT NULL`;assert.equal(reuseFile!.file_key,file!.key);
   assert.equal((await sql`SELECT expires_at FROM stored_files WHERE key=${file!.key}`)[0]!.expires_at.toISOString(),file!.expires_at.toISOString());
@@ -172,7 +175,7 @@ test('Shipinhao empty, cover-only and contradictory works never register; standa
  const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic manual boundaries','external','isolated')`;
  const input=()=>({sourceId,reason:'Verified work',supplement:{url:`https://weixin.qq.com/sph/${tag()}`,evidence:'Verified original and author'}});
  for(const fields of [{videoUrl:''},{coverUrl:mediaUrl+'/cover'},{videoUrl:mediaUrl+'/video',workType:'normal'},{videoUrl:mediaUrl+'/video',workType:'图文'},{videoUrl:'javascript:bad'}]){
-  const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Not confirmed',...fields}]});
+  const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Not confirmed',...fields}]},sourceId);
   const imported=await importManualWorkResult(collected.results.find(r=>r.kind==='shipinhao_work')!.id,input(),'test',tag());
   assert.equal(await child(collected.run.id),undefined);assert.equal((await sql`SELECT media FROM articles WHERE id=${imported!.articleId}`)[0]!.media.some((m:any)=>m.confirmed),false);
  }
@@ -180,7 +183,7 @@ test('Shipinhao empty, cover-only and contradictory works never register; standa
  const query=await createSynchronousQuery({operationId:'E7G00COY',parameters:{keyword:tag()}},'test',tag());await step(query.id);
  const [q]=await sql`SELECT id FROM operation_results WHERE run_id=${query.id} AND kind='shipinhao_work'`;await importManualWorkResult(q!.id,input(),'test',tag());assert.equal(await child(query.id),undefined);
  for(const patch of [{enabled:false},{autoDownloadVideo:false}]){
-  const collected=await platformCollect('OVUTOTCV',{nickname:tag()},{list:[{description:'Pending save',videoUrl:mediaUrl+'/pending'}]});
+  const collected=await platformCollect('OVUTOTCV',{nickname:tag()},{list:[{description:'Pending save',videoUrl:mediaUrl+'/pending'}]},sourceId);
   await importManualWorkResult(collected.results.find(r=>r.kind==='shipinhao_work')!.id,input(),'test',tag());const run=await child(collected.run.id);assert.ok(run);
   const [sub]=await sql`SELECT * FROM collection_subscriptions WHERE id=${collected.sub.id}`;
   const before=gets.length,receipts=(await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n;
@@ -198,7 +201,7 @@ test('Shipinhao cross-source discovery survives an ineligible original author wi
   await sql`UPDATE sources SET enabled=${enabled} WHERE id=${owner}`;
   const [beforeArticle]=await sql`SELECT * FROM articles WHERE id=${old.articleId}`,beforeSources=await sql`SELECT * FROM sources WHERE id IN (${owner},${target}) ORDER BY id`;
   const parameters=operationId==='E7G00COY'?{keyword:tag()}:{nickname:tag()};
-  const collected=await platformCollect(operationId,parameters,{list:[{description:'New discovery',videoUrl:mediaUrl+'/discovery'}]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+  const collected=await platformCollect(operationId,parameters,{list:[{description:'New discovery',videoUrl:mediaUrl+'/discovery'}]},target),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
   const beforeGets=gets.length,receipts=(await sql`SELECT count(*)::int AS n FROM receipts WHERE service='redfox.media'`)[0]!.n;
   const imported=await importManualWorkResult(result.id,{sourceId:target,reason:'Verified discovery',supplement:{url,evidence:'Verified this original and author'}},'test',tag());
   assert.equal(imported!.articleId,old.articleId);
@@ -217,7 +220,7 @@ test('Shipinhao cross-source discovery survives an ineligible original author wi
 test('real video registration association errors still propagate and roll back the material transaction',async()=>{
  const sourceId=tag(),url=`https://weixin.qq.com/sph/${tag()}`;
  await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Rollback author','external','isolated')`;
- const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Rollback work',videoUrl:mediaUrl+'/rollback'}]}),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
+ const collected=await platformCollect('E7G00COY',{keyword:tag()},{list:[{description:'Rollback work',videoUrl:mediaUrl+'/rollback'}]},sourceId),result=collected.results.find(r=>r.kind==='shipinhao_work')!;
  await assert.rejects(sql.begin(async tx=>{
   const material=await upsertMaterial({sourceId,url,title:'Must roll back',via:'import'},tx);
   await tx`UPDATE operation_results SET article_id=${material.articleId},source_id=${sourceId} WHERE id=${result.id}`;

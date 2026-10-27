@@ -44,7 +44,7 @@ test('V4 material record contains only verified description, author and cover pr
 });
 test('query receipt import chooses verified Desc and keeps unknown content in receipt only',async()=>{
  const item=work();await query(item,async(result,calls)=>{
-  const imported=await importDouyinResult(result.id,{reason:'V4 evidence fixture'},'fixture',tag());assert.ok(imported?.articleId);
+  const imported=await importDouyinResult(result.id,{sourceId:await selectedSource(),reason:'V4 evidence fixture'},'fixture',tag());assert.ok(imported?.articleId);
   const [a]=await sql`SELECT body_text,body_status,author,media FROM articles WHERE id=${imported!.articleId}`;
   assert.equal(a!.body_text,item.Desc);assert.equal(a!.body_status,'ok');assert.equal(a!.author,item.Author.Nickname);assert.deepEqual(a!.media,[{kind:'image',url:item.Video.Cover.UrlList[0]},{kind:'video',confirmed:true}]);
   assert.equal(Object.hasOwn(result.data.record,'content'),false);
@@ -58,16 +58,19 @@ test('legacy V4 raw record imports safely and still rejects verified-field or ou
   const legacy={...result.data,record:{...item,desc:item.Desc,aweme_desc:item.Desc,authorName:item.Author.Nickname,coverUrl:item.Video.Cover.UrlList[0]}};
   for(const data of [{...legacy,title:'forged title'},{...legacy,record:{...legacy.record,desc:'forged desc'}},{...legacy,record:{...legacy.record,Desc:'forged raw Desc'}},{...legacy,record:{...legacy.record,authorName:'forged author'}},{...legacy,record:{...legacy.record,coverUrl:'https://example.test/forged.jpg'}},{...legacy,record:{...legacy.record,unexpected:'not present in receipt'}},{...result.data,record:{...result.data.record,content:item.content}}]){
    await sql`UPDATE operation_results SET data=${sql.json(data)} WHERE id=${result.id}`;
-   await assert.rejects(importDouyinResult(result.id,{reason:'reject forged V4 evidence'},'fixture',tag()),/differs/);
+   await assert.rejects(importDouyinResult(result.id,{sourceId:await selectedSource(),reason:'reject forged V4 evidence'},'fixture',tag()),/differs/);
   }
   await sql`UPDATE operation_results SET data=${sql.json(legacy)} WHERE id=${result.id}`;
-  const imported=await importDouyinResult(result.id,{reason:'historical V4 import'},'fixture',tag());assert.ok(imported?.articleId);
+  const imported=await importDouyinResult(result.id,{sourceId:await selectedSource(),reason:'historical V4 import'},'fixture',tag());assert.ok(imported?.articleId);
   assert.equal((await sql`SELECT body_text FROM articles WHERE id=${imported!.articleId}`)[0]!.body_text,item.Desc);assert.equal(calls.length,1);
  });
 });
 test('unknown V4 content alone cannot mark a material body as confirmed',async()=>{
  const item=work();delete item.Desc;await query(item,async(result,calls)=>{
-  const imported=await importDouyinResult(result.id,{reason:'missing verified Desc'},'fixture',tag());assert.ok(imported?.articleId);
+  const imported=await importDouyinResult(result.id,{sourceId:await selectedSource(),reason:'missing verified Desc'},'fixture',tag());assert.ok(imported?.articleId);
   const [a]=await sql`SELECT body_text,body_status FROM articles WHERE id=${imported!.articleId}`;assert.equal(a!.body_text,null);assert.equal(a!.body_status,'pending');assert.equal(calls.length,1);
  });
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

@@ -19,7 +19,7 @@ export function parseAgentKeyBilibili(response:unknown,route:AgentKeyBilibiliRou
  const summary:Record<string,unknown>={count:0,query,snapshot:true,stopReason:'single-request'};
  const candidates:BilibiliCandidate[]=[];
  const add=(kind:string,data:Record<string,unknown>)=>candidates.push({kind,itemKey:`item:${candidates.length}`,data:{...common,...data}});
- const work=(av:string,bvid:string|undefined,title:string,mid:string|undefined,record:Record<string,unknown>,role='native_video')=>add('bilibili_work',{title,workId:bvid??null,avId:av,url:bvid?`https://www.bilibili.com/video/${bvid}`:null,identity:mid?{mid}:{},role,record,publishedAt:null,importable:route===bilibiliDetailRoute&&!!mid&&!!bvid,missing:[...(route===bilibiliDetailRoute?[]:['仅研究，不导入材料']),...(!mid?['缺稳定作者 MID']:[]),...(!bvid?['未返回 BV']:[]),'发布时间单位未证实']});
+ const work=(av:string,bvid:string|undefined,title:string,mid:string|undefined,record:Record<string,unknown>,role='native_video')=>add('bilibili_work',{title,workId:bvid??null,avId:av,url:bvid?`https://www.bilibili.com/video/${bvid}`:null,identity:mid?{mid}:{},role,record,publishedAt:null,importable:route===bilibiliDetailRoute&&!!bvid,missing:[...(route===bilibiliDetailRoute?[]:['仅研究，不导入材料']),...(!bvid?['未返回 BV']:[]),'发布时间单位未证实']});
  const d=object(b.data);
  if(route===bilibiliSearchRoute||route===bilibiliTypedSearchRoute){
   const list=z.array(z.object({goto:z.string()}).passthrough()).max(1000).parse(d?.[route===bilibiliSearchRoute?'item':'items']);

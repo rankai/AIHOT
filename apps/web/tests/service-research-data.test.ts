@@ -152,11 +152,12 @@ test("AgentKey X has its own research dispatch, received snake-case fields and t
   assert.deepEqual(agentKeyXScopeRows({ list_id: huge, received: "unknown", author: "not scope" }), [["list_id", huge]]);
 });
 
-test("AgentKey X keeps author context conditional on received stable identity and relationships distinct", () => {
+test("AgentKey X displays received account context without mandatory author ID and rejects actual context conflicts", () => {
   const author = { rest_id: huge, screen_name: null }, authorContext = { rest_id: huge, screen_name: "actual", source: "received-account-context" };
   assert.deepEqual(agentKeyXContextRows({ author, authorContext }), [["rest_id", huge], ["screen_name", "actual"], ["source", "received-account-context"]]);
   assert.equal(author.screen_name, null);
-  for (const patch of [{ author: null }, { author: { rest_id: "other" } }, { authorContext: { ...authorContext, source: "request" } }]) assert.deepEqual(agentKeyXContextRows({ author, authorContext, ...patch }), []);
+  assert.deepEqual(agentKeyXContextRows({ author: null, authorContext }), [["rest_id", huge], ["screen_name", "actual"], ["source", "received-account-context"]]);
+  for (const patch of [{ author: { rest_id: "other" } }, { authorContext: { ...authorContext, source: "request" } }]) assert.deepEqual(agentKeyXContextRows({ author, authorContext, ...patch }), []);
   for (const [identityRole, label] of [["follower", "粉丝账号"], ["followee", "关注账号"], ["list-member", "列表成员账号"], ["community-member", "社区成员账号"]]) assert.equal(agentKeyXRole("x_followee", { identityRole }), label);
   assert.equal(agentKeyXRole("x_comment", {}), "会话中的帖子（非直接回复证明）");
   assert.equal(agentKeyXRole("x_research_work", { role: "retweet-wrapper" }), "转发外层帖子");

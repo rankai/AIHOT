@@ -21,7 +21,7 @@ function work(op:YoutubeOperation,raw:unknown,index:number,parameters:Record<str
  if(origin&&(op!=="609DF2IR"||record.videoId!==origin.videoId))throw new RedfoxResponseError("YouTube detail differs from frozen origin video");
  if(origin?.channelId&&returnedChannelId&&origin.channelId!==returnedChannelId)throw new RedfoxResponseError("YouTube detail author differs from frozen same-video evidence");
  const channelId=returnedChannelId??origin?.channelId;
- const missing:string[]=[];if(!record.videoId)missing.push("缺少已收到的视频 ID，不能生成原文链接");if(!channelId)missing.push("缺少已确认 channelId；频道名称和 handle 不证明作者归属");
+ const missing:string[]=[];if(!record.videoId)missing.push("缺少已收到的视频 ID，不能生成原文链接");
  const url=record.videoUrl??(record.videoId?`https://www.youtube.com/watch?v=${record.videoId}`:null);
  return {kind:"youtube_work",itemKey:`work:${index}`,data:{platform:"youtube",operationId:op,title:record.title||"YouTube 视频",workId:record.videoId??null,url,identity:channelId?{channelId}:{},missing,record,...(origin?{originResultId:origin.resultId}:{})}};
 }

@@ -39,7 +39,7 @@ export function ResultUse({ result: r }: { result: OperationResult }) {
   return <section className="min-w-0 space-y-3 rounded-control border border-line p-3" aria-label="结果关联材料">
     <p className="text-[13px] font-medium">关联已有材料 / 填入缺失正文</p>
     <p className="text-[12px] text-ink-3">关联不发布、不改变作者归属或权限；填空只用于缺失正文，不能覆盖已有内容。分享文案、任务 ID 或媒体地址不足以证明同一作品时须提供核实依据；明确的作品矛盾不能用依据覆盖。</p>
-    {r.articleId ? <div className="flex flex-wrap gap-3 text-[13px]"><Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>查看已关联材料</Link><Button size="sm" disabled={!!pending || loading} onClick={() => readArticle(r.articleId!)}>读取最新材料状态</Button></div> : <>
+    {r.articleId ? <div className="flex flex-wrap items-center gap-3 text-[13px]"><Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>查看已关联材料</Link><Button size="sm" disabled={!!pending || loading} onClick={() => readArticle(r.articleId!)}>读取最新材料状态</Button></div> : <>
       <Field label="搜索已有材料"><Input aria-label="搜索已有材料" value={query} disabled={!!pending || loading} placeholder="材料 ID、原文 URL 或标题" onChange={e => { invalidate(); setQuery(e.target.value); setRows([]); setSelectedId(""); }} /></Field>
       <Button size="sm" disabled={!query.trim() || !!pending || loading} onClick={async () => {
         invalidate(); setRows([]); setSelectedId(""); setError(null); setLoading(true);

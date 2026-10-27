@@ -46,8 +46,8 @@ test('six dispatcher Q routes freeze exact input, retain actual charge and persi
   assert.equal(rows.filter(r=>r.kind!=='query_summary').length,scenario.id==='douyin.following'?19:scenario.kind?1:0);
   if(scenario.kind)assert.equal(rows.find(r=>r.kind!=='query_summary')!.kind,scenario.kind);
   const [receipt]=await sql`SELECT status,usage,response FROM receipts WHERE id=${summary.receipt_id}`;assert.equal(receipt!.status,'completed');assert.equal(receipt!.usage.chargedCredits,.37);assert.equal(JSON.stringify(receipt!.response).includes('must-redact'),false);
-  if(scenario.id==='XUT4CECZ'){assert.equal(summary.data.accountState,'deleted');await assert.rejects(importDouyinResult(summary.id,{reason:'must not bind'},'test',tag()),/Not an importable/);}
-  else if(scenario.kind!=='douyin_work')await assert.rejects(importDouyinResult(rows.find(r=>r.kind!=='query_summary')!.id,{reason:'must not import'},'test',tag()),/Not an importable/);
+  if(scenario.id==='XUT4CECZ'){assert.equal(summary.data.accountState,'deleted');await assert.rejects(importDouyinResult(summary.id,{sourceId:await selectedSource(),reason:'must not bind'},'test',tag()),/Not an importable/);}
+  else if(scenario.kind!=='douyin_work')await assert.rejects(importDouyinResult(rows.find(r=>r.kind!=='query_summary')!.id,{sourceId:await selectedSource(),reason:'must not import'},'test',tag()),/Not an importable/);
  });
 });
 test('received malformed scope stays reviewable and local retry with valves off never repurchases',async()=>{
@@ -78,20 +78,23 @@ test('scheduled research snapshots finish one request with no material/binding a
 test('scheduled topic imports isolated native works once, preserves discovery and unknown-time backfill',async()=>{
  const id=String(Date.now())+'55',uid=String(Date.now())+'66',author={uid,sec_uid:'topic-'+tag(),nickname:'Topic author'};
  await withStub({status_code:0,aweme_list:[],mix_list:[{type:1,aweme_info:{aweme_id:id,desc:'Description, not transcript',create_time:1700000000,share_url:'https://v.douyin.com/test/',author}}],has_more:1,cursor:10},async server=>{
-  const sub=await createPlatformSubscription({name:'话题单页',provider:'agentkey',operationId:'douyin.topic_posts',parameters:{ch_id:'444'},enabled:true},'douyin-snapshot-test',tag());
+  const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:'话题单页',provider:'agentkey',operationId:'douyin.topic_posts',parameters:{ch_id:'444'},enabled:true},'douyin-snapshot-test',tag());
   try{
    await schedulePlatformSubscriptions();const [s]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`;const state=await step(s!.active_run_id);assert.equal(state.status,'completed',JSON.stringify(state));assert.equal(server.calls.length,1);
    const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${state.id} AND kind='douyin_work'`;assert.ok(result!.article_id);assert.ok(result!.source_id);
    const [source]=await sql`SELECT participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${result!.source_id}`;assert.equal(source!.participation_mode,'isolated');assert.equal(source!.site_fulltext,false);assert.equal(source!.syndicate_fulltext,false);
    const [article]=await sql`SELECT published_at,discovered_at,backfill,url FROM articles WHERE id=${result!.article_id}`;assert.equal(article!.published_at,null);assert.equal(article!.backfill,true);assert.equal(article!.url,`https://www.douyin.com/video/${id}`);
    const again=await importDouyinResult(result!.id,{reason:'idempotence'},'test',tag());assert.equal(again!.articleId,result!.article_id);
-   const q=await createAgentKeyQuery({provider:'agentkey',operationId:'douyin.topic_posts',parameters:{ch_id:'444'}},'douyin-snapshot-test',tag());await step(q.id);const [r]=await sql`SELECT id FROM operation_results WHERE run_id=${q.id} AND kind='douyin_work'`;const duplicate=await importDouyinResult(r!.id,{reason:'URL dedup'},'test',tag());assert.equal(duplicate!.articleId,result!.article_id);
+   const q=await createAgentKeyQuery({provider:'agentkey',operationId:'douyin.topic_posts',parameters:{ch_id:'444'}},'douyin-snapshot-test',tag());await step(q.id);const [r]=await sql`SELECT id FROM operation_results WHERE run_id=${q.id} AND kind='douyin_work'`;const duplicate=await importDouyinResult(r!.id,{sourceId:await selectedSource(),reason:'URL dedup'},'test',tag());assert.equal(duplicate!.articleId,result!.article_id);
    const [after]=await sql`SELECT discovered_at FROM articles WHERE id=${result!.article_id}`;assert.equal(after!.discovered_at.toISOString(),article!.discovered_at.toISOString());
   }finally{await sql`UPDATE collection_subscriptions SET enabled=false WHERE id=${sub.id}`;}
  });
 });
 test('unsupported modes, followers and snapshot enrichment fail before paid requests',async()=>{
  await assert.rejects(createAgentKeyQuery({provider:'agentkey',operationId:'douyin.followers',parameters:{}},'test',tag()));
- for(const operationId of ['XUT4CECZ','douyin.comments'])await assert.rejects(createPlatformSubscription({name:'invalid',provider:'agentkey',operationId,parameters:operationId==='XUT4CECZ'?{sec_user_id:'x'}:{aweme_id:'987'},enrichDetails:true,detailOperationId:'FK67XDVQ'},'test',tag()));
- await assert.rejects(createPlatformSubscription({name:'invalid',provider:'redfox',operationId:'douyin.comments',parameters:{aweme_id:'987'}},'test',tag()));
+ for(const operationId of ['XUT4CECZ','douyin.comments'])await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'invalid',provider:'agentkey',operationId,parameters:operationId==='XUT4CECZ'?{sec_user_id:'x'}:{aweme_id:'987'},enrichDetails:true,detailOperationId:'FK67XDVQ'},'test',tag()));
+ await assert.rejects(createPlatformSubscription({sourceId:await selectedSource(),name:'invalid',provider:'redfox',operationId:'douyin.comments',parameters:{aweme_id:'987'}},'test',tag()));
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

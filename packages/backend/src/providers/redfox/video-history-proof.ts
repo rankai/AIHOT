@@ -76,15 +76,15 @@ export async function redfoxHistoryProof(tx:Tx,s:any,articleUrl:string):Promise<
    if(request.input.restId!==input.restId)fail("request-context-mismatch");
    const page=parseTimeline(body,input.restId);tweet=[...(page.pinned?[page.pinned]:[]),...page.timeline].find(t=>t.tweetId===s.data.tweetId);
   }else if(op==="QCP75W33"&&request.input.tweetId===s.data.tweetId)tweet=parseTweet(body,s.data.tweetId);
-  if(!tweet||tweet.author.userId!==input.restId||tweet.retweetedTweet)fail("work-identity-mismatch");
-  return {platform:"x",identityKey:`x:${tweet.tweetId}`,identity:{user_id:tweet.author.userId},hasVideo:redfoxXHasVideo(tweet.medias)};
+  if(!tweet||(tweet.author.userId!==undefined&&tweet.author.userId!==input.restId)||tweet.retweetedTweet)fail("work-identity-mismatch");
+  return {platform:"x",identityKey:`x:${tweet.tweetId}`,identity:tweet.author.userId?{user_id:tweet.author.userId}:{},hasVideo:redfoxXHasVideo(tweet.medias)};
  }
  if(s.operation_key==="redfox.x.detail"){
   if(op!=="QCP75W33"||stableJson(request.input)!==stableJson(input.parameters)||request.window!==input.window)fail("request-context-mismatch");
   const tweet=parseTweet(body,input.parameters.tweetId),origin=checkedXDetailOrigin(input.origin,tweet.tweetId,tweet);
   const expected={platform:"x",operationId:op,record:tweet,workId:tweet.tweetId,identity:{userId:tweet.author.userId},...(origin?{originResultId:origin.sourceResultId}:{}),context:xDetailContext(tweet,origin)};
   if(s.kind!=="x_detail_work"||stableJson(projection(s.data))!==stableJson(expected))fail("result-projection-mismatch");
-  return {platform:"x",identityKey:`x:${tweet.tweetId}`,identity:{user_id:tweet.author.userId},hasVideo:redfoxXHasVideo(tweet.medias)};
+  return {platform:"x",identityKey:`x:${tweet.tweetId}`,identity:tweet.author.userId?{user_id:tweet.author.userId}:{},hasVideo:redfoxXHasVideo(tweet.medias)};
  }
  if(!["redfox.sync.query","redfox.platform.collection","redfox.weibo.collection"].includes(s.operation_key)||input.operationId!==op)fail("route-not-covered");
  if(s.operation_key==="redfox.sync.query"&&(stableJson(request.input)!==stableJson(input.parameters)||request.window!==input.window))fail("request-context-mismatch");
