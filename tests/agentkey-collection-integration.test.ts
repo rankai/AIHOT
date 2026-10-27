@@ -130,7 +130,7 @@ test("scheduled AgentKey collection uses its own valve, follows only upstream pa
     });
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.collect'`;
 
-    const subscription = await createPlatformSubscription({
+    const subscription = await createPlatformSubscription({sourceId:await selectedSource(),
       name: tag(),
       provider: "agentkey",
       operationId: "OWIBYU1V",
@@ -230,14 +230,14 @@ test("AgentKey and Redfox scheduling valves do not gate or reroute each other", 
       REDFOX_CALLS_ENABLED: "false",
       COLLECT_ENABLED: "true",
     });
-    const agentKey = await createPlatformSubscription({
+    const agentKey = await createPlatformSubscription({sourceId:await selectedSource(),
       name: tag(), provider: "agentkey", operationId: "OWIBYU1V", parameters: {keyword: "agentkey only"},
       enabled: false, limits: {pages: 1, items: 10, details: 0},
     }, "agentkey-valve", tag());
     ids.push(agentKey.id);
     await sql`UPDATE collection_subscriptions SET enabled=true,next_run_at=now()-interval '1 second' WHERE id=${agentKey.id}`;
 
-    const redfox = await createPlatformSubscription({
+    const redfox = await createPlatformSubscription({sourceId:await selectedSource(),
       name: tag(), provider: "redfox", operationId: "OWIBYU1V", parameters: {keyword: "redfox only"},
       enabled: false, limits: {pages: 1, items: 10, details: 0},
     }, "agentkey-valve", tag());
@@ -268,7 +268,7 @@ test("AgentKey and Redfox scheduling valves do not gate or reroute each other", 
 });
 
 test("ordinary subscription editing cannot switch its provider", async () => {
-  const id = (await createPlatformSubscription({
+  const id = (await createPlatformSubscription({sourceId:await selectedSource(),
     name: tag(), provider: "redfox", operationId: "OWIBYU1V", parameters: {keyword: "cannot switch"},
     enabled: false, limits: {pages: 1, items: 10, details: 0},
   }, "provider-lock", tag())).id;
@@ -337,7 +337,7 @@ async function agentKeyFixture<T>(pages: StubPage[], body: (fixture: {
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.collect'`;
     return await body({stub, create: async (limits,overrides) => {
       const config = {...collectionConfig(limits),...overrides};
-      const subscription = await createPlatformSubscription(config, "bounded-agentkey", tag());
+      const subscription = await createPlatformSubscription({...config,sourceId:await selectedSource()}, "bounded-agentkey", tag());
       ids.push(subscription.id);
       const run = await startPlatformSubscription(subscription.id, "bounded-agentkey", tag());
       return {subscription, run, config};
@@ -480,24 +480,27 @@ test("editing active AgentKey execution rejects a late old-generation page and p
 test("current AgentKey execution surfaces a deterministic identity conflict for review instead of treating it as a stale delivery", async () => {
   const item = work();
   const aweme = item.AwemeInfo;
+
   const left = `agentkey-conflict-left-${tag()}`, right = `agentkey-conflict-right-${tag()}`;
   await sql`INSERT INTO sources(id,name,kind,config,participation_mode,enabled) VALUES
     (${left},'AgentKey conflict left','external',${sql.json({platform:"douyin"})},'isolated',true),
     (${right},'AgentKey conflict right','external',${sql.json({platform:"douyin"})},'isolated',true)`;
   try {
-    await sql`INSERT INTO source_account_bindings(source_id,platform,id_kind,id_value,evidence) VALUES
-      (${left},'douyin','uid',${aweme.Author.Uid},${sql.json({kind:"test",reference:left})}),
-      (${right},'douyin','secUserId',${aweme.Author.SecUid},${sql.json({kind:"test",reference:right})})`;
+    const {newArticleId}=await import('@aihot/backend/lib/ids');
+    const {identityKeyForUrl}=await import('@aihot/backend/lib/url');
+    await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES
+      (${newArticleId()},${left},${identityKeyForUrl(`https://www.douyin.com/video/${aweme.AwemeId}`)!},${`https://www.douyin.com/video/${aweme.AwemeId}`},'First historical work',now(),now()),
+      (${newArticleId()},${right},${identityKeyForUrl(`https://www.iesdouyin.com/share/video/${aweme.AwemeId}`)!},${`https://www.iesdouyin.com/share/video/${aweme.AwemeId}`},'Second historical work',now(),now())`;
     await agentKeyFixture([[item]], async ({create, stub}) => {
       const {run} = await create();
       const outcome = await step(run.id);
       if ("skipped" in outcome) assert.fail("A current deterministic conflict must not be reported as a stale delivery");
       assert.equal(outcome.runId, run.id);
-      assert.match(outcome.error ?? "", /Received account IDs belong to different sources/);
+      assert.match(outcome.error ?? "", /Douyin native work already belongs to different articles/);
       const current = await runOf(run.id);
       assert.equal(stub.calls.length, 1);
       assert.equal(current.status, "needs_review");
-      assert.match(current.wait_reason, /account IDs belong to different sources/);
+      assert.match(current.wait_reason, /different articles/);
       assert.ok(current.current_receipt_id);
       const [receipt] = await sql`SELECT status,response FROM receipts WHERE id=${current.current_receipt_id}`;
       assert.equal(receipt.status, "received");
@@ -505,14 +508,14 @@ test("current AgentKey execution surfaces a deterministic identity conflict for 
       assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`).length, 0);
     });
   } finally {
-    await sql`DELETE FROM source_account_bindings WHERE source_id IN ${sql([left, right])}`;
+    await sql`DELETE FROM articles WHERE source_id IN ${sql([left, right])}`;
     await sql`DELETE FROM sources WHERE id IN ${sql([left, right])}`;
   }
 });
 
 test("platform scheduling explicitly rejects an unknown persisted provider even with both provider valves closed", async () => {
   const previous = {COLLECT_ENABLED: process.env.COLLECT_ENABLED, REDFOX_CALLS_ENABLED: process.env.REDFOX_CALLS_ENABLED, AGENTKEY_CALLS_ENABLED: process.env.AGENTKEY_CALLS_ENABLED};
-  const subscription = await createPlatformSubscription({...collectionConfig(), provider: "redfox", enabled: false}, "unknown-provider", tag());
+  const subscription = await createPlatformSubscription({sourceId:await selectedSource(),...collectionConfig(), provider: "redfox", enabled: false}, "unknown-provider", tag());
   try {
     Object.assign(process.env, {COLLECT_ENABLED: "true", REDFOX_CALLS_ENABLED: "false", AGENTKEY_CALLS_ENABLED: "false"});
     await sql`UPDATE collection_subscriptions SET provider='future-provider',enabled=true,next_run_at='1900-01-01' WHERE id=${subscription.id}`;
@@ -604,7 +607,8 @@ test("confirmed Redfox and AgentKey Douyin imports share one stable work identit
       const direct = await createSynchronousQuery({operationId: "OWIBYU1V", parameters: {keyword: "Cross-provider identity"}}, "cross-provider", tag());
       assert.equal((await finish(direct.id)).status, "completed");
       const [directResult] = await sql`SELECT * FROM operation_results WHERE run_id=${direct.id} AND kind='douyin_work'`;
-      const first = await importDouyinResult(directResult!.id, {reason: "Synthetic confirmed Redfox import"}, "cross-provider", tag());
+      const crossSource=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${crossSource},'Cross provider chosen source','external','isolated')`;
+      const first = await importDouyinResult(directResult!.id, {sourceId:crossSource,reason: "Synthetic confirmed Redfox import"}, "cross-provider", tag());
       assert.ok(first?.articleId);
       const [permissions] = await sql`SELECT kind,participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id=${first.sourceId}`;
       assert.deepEqual(permissions, {kind: "external", participation_mode: "isolated", site_fulltext: false, syndicate_fulltext: false, enabled: true});
@@ -612,17 +616,14 @@ test("confirmed Redfox and AgentKey Douyin imports share one stable work identit
       const gateway = await createAgentKeyQuery({provider: "agentkey", operationId: "OWIBYU1V", parameters: {keyword: "Cross-provider identity"}}, "cross-provider", tag());
       assert.equal((await finish(gateway.id)).status, "completed");
       const [gatewayResult] = await sql`SELECT * FROM operation_results WHERE run_id=${gateway.id} AND kind='douyin_work'`;
-      const second = await importDouyinResult(gatewayResult!.id, {reason: "Synthetic confirmed AgentKey import"}, "cross-provider", tag());
+      const second = await importDouyinResult(gatewayResult!.id, {sourceId:crossSource,reason: "Synthetic confirmed AgentKey import"}, "cross-provider", tag());
       assert.ok(second);
       assert.equal(second.sourceId, first.sourceId);
       assert.equal(second.articleId, first.articleId);
       const articles = await sql`SELECT id,identity_key,source_id FROM articles WHERE identity_key=${`douyin:aweme_id:${aweme.AwemeId}`} OR source_id=${first.sourceId}`;
       assert.deepEqual([...articles], [{id: first.articleId, identity_key: `douyin:aweme_id:${aweme.AwemeId}`, source_id: first.sourceId}]);
       const bindings = await sql`SELECT source_id,id_kind,id_value FROM source_account_bindings WHERE platform='douyin' AND source_id=${first.sourceId} ORDER BY id_kind`;
-      assert.deepEqual([...bindings], [
-        {source_id: first.sourceId, id_kind: "secUserId", id_value: aweme.Author.SecUid},
-        {source_id: first.sourceId, id_kind: "uid", id_value: aweme.Author.Uid},
-      ]);
+      assert.deepEqual([...bindings], []);
       const [after] = await sql`SELECT kind,participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id=${first.sourceId}`;
       assert.deepEqual(after, permissions);
       const results = await sql`SELECT r.provider,z.source_id,z.article_id,p.status,p.service,p.model FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN receipts p ON p.id=z.receipt_id WHERE z.id IN ${sql([directResult!.id, gatewayResult!.id])} ORDER BY z.id`;
@@ -649,7 +650,7 @@ test("explicit Redfox to AgentKey switch preserves the subscription and history,
   const item = work();
   await agentKeyFixture([[item]], async ({stub}) => {
     const config = {...collectionConfig({pages: 2, items: 7, details: 0}), provider: "redfox", intervalMinutes: 37};
-    const subscription = await createPlatformSubscription(config, "switch-test", tag());
+    const subscription = await createPlatformSubscription({...config,sourceId:await selectedSource()}, "switch-test", tag());
     try {
       const old = await startPlatformSubscription(subscription.id, "switch-test", tag());
       const progress = {oldProviderCursor: "not-portable", pages: 2};
@@ -710,7 +711,7 @@ test("explicit Redfox to AgentKey switch preserves the subscription and history,
 test("AgentKey to Redfox switch keeps a disabled subscription disabled and starts from the same keyword", async () => {
   const previous = {AGENTKEY_API_KEY: process.env.AGENTKEY_API_KEY, REDFOX_API_KEY: process.env.REDFOX_API_KEY};
   const config = {...collectionConfig(), enabled: false};
-  const subscription = await createPlatformSubscription(config, "reverse-switch", tag());
+  const subscription = await createPlatformSubscription({...config,sourceId:await selectedSource()}, "reverse-switch", tag());
   try {
     process.env.REDFOX_API_KEY = "test-redfox-switch-key";
     process.env.AGENTKEY_API_KEY = "test-agentkey-switch-key";
@@ -739,7 +740,7 @@ test("provider switch preflight blocks untranslatable parameters, details, missi
   try {
     for (const patch of fixtures) {
       const config = {...collectionConfig(), provider: "redfox", enabled: false, ...patch};
-      const subscription = await createPlatformSubscription(config, "blocked-switch", tag());
+      const subscription = await createPlatformSubscription({...config,sourceId:await selectedSource()}, "blocked-switch", tag());
       const [before] = await sql`SELECT * FROM collection_subscriptions WHERE id=${subscription.id}`;
       const result = await preflightPlatformSubscriptionProvider(subscription.id, {editVersion: 1, targetProvider: "agentkey"});
       assert.equal(result!.supported, false);
@@ -748,7 +749,7 @@ test("provider switch preflight blocks untranslatable parameters, details, missi
       await assert.rejects(switchPlatformSubscriptionProvider(subscription.id, {editVersion: 1, targetProvider: "agentkey", reason: "Must remain blocked"}, "blocked-switch"), /承接|仅开放/);
       assert.deepEqual((await sql`SELECT * FROM collection_subscriptions WHERE id=${subscription.id}`)[0], before);
     }
-    const subscription = await createPlatformSubscription({...collectionConfig(), provider: "redfox", enabled: false}, "missing-switch-key", tag());
+    const subscription = await createPlatformSubscription({sourceId:await selectedSource(),...collectionConfig(), provider: "redfox", enabled: false}, "missing-switch-key", tag());
     delete process.env.AGENTKEY_API_KEY;
     const result = await preflightPlatformSubscriptionProvider(subscription.id, {editVersion: 1, targetProvider: "agentkey"});
     assert.equal(result!.supported, false);
@@ -764,7 +765,7 @@ test("provider switch API rejects stale versions and arbitrary config, rechecks 
   backendConfig.devAdmin = {displayName: "Synthetic provider switch"};
   process.env.AGENTKEY_API_KEY = "test-agentkey-api-switch-key";
   const config = {...collectionConfig(), provider: "redfox", enabled: false};
-  const subscription = await createPlatformSubscription(config, "switch-api", tag());
+  const subscription = await createPlatformSubscription({...config,sourceId:await selectedSource()}, "switch-api", tag());
   const path = `/api/admin/redfox/collections/${subscription.id}`, headers = {"x-csrf-token": "dev"};
   try {
     const request = {editVersion: 1, targetProvider: "agentkey"};
@@ -819,7 +820,7 @@ for (const enabledProvider of ["agentkey", "redfox"] as const) {
       process.env.REDFOX_CALLS_ENABLED = String(enabledProvider === "redfox");
       for (let i = 0; i < 101; i++) {
         const provider = i === 100 ? enabledProvider : enabledProvider === "agentkey" ? "redfox" : "agentkey";
-        const sub = await createPlatformSubscription({...collectionConfig(), provider, enabled: false}, "starvation-test", tag());
+        const sub = await createPlatformSubscription({sourceId:await selectedSource(),...collectionConfig(), provider, enabled: false}, "starvation-test", tag());
         ids.push(sub.id);
         await sql`UPDATE collection_subscriptions SET enabled=true,next_run_at=now()-interval '2 days'+${i}*interval '1 second' WHERE id=${sub.id}`;
       }
@@ -858,7 +859,7 @@ test("account subscription retains page through bounded detail, resumes list and
   try{
     Object.assign(process.env,{AGENTKEY_CALLS_ENABLED:"true",AGENTKEY_API_KEY:"test-app-collection",AGENTKEY_MCP_URL:stub.url,COLLECT_ENABLED:"true"});
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.collect'`;
-    const sub=await createPlatformSubscription({name:tag(),provider:"agentkey",operationId:"QEQLCKD6",parameters:{sec_user_id:sec},enabled:true,enrichDetails:true,detailOperationId:"FK67XDVQ",limits:{pages:3,items:10,details:1}},"app-integration",tag());id=sub.id;
+    const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),provider:"agentkey",operationId:"QEQLCKD6",parameters:{sec_user_id:sec},enabled:true,enrichDetails:true,detailOperationId:"FK67XDVQ",limits:{pages:3,items:10,details:1}},"app-integration",tag());id=sub.id;
     await schedulePlatformSubscriptions();
     const [s]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`;
     const step=async()=>{const [run]=await sql`SELECT * FROM operation_runs WHERE id=${s.active_run_id}`;await executeOperationStep(run.id,run.step_version,run.job_id);return (await sql`SELECT * FROM operation_runs WHERE id=${run.id}`)[0];};
@@ -894,7 +895,7 @@ test("account subscription retains page through bounded detail, resumes list and
   }
 });
 
-test("account collection completes missing author with chosen detail and keeps discovery time",async()=>{
+test("account collection imports without author and chosen detail keeps discovery time",async()=>{
   const id=`93${Date.now()}`,sec=`synthetic-${id}`;
   const partial={aweme_id:id,desc:"list description"};
   const complete={...partial,create_time:1729400000,author:{uid:`94${id}`,sec_uid:sec,nickname:"Synthetic recovered author"}};
@@ -902,7 +903,7 @@ test("account collection completes missing author with chosen detail and keeps d
     const {run}=await create({pages:1,items:10,details:1},{operationId:"QEQLCKD6",parameters:{sec_user_id:sec},enrichDetails:true,detailOperationId:"FK67XDVQ"});
     await step(run.id);
     const [original]=await sql`SELECT z.*,p.received_at FROM operation_results z JOIN receipts p ON p.id=z.receipt_id WHERE z.run_id=${run.id} AND z.kind='douyin_work'`;
-    assert.equal(original.article_id,null);assert.match(original.data.pendingReason,/stable author/);
+    assert.ok(original.article_id);assert.equal(original.data.pendingReason,undefined);
     assert.equal((await finish(run.id)).status,"completed");assert.equal(stub.calls.length,2);
     const [detail]=await sql`SELECT z.article_id,a.discovered_at FROM operation_results z JOIN articles a ON a.id=z.article_id WHERE z.run_id=${run.id} AND z.kind='douyin_work'`;
     assert.ok(detail.article_id);assert.equal(detail.discovered_at.toISOString(),original.received_at.toISOString());
@@ -988,3 +989,6 @@ test("research API exposes truthful nonschedulable variants and freezes only sup
     }
   }finally{backendConfig.devAdmin=previous;await app.close();}
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

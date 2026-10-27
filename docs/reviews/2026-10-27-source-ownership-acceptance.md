@@ -74,3 +74,14 @@
 - 用户确认清理本轮隔离验收库旧样例：已删除 `aihot_source_ownership_ui_test:55527` 的订阅 #2、#7。删除前核对完整名称、无在途执行和无执行引用，并备份至 `/tmp/aihot-source-ownership-20261027/deleted-legacy-ui-subscriptions.json`。文章、媒体与其他订阅保留。前文涉及这两条的截图是删除前验收证据。
 - 用户进一步确认“日常库”即当前 `http://127.0.0.1:3370` 后台，对应同一隔离验收库，并非另一个日常环境。再次按现有 `contentSubscription` 规则核对：未关联信源的内容订阅剩余 0 条，无需额外删除。保留 6 条其他订阅，其中 #5 是合法无源研究快照，#8 使用原生主订阅的 `control_source_id`；未访问或清理其他数据库。
 - 日志：`/tmp/ownership-p3-red.log`、`/tmp/ownership-p3-green.log`、`/tmp/ownership-p3-types.log`。未提交、推送、部署或发起真实调用。
+
+
+## PR #8 首轮 CI 修复
+
+[PR #8](https://github.com/rankai/AIHOT/pull/8) 基于仍打开的 PR #7。首个提交 `a840e6c` 的 [Check #17](https://github.com/rankai/AIHOT/actions/runs/40441864269)：Web 382/382、类型检查、构建、迁移、站点冒烟及 Docker 通过；后端 895/1035，140 项失败集中在 14 个文件。不将本地定向验证表述为首轮全量 CI 通过。
+
+- 实际兼容回归：通用归属辅助函数直接读取历史 JSON null 配置，影响原生迁移/修复。仅将两处属性读取改为空值安全访问，保留既有 malformed 配置迁移测试及其拒绝/修复行为，未修改这两个测试文件。
+- 12 个测试文件补齐管理员配置的所属信源，明确独立查询导入归属，更新新 DTO 字段和旧作者门槛预期。预算、分页、停止、回执恢复、事务回滚、跨源权限、媒体候选、30 天期限和复用断言继续保留。
+- 原 current-run 冲突测试由已不成立的作者绑定冲突，改为同一抖音作品的两种原文地址指向不同旧文章这一真实材料冲突；仍断言 needs_review、received 回执和不误判 stale。TikTok 手工补证夹具改为确实缺原文，保留原子回滚和媒体补齐验证。
+- 修复后的 14 个原失败文件加 `source-ownership` 串行回归 **205/205**，失败/取消/跳过均为 0；backend/tests 类型检查和 diff 检查通过。日志 `/tmp/ownership-ci-final.log`。主监督核对实际业务与夹具差异后提交，最新完整 CI 结果见 PR 描述。
+- 本轮 CI 修复无 UI 改动、无新表/状态/队列，未发起真实调用，未合并或部署。

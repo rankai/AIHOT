@@ -24,7 +24,7 @@ before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));proc
 after(async()=>{await sql`UPDATE budgets SET per_minute=${budget.per_minute as number},per_hour=${budget.per_hour as number},per_day=${budget.per_day as number} WHERE service='redfox.collect'`;process.env.REDFOX_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
-async function start(operationId:string,parameters:Record<string,unknown>,pages=2,items=10){const sub=await createPlatformSubscription({name:tag(),operationId,parameters,enabled:true,limits:{pages,items,details:0}},'test',tag());return startPlatformSubscription(sub.id,'test',tag());}
+async function start(operationId:string,parameters:Record<string,unknown>,pages=2,items=10){const sub=await createPlatformSubscription({sourceId:await selectedSource(),name:tag(),operationId,parameters,enabled:true,limits:{pages,items,details:0}},'test',tag());return startPlatformSubscription(sub.id,'test',tag());}
 async function finish(id:number){for(let i=0;i<30;i++){const r=await row(id);if(r.status!=='active')return r;await step(id);}throw new Error('Fixture exceeded bounded steps');}
 test('YouTube token pages commit each result with its own source-page proof and original discovery',async()=>{
  const ids=[randomUUID().replaceAll('-','').slice(0,11),randomUUID().replaceAll('-','').slice(0,11)],token=' | opaque-next | ',channel='channel_'+tag();
@@ -72,7 +72,7 @@ test('new TikTok description result preserves existing same-owner full body and 
 });
 test('catalog exposes only local collect prices and actual detail capability without paid reads',async()=>{
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Collection metadata fixture'};const initial=requests.length;
- try{const response=await app.inject({url:'/api/admin/redfox/operations'});assert.equal(response.statusCode,200);const list=response.json(),yt=list.find((d:{id:string})=>d.id==='GC5SC5HS'),detail=list.find((d:{id:string})=>d.id==='609DF2IR');assert.deepEqual(yt.collectionPrice,{amount:0.06,currency:'CNY',basis:'estimated'});assert.deepEqual(yt.collectionCapabilities,{detailEnrichment:false,detailOperations:[]});assert.equal(detail.collectionPrice,undefined);assert.equal(list.find((d:{id:string})=>d.id==='TXQPVGJG').collectionCapabilities.detailEnrichment,true);assert.equal(requests.length,initial);}
+ try{const response=await app.inject({url:'/api/admin/redfox/operations'});assert.equal(response.statusCode,200);const list=response.json(),yt=list.find((d:{id:string})=>d.id==='GC5SC5HS'),detail=list.find((d:{id:string})=>d.id==='609DF2IR');assert.deepEqual(yt.collectionPrice,{amount:0.06,currency:'CNY',basis:'estimated'});assert.deepEqual(yt.collectionCapabilities,{detailEnrichment:false,detailOperations:[],sourceRequired:true});assert.equal(detail.collectionPrice,undefined);assert.equal(list.find((d:{id:string})=>d.id==='TXQPVGJG').collectionCapabilities.detailEnrichment,true);assert.equal(requests.length,initial);}
  finally{config.devAdmin=null;await app.close();}
 });
 test('confirmed page counters advance by their documented units without coercing string pages',async()=>{
@@ -100,7 +100,7 @@ test('scheduled work consumers validate page proof for detail origins and isolat
  await assert.rejects(createSynchronousQuery({...payload,parameters:Object.fromEntries(Object.keys(detail).map(k=>[k,'WrongWork']))},'test',tag()));
  const provenance=result!.provenance;await sql`UPDATE operation_results SET provenance=${sql.json({...provenance,sourcePageResultId:result!.id})} WHERE id=${result!.id}`;await assert.rejects(createSynchronousQuery(payload,'test',tag()),/Source page/);assert.equal((await createSynchronousQuery(payload,'test',key)).id,child.id);await sql`UPDATE operation_results SET provenance=${sql.json(provenance)} WHERE id=${result!.id}`;
  if(op==='E7G00COY'||op==='ZWR31P2A'){
-  assert.equal(result!.article_id,null);const source=tag();await sql`INSERT INTO sources(id,name,kind,enabled,participation_mode) VALUES (${source},'Synthetic manual source','external',true,'isolated')`;
+  assert.equal(result!.article_id,null);const source=await selectedSource();
   const input={sourceId:source,reason:'Verified scheduled candidate',supplement:{url:op==='E7G00COY'?`https://weixin.qq.com/sph/${tag()}`:`https://www.kuaishou.com/short-video/${tag()}`,evidence:'Individually verified original and isolated attribution'}};
   process.env.REDFOX_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';delete process.env.REDFOX_API_KEY;
   try{const linked=await importManualWorkResult(result!.id,input,'test',tag());assert.ok(linked?.articleId);const [article]=await sql`SELECT * FROM articles WHERE id=${linked.articleId}`;assert.equal(article!.discovered_at.toISOString(),at.toISOString());assert.equal(article!.source_id,source);assert.equal((await sql`SELECT count(*)::int AS n FROM source_account_bindings WHERE source_id=${source}`)[0]!.n,0);assert.equal(requests.length,before);}
@@ -113,3 +113,6 @@ test('scheduled work consumers validate page proof for detail origins and isolat
  }finally{await sql`UPDATE budgets SET per_minute=${queryBudget!.per_minute},per_hour=${queryBudget!.per_hour},per_day=${queryBudget!.per_day} WHERE service='redfox.query'`;}
  }
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

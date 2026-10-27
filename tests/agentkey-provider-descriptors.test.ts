@@ -1,3 +1,5 @@
+import {collectionOperationIds} from "@aihot/backend/sources/platform-subscriptions";
+import {contentSubscription} from "@aihot/backend/sources/subscriptions";
 import {after, before, test} from "node:test";
 import assert from "node:assert/strict";
 import {assertConfiguredTestDatabase} from "./setup.ts";
@@ -76,7 +78,7 @@ for (const fixture of fixtures) {
 
   test(`actual Web draft/config keeps enabled Redfox detail on unchanged save for ${fixture.id}`,()=>{
     const base = operation(fixture.id);
-    const initial: CollectionSubscription = {id:991, platform:fixture.platform, name:"Existing subscription", provider:"redfox", operationId:fixture.id, parameters:fixture.parameters, enabled:false, intervalMinutes:30, enrichDetails:true, detailOperationId:fixture.detail, limits:{pages:3,items:100,details:20}, editVersion:1, executionVersion:1, nextRunAt:null, activeRun:null};
+    const initial: CollectionSubscription = {sourceId:"descriptor-source",sourceRequired:true,id:991, platform:fixture.platform, name:"Existing subscription", provider:"redfox", operationId:fixture.id, parameters:fixture.parameters, enabled:false, intervalMinutes:30, enrichDetails:true, detailOperationId:fixture.detail, limits:{pages:3,items:100,details:20}, editVersion:1, executionVersion:1, nextRunAt:null, activeRun:null};
     const draft = collectionDraft(base, initial);
     assert.equal(draft.enrichDetails, true);
     const saved = collectionConfig(base, draft, fixture.platform);
@@ -89,7 +91,7 @@ for (const fixture of fixtures) {
 
   test(`actual AgentKey ${fixture.id} keeps one page and explicit bounded details`,()=>{
     const base = operation(fixture.id);
-    const draft = {...collectionDraft(base, null, {operationId:base.id,provider:"agentkey",sequence:1,values:fixture.agentKeyParameters}),name:"AgentKey subscription"};
+    const draft = {...collectionDraft(base, null, {operationId:base.id,provider:"agentkey",sequence:1,values:fixture.agentKeyParameters}),sourceId:"descriptor-source",name:"AgentKey subscription"};
     const single = collectionConfig(base, {...draft,pages:8,details:7});
     assert.deepEqual(single.limits, {pages:1,items:100,details:0});
     const enriched = collectionConfig(base, {...draft,pages:8,enrichDetails:true,detailOperationId:fixture.detail,details:2});
@@ -128,5 +130,5 @@ test("actual WeChat query variants retain their separate fields and AgentKey que
 
 test("actual AgentKey-only descriptors preserve their existing contracts",()=>{
   const expected = [...xResearchDescriptors,...weiboResearchDescriptors,...bilibiliResearchDescriptors,...xiaohongshuResearchDescriptors,...toutiaoResearchDescriptors,...wechatResearchDescriptors,...douyinSnapshotDescriptors,douyinSuggestDescriptor];
-  for (const descriptor of expected) assert.deepEqual(operation(descriptor.id),JSON.parse(JSON.stringify(descriptor)),descriptor.id);
+  for (const descriptor of expected) assert.deepEqual(operation(descriptor.id),JSON.parse(JSON.stringify({...descriptor,...((collectionOperationIds as readonly string[]).includes(descriptor.id)?{collectionCapabilities:{...descriptor.collectionCapabilities,sourceRequired:contentSubscription({platform:descriptor.platform,config:{operationId:descriptor.id}})}}:{})})),descriptor.id);
 });

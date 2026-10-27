@@ -45,7 +45,7 @@ after(async()=>{for(const b of budgets)await sql`UPDATE budgets SET per_minute=$
 
 test("V4 material import registers one separate low-priority save, Redfox resolves once, private bytes expire in 30 days",async()=>{
   newWork();parserData={resources:[{type:"image",downloadUrl:mediaUrl+"/cover"},{type:"video",downloadUrl:mediaUrl+"/video?signature=private"}]};
-  const sub=await createPlatformSubscription(input(true),"video-test",tag());
+  const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag());
   assert.equal((await listPlatformSubscriptions("douyin")).find(s=>s.id===sub.id)!.autoDownloadVideo,true);
   const parent=await collect(sub.id),run=await child(parent.id);assert.ok(run);
   assert.equal(run.provider,"local");assert.equal((await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`)[0]!.active_run_id,null);
@@ -61,29 +61,29 @@ test("V4 material import registers one separate low-priority save, Redfox resolv
   assert.deepEqual(await readFile(assetPath(asset.key)),mediaBytes);
   const again=await collect(sub.id);assert.equal(await child(again.id),undefined);assert.equal(parserCalls,before+1);
   assert.equal((await sql`SELECT provenance->'videoDownloadRunId' AS id FROM operation_results WHERE run_id=${again.id} AND kind='douyin_work'`)[0]!.id,run.id);
-  const second=await createPlatformSubscription(input(true),"video-test",tag()),p2=await collect(second.id),r2=await child(p2.id);
+  const second=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),p2=await collect(second.id),r2=await child(p2.id);
   const gets=downloads;await step(r2.id);assert.equal((await state(r2.id)).status,"completed");assert.equal(parserCalls,before+1);assert.equal(downloads,gets);
   assert.equal((await getAsset(asset.key)).expires_at!.getTime(),asset.expires_at!.getTime());
   await deleteAsset(asset.key);
-  const third=await createPlatformSubscription(input(true),"video-test",tag()),p3=await collect(third.id),r3=await child(p3.id);await step(r3.id);
+  const third=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),p3=await collect(third.id),r3=await child(p3.id);await step(r3.id);
   assert.equal(parserCalls,before+1);assert.equal(downloads,gets);assert.equal((await sql`SELECT data FROM operation_results WHERE run_id=${r3.id}`)[0]!.data.reason,"deleted");
 });
 
 test("old config, false config and unconfirmed work do not register downloads",async()=>{
-  for(const enabled of [undefined,false]){newWork();const sub=await createPlatformSubscription(input(enabled),"video-test",tag());const parent=await collect(sub.id);assert.equal(await child(parent.id),undefined);assert.equal((await listPlatformSubscriptions("douyin")).find(s=>s.id===sub.id)!.autoDownloadVideo,false);}
-  newWork(false);const sub=await createPlatformSubscription(input(true),"video-test",tag());assert.equal(await child((await collect(sub.id)).id),undefined);
+  for(const enabled of [undefined,false]){newWork();const sub=await createPlatformSubscription({...input(enabled),sourceId:await selectedSource()},"video-test",tag());const parent=await collect(sub.id);assert.equal(await child(parent.id),undefined);assert.equal((await listPlatformSubscriptions("douyin")).find(s=>s.id===sub.id)!.autoDownloadVideo,false);}
+  newWork(false);const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag());assert.equal(await child((await collect(sub.id)).id),undefined);
 });
 
 test("empty parsing consumes its receipt and ends honestly with zero saved",async()=>{
   newWork();parserData={title:"Only a cover",resources:[{type:"image",downloadUrl:mediaUrl+"/cover"}]};
-  const sub=await createPlatformSubscription(input(true),"video-test",tag()),run=await child((await collect(sub.id)).id),gets=downloads;
+  const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),run=await child((await collect(sub.id)).id),gets=downloads;
   assert.equal((await step(run.id)).step_key,"subscription.video.save");assert.equal((await step(run.id)).status,"completed");assert.equal(downloads,gets);
   const [result]=await sql`SELECT data FROM operation_results WHERE run_id=${run.id} AND kind='subscription_video'`;assert.equal(result!.data.saved,0);assert.equal(result!.data.reason,"no_video_address");
   const [receipt]=await sql`SELECT p.status FROM receipts p JOIN operation_results z ON z.receipt_id=p.id WHERE z.run_id=${run.id}`;assert.equal(receipt!.status,"completed");
 });
 
 test("temporary rejection and manual resume share the two actual parser attempt cap",async()=>{
-  newWork();rejectParser=true;const sub=await createPlatformSubscription(input(true),"video-test",tag()),run=await child((await collect(sub.id)).id),calls=parserCalls;
+  newWork();rejectParser=true;const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),run=await child((await collect(sub.id)).id),calls=parserCalls;
   try {
     assert.equal((await step(run.id)).status,"waiting");let current=await state(run.id);
     await sql.begin(tx=>resumeRun(tx,{runId:run.id,stepVersion:current.step_version,generation:current.generation}));
@@ -94,14 +94,14 @@ test("temporary rejection and manual resume share the two actual parser attempt 
 });
 
 test("config close stops derived runs while completed collection stays completed",async()=>{
-  newWork();const sub=await createPlatformSubscription(input(true),"video-test",tag()),parent=await collect(sub.id),run=await child(parent.id),calls=parserCalls;
+  newWork();const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),parent=await collect(sub.id),run=await child(parent.id),calls=parserCalls;
   await updatePlatformSubscription(sub.id,{editVersion:1,config:input(false)},"video-test");
   assert.equal((await state(run.id)).status,"stopped");assert.equal((await state(parent.id)).status,"completed");await step(run.id);assert.equal(parserCalls,calls);
 });
 
 test("expiry blocks reads before physical cleanup and retains its tombstone",async()=>{
   newWork();parserData={resources:[{type:"video",downloadUrl:mediaUrl+"/video"}]};
-  const sub=await createPlatformSubscription(input(true),"video-test",tag()),run=await child((await collect(sub.id)).id);await step(run.id);await step(run.id);
+  const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),run=await child((await collect(sub.id)).id);await step(run.id);await step(run.id);
   const [result]=await sql`SELECT file_key FROM operation_results WHERE run_id=${run.id} AND kind='subscription_video'`;assert.ok(result!.file_key);
   await sql`UPDATE stored_files SET expires_at=now()-interval '1 second' WHERE key=${result!.file_key}`;
   await assert.rejects(getAsset(result!.file_key),/expired/);await cleanupAssets();
@@ -111,7 +111,7 @@ test("expiry blocks reads before physical cleanup and retains its tombstone",asy
 
 test("received parser response replays locally, then a complete unregistered file recovers with outbound disabled",async()=>{
   newWork();parserData={resources:[{type:"video",downloadUrl:mediaUrl+"/recover?signature=secret"}]};
-  const sub=await createPlatformSubscription(input(true),"video-test",tag()),run=await child((await collect(sub.id)).id);
+  const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),run=await child((await collect(sub.id)).id);
   const calls=parserCalls;
   await queryMediaTool("0W27H3O6",{url:run.input.originalUrl},`subscription-video:${run.id}`,receiptOptions({runId:run.id,stepVersion:run.step_version,generation:run.generation}));
   assert.equal(parserCalls,calls+1);
@@ -130,7 +130,7 @@ test("received parser response replays locally, then a complete unregistered fil
 });
 
 test("unknown outcome waits thirty minutes, retries once, and remains governed after the second loss",async()=>{
-  newWork();loseParser=true;const sub=await createPlatformSubscription(input(true),"video-test",tag()),run=await child((await collect(sub.id)).id),calls=parserCalls;
+  newWork();loseParser=true;const sub=await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag()),run=await child((await collect(sub.id)).id),calls=parserCalls;
   try {
     let current=await step(run.id);assert.equal(current.status,"waiting");const id=current.current_receipt_id;assert.ok(id);
     assert.equal((await releaseOperationReceipt(id)).released,false);
@@ -146,10 +146,10 @@ test("unknown outcome waits thirty minutes, retries once, and remains governed a
 
 for(const orphan of [false,true])test(`received parser is consumed before offline ${orphan?'complete orphan':'other subscription saved file'} recovery`,async()=>{
  newWork();parserData={resources:[{type:"video",downloadUrl:mediaUrl+'/already-local'}]};
- const a=await child((await collect((await createPlatformSubscription(input(true),'video-test',tag())).id)).id);
+ const a=await child((await collect((await createPlatformSubscription({...input(true),sourceId:await selectedSource()},'video-test',tag())).id)).id);
  await queryMediaTool('0W27H3O6',{url:a.input.originalUrl},`subscription-video:${a.id}`,receiptOptions({runId:a.id,stepVersion:a.step_version,generation:a.generation}));
  const receiptId=(await state(a.id)).current_receipt_id;
- const b=await child((await collect((await createPlatformSubscription(input(true),'video-test',tag())).id)).id);await step(b.id);
+ const b=await child((await collect((await createPlatformSubscription({...input(true),sourceId:await selectedSource()},'video-test',tag())).id)).id);await step(b.id);
  const key=(await state(b.id)).progress.expectedFileKey;
  if(orphan){const temp=await prepareUpload(50_000_000);try{const written=await writeUpload(Readable.from([mediaBytes]),temp.file,AbortSignal.timeout(1000),50_000_000);await assert.rejects(sql.begin(async tx=>{await publishUpload({actor:'synthetic',key,file:temp.file,filename:'orphan.mp4',mime:'video/mp4',purpose:'operation-output',origin:'subscription-video',...written},tx);throw Error('orphan rollback');}),/orphan rollback/);}finally{await temp.release();}}
  else assert.equal((await step(b.id)).status,'completed');
@@ -161,7 +161,7 @@ for(const orphan of [false,true])test(`received parser is consumed before offlin
 for(const response of ["empty","duplicate","ambiguous"] as const)for(const local of ["shared","orphan","deleted","missing"] as const)test(`${response} received parser checks ${local} before ending without a new candidate`,async()=>{
   newWork();const url=mediaUrl+"/old-candidate";
   parserData={resources:response==="empty"?[]:response==="duplicate"?[{type:"video",downloadUrl:url}]:[{type:"video",downloadUrl:url},{type:"video",downloadUrl:mediaUrl+"/other"}]};
-  const a=await child((await collect((await createPlatformSubscription(input(true),"video-test",tag())).id)).id);
+  const a=await child((await collect((await createPlatformSubscription({...input(true),sourceId:await selectedSource()},"video-test",tag())).id)).id);
   if(response==="duplicate")await sql`UPDATE operation_runs SET progress=${sql.json({targets:[{selection:"single-video-main",stable:true,candidates:[{url,provider:"redfox",field:"synthetic",quality:"unknown"}]}],candidateIndex:1})} WHERE id=${a.id}`;
   await queryMediaTool("0W27H3O6",{url:a.input.originalUrl},`subscription-video:${a.id}`,receiptOptions({runId:a.id,stepVersion:a.step_version,generation:a.generation}));
   const receiptId=(await state(a.id)).current_receipt_id;
@@ -187,3 +187,6 @@ for(const response of ["empty","duplicate","ambiguous"] as const)for(const local
     assert.equal((await sql`SELECT count(*)::int AS n FROM operation_results WHERE run_id=${a.id} AND kind='subscription_video_parse' AND receipt_id=${receiptId}`)[0]!.n,1);
   }finally{process.env.REDFOX_CALLS_ENABLED="true";process.env.COLLECT_ENABLED="true";}
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

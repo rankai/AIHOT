@@ -55,7 +55,7 @@ async function fixture(platform:string,operationId:string,record:unknown,singleV
   const sourceId=`candidate-${tag()}`,articleId=newArticleId(),workId=options.workId??tag(),provider=options.provider??"redfox";
   await sql`INSERT INTO sources(id,name,kind) VALUES(${sourceId},'Synthetic candidate author','external')`;
   await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES(${articleId},${sourceId},${`synthetic:${tag()}`},${`https://example.test/${platform}/${workId}`},'Synthetic video',now(),now())`;
-  const subscriptionId=await sql.begin(tx=>createSubscription(tx,{provider,platform,operationKey:"synthetic.collect",contractVersion:1,enabled:true,intervalMinutes:30,config:{autoDownloadVideo:true}}));
+  const subscriptionId=await sql.begin(tx=>createSubscription(tx,{provider,platform,operationKey:"synthetic.collect",contractVersion:1,enabled:true,intervalMinutes:30,config:{sourceId,autoDownloadVideo:true}}));
   const parent=await sql.begin(tx=>createRun(tx,{actor:"candidate-test",commandKey:tag(),provider,operationKey:"synthetic.collect",contractVersion:1,stepKey:"synthetic.page",subscriptionIds:[subscriptionId],input:{mode:"collection",operationId,platform}}));
   const e={runId:parent.id,stepVersion:parent.step_version,generation:parent.generation};
   const receipt=await paidRequest({service:"candidate-fixture",purpose:"synthetic",identity:tag()},async()=>({response:record}),receiptOptions(e));

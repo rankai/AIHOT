@@ -34,14 +34,15 @@ before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));proc
 after(async()=>{await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.collect'`;process.env.REDFOX_CALLS_ENABLED='false';process.env.COLLECT_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
-async function start(pages=1,items=10){const payload={name:tag(),operationId:current[0],parameters:current[1],enabled:true,limits:{pages,items,details:0}},sub=await createPlatformSubscription(payload,'test',tag()),run=await startPlatformSubscription(sub.id,'test',tag());return {sub,run,payload};}
+async function start(pages=1,items=10){const payload={sourceId:await selectedSource(),name:tag(),operationId:current[0],parameters:current[1],enabled:true,limits:{pages,items,details:0}},sub=await createPlatformSubscription({...payload,sourceId:await selectedSource()},'test',tag()),run=await startPlatformSubscription(sub.id,'test',tag());return {sub,run,payload};}
 async function finish(id:number){for(let i=0;i<25;i++){const r=await row(id);if(r.status!=='active')return r;await step(id);}throw new Error('Fixture exceeded bounded steps');}
 test('fifteen actual collection adapters use collect receipts and preserve research/missing identities',async()=>{
  for(const c of cases){current=c;const initial=hits,{run}=await start(),done=await finish(run.id);assert.equal(done.status,'completed',`${c[0]}: ${done.wait_reason}`);assert.equal(hits,initial+1);
   const results=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`,summary=results.find(r=>r.kind==='query_summary')!;
   assert.equal(summary.data.workCount,1);const [receipt]=await sql`SELECT * FROM receipts WHERE id=${summary.receipt_id}`;assert.equal(receipt!.service,'redfox.collect');assert.equal(receipt!.model,c[0]);assert.equal(receipt!.attempts,1);assert.ok(receipt!.cost!=null);
   const works=results.filter(r=>r.kind.endsWith('_work'));
-  if(['QEQLCKD6','774OBKK0','HUCIASU','I8P3HTVH','047JJ3UA','P3W2W18P'].includes(c[0]))assert.ok(works[0]!.data.pendingReason);
+  if(c[0]==='P3W2W18P')assert.ok(works[0]!.data.pendingReason);
+  if(['QEQLCKD6','774OBKK0','HUCIASU','I8P3HTVH','047JJ3UA'].includes(c[0]))assert.ok(works[0]!.article_id);
   if(c[0]==='3X8FGEEM'){assert.equal(works.find(r=>r.data.role==='provider_recommendation')!.article_id,null);assert.equal(summary.data.count,3);assert.equal(summary.data.workCount,1);}
  }
 });
@@ -63,7 +64,7 @@ test('budget and collection gate produce no attempt; invalidated versions cannot
 });
 test('collection API shares creation commands, isolates old endpoint and fences edited configuration',async()=>{
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Platform collection fixture'};
- try{const payload={name:tag(),operationId:'OWIBYU1V',parameters:{keyword:'synthetic'}},headers={'x-csrf-token':'dev','idempotency-key':tag()},initial=hits;
+ try{const payload={sourceId:await selectedSource(),name:tag(),operationId:'OWIBYU1V',parameters:{keyword:'synthetic'}},headers={'x-csrf-token':'dev','idempotency-key':tag()},initial=hits;
   const [a,b]=await Promise.all([app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload}),app.inject({method:'POST',url:'/api/admin/redfox/collections',headers,payload})]);assert.equal(a.statusCode,201,a.body);assert.equal(a.json().id,b.json().id);
   const id=a.json().id,list=(await app.inject({url:'/api/admin/redfox/collections'})).json(),savedRow=list.find((s:{id:number})=>s.id===id);assert.equal(savedRow.enabled,false);assert.equal(savedRow.platform,'douyin');assert.equal(savedRow.provider,'redfox');
   const catalog=(await app.inject({url:'/api/admin/redfox/operations'})).json().find((operation:{id:string})=>operation.id==='OWIBYU1V');assert.deepEqual(catalog.collectionProviders.map((provider:{id:string})=>provider.id),['redfox','agentkey']);
@@ -82,7 +83,7 @@ test('collection API shares creation commands, isolates old endpoint and fences 
 test('scheduled platform collection retains the saved provider through task execution',async()=>{
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp();config.devAdmin={displayName:'Platform provider scheduler fixture'};let subscriptionId:number|null=null;
  try{
-  const response=await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers:{'x-csrf-token':'dev','idempotency-key':tag()},payload:{name:tag(),provider:'redfox',operationId:'OWIBYU1V',parameters:{keyword:'scheduled-provider'},enabled:true,limits:{pages:1,items:10,details:0}}});
+  const response=await app.inject({method:'POST',url:'/api/admin/redfox/collections',headers:{'x-csrf-token':'dev','idempotency-key':tag()},payload:{sourceId:await selectedSource(),name:tag(),provider:'redfox',operationId:'OWIBYU1V',parameters:{keyword:'scheduled-provider'},enabled:true,limits:{pages:1,items:10,details:0}}});
   assert.equal(response.statusCode,201,response.body);subscriptionId=response.json().id;
   const [saved]=await sql`SELECT provider,operation_key,config FROM collection_subscriptions WHERE id=${subscriptionId}`;
   assert.equal(saved!.provider,'redfox');assert.equal(saved!.operation_key,'redfox.platform.collection');assert.equal(saved!.config.operationId,'OWIBYU1V');
@@ -110,12 +111,12 @@ test('lost item job is recovered from retained raw while outbound is closed, wit
  try{let found=false;for(let i=0;i<20;i++){await recoverOperations();if((await row(run.id)).job_id){found=true;break;}}assert.ok(found,'bounded recovery cursor must eventually visit the fixture');await step(run.id);assert.equal((await row(run.id)).status,'completed');assert.equal(hits,initial);}
  finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.COLLECT_ENABLED='true';}
 });
-test('disabled author stays pending and forged page provenance cannot grant formal import',async()=>{
+test('disabled foreign author mapping does not redirect ownership and forged page provenance cannot grant formal import',async()=>{
  const {importDouyinResult}=await import('@aihot/backend/providers/redfox/import-douyin');const source=tag(),author='disabled-'+tag();
  await sql`INSERT INTO sources(id,name,kind,participation_mode,enabled) VALUES (${source},'Synthetic disabled','external','isolated',false)`;
  await sql`INSERT INTO source_account_bindings(source_id,platform,id_kind,id_value,evidence) VALUES (${source},'douyin','uid',${author},${sql.json({kind:'test',reference:tag()})})`;
  current=cases.find(c=>c[0]==='OWIBYU1V')!;override=()=>({list:[{...wide,authorUid:author,videoId:workId+'9',opusUrl:`https://www.douyin.com/video/${workId}9`}]});
- try{const {run}=await start();assert.equal((await finish(run.id)).status,'completed');const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;assert.equal(r!.article_id,null);assert.match(r!.data.pendingReason,/disabled/);assert.equal((await sql`SELECT 1 FROM articles WHERE source_id=${source}`).length,0);
+ try{const {run}=await start();assert.equal((await finish(run.id)).status,'completed');const [r]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;assert.ok(r!.article_id);assert.equal(r!.source_id,await selectedSource());assert.equal((await sql`SELECT 1 FROM articles WHERE source_id=${source}`).length,0);
  await sql`UPDATE operation_results SET provenance=provenance||${sql.json({sourcePageResultId:r!.id})} WHERE id=${r!.id}`;await assert.rejects(importDouyinResult(r!.id,{reason:'Forged page'},'test',tag()),/Source page/);
  }finally{override=undefined;}
 });
@@ -143,3 +144,6 @@ test('two mixed pages share one total item cap while work counts stay separate',
  const results=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`,summaries=results.filter(r=>r.kind==='query_summary');
  assert.equal(results.filter(r=>r.kind!=='query_summary').length,5);assert.deepEqual(summaries.map(r=>r.data.workCount),[1,1]);assert.deepEqual(summaries.map(r=>r.data.selectedResearchCount),[2,1]);assert.equal(summaries[1]!.data.stopReason,'item-limit');
 });
+
+const selectedSourceId=tag();
+async function selectedSource(){await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${selectedSourceId},'Selected test source','external','isolated') ON CONFLICT(id) DO NOTHING`;return selectedSourceId;}

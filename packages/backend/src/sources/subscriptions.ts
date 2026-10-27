@@ -11,13 +11,13 @@ const researchSubscriptionOperations = new Set([
 
 /** Research snapshots do not require a material owner; work lists do. */
 export function contentSubscription(sub: { platform?: unknown; config: Record<string, unknown> }): boolean {
-  return typeof sub.config.operationId === "string" && sub.platform !== "hot-research" && !researchSubscriptionOperations.has(sub.config.operationId);
+  return typeof sub.config?.operationId === "string" && sub.platform !== "hot-research" && !researchSubscriptionOperations.has(sub.config.operationId);
 }
 
 /** The control column belongs only to native main subscriptions. */
 export function subscriptionSourceId(sub: { control_source_id?: unknown; config: Record<string, unknown> }): string | null {
   if (typeof sub.control_source_id === "string") return sub.control_source_id;
-  return typeof sub.config.sourceId === "string" && sub.config.sourceId.length > 0 ? sub.config.sourceId : null;
+  return typeof sub.config?.sourceId === "string" && sub.config.sourceId.length > 0 ? sub.config.sourceId : null;
 }
 
 export interface SubscriptionMember {
