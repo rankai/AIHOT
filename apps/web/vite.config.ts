@@ -25,17 +25,27 @@ function devEdge(): Plugin {
           return res.end();
         }
         if (!isApiOwned(pathname)) return next();
+        let responseStream: import("node:http").IncomingMessage | undefined;
         const upstream = httpRequest(
           { hostname: API.hostname, port: API.port, path: raw, method: req.method, headers: req.headers },
           (up) => {
+            responseStream = up;
+            if (res.destroyed) { up.destroy(); return; }
+            up.on("error", () => res.destroy());
             res.writeHead(up.statusCode ?? 502, up.headers);
             up.pipe(res);
           },
         );
+        const cancelUpstream = () => { upstream.destroy(); responseStream?.destroy(); };
+        req.once("aborted", cancelUpstream);
+        res.once("close", () => { if (!res.writableFinished) cancelUpstream(); });
         upstream.on("error", () => {
+          if (res.destroyed) return;
+          if (res.headersSent) { res.destroy(); return; }
           res.statusCode = 502;
           res.end("api unavailable");
         });
+        upstream.flushHeaders(); // Match production's early upload authentication.
         req.pipe(upstream);
       });
     },

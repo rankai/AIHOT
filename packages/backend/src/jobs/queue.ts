@@ -13,8 +13,7 @@ export const QUEUES = {
   group: "events.group",
   digest: "events.digest",
   fetchSource: "sources.fetch",
-  fetchXShard: "sources.fetch-x",
-  mpCheck: "sources.mp",
+  operation: "operations.execute",
 
   notifySelected: "notify.selected",
   republishSource: "publication.republish-source",
@@ -31,9 +30,8 @@ export const QUEUE_OPTIONS: Record<string, QueueOptions> = {
   [QUEUES.extractBody]: { policy: "short", retryLimit: 2, retryDelay: 120, expireInSeconds: 300 },
   [QUEUES.group]: { policy: "short", retryLimit: 4, retryDelay: 20, retryBackoff: true, expireInSeconds: 600 },
   [QUEUES.digest]: { policy: "short", retryLimit: 3, retryDelay: 60, retryBackoff: true, expireInSeconds: 900 },
+  [QUEUES.operation]: { policy: "short", retryLimit: 2, retryDelay: 30, expireInSeconds: 180 },
   [QUEUES.fetchSource]: { policy: "short", retryLimit: 0, expireInSeconds: 600 },
-  [QUEUES.fetchXShard]: { policy: "short", retryLimit: 0, expireInSeconds: 900 },
-  [QUEUES.mpCheck]: { policy: "short", retryLimit: 3, retryDelay: 60, retryBackoff: true, expireInSeconds: 600 },
   [QUEUES.notifySelected]: { policy: "short", retryLimit: 0, expireInSeconds: 300 },
   [QUEUES.republishSource]: { policy: "short", retryLimit: 2, retryDelay: 60, expireInSeconds: 3600 },
 

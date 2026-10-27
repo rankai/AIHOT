@@ -1,10 +1,9 @@
 // X accounts via SocialData search ("from:handle -filter:replies", newest first). Plain account queries
 // are read together, about two dozen accounts per search (planXShards); SocialData bills per request.
-import { searchTweets, tweetMedia, tweetText, type SdArticle, type SdTweet } from "../providers/socialdata.ts";
-import { ProviderRejectedError } from "../providers/receipts.ts";
+import { tweetMedia, tweetText, type SdArticle, type SdTweet } from "../providers/socialdata.ts";
 import type { XPostData } from "../content/materials.ts";
 import { sha256 } from "../lib/ids.ts";
-import { FetchError, type Candidate, type SourceRow } from "./types.ts";
+import { type Candidate, type SourceRow } from "./types.ts";
 
 function avatar(url: string | undefined): string | null {
   // Larger avatar than the default 48px thumbnail.
@@ -72,126 +71,8 @@ export function tweetToCandidate(t: SdTweet): Candidate {
   };
 }
 
-/** Half-hour receipt window: a retried fetch in the same window reuses the paid response. */
-function windowKey(now = Date.now()): string {
-  return new Date(Math.floor(now / 1_800_000) * 1_800_000).toISOString();
-}
-
-/** Pages of new posts read per run after a watermark; a longer search continues in later runs. */
-const MAX_PAGES = 10;
-/** Pages per run spent on older stretches left over from earlier runs. */
-const MAX_BACKLOG_PAGES = 10;
-/** Stretches kept per source; beyond this the oldest is given up and reported. */
-const MAX_BACKLOG = 5;
-
-/** Where a newest-first search stopped at the page limit: the same query continues from `next`. */
-export interface XBacklog {
-  query: string;
-  next: string;
-}
-
-export interface XRead {
-  tweets: SdTweet[];
-  lastId: string | null;
-  /** Stretches still to read, oldest first (kept in the source cursor). */
-  backlog: XBacklog[];
-  pages: number;
-  /** The new-post search stopped at the page limit; the rest joined the backlog. */
-  truncated: boolean;
-  backlogPages: number;
-  /** Stretches given up (too many, or the provider refused to continue one): posts in them may be missing. */
-  dropped: number;
-}
-
-export interface XFetch extends Omit<XRead, "tweets"> {
-  candidates: Candidate[];
-}
-
-/**
- * New posts since the watermark. The search is bounded by since_id, so every further page holds older
- * posts that are still new to us. A search longer than one run's pages (a long outage) moves the
- * watermark to the newest post and keeps its position; later runs read on from there until it reaches
- * the old watermark, so nothing in between is skipped. Without a watermark (a source's very first
- * fetch) one page is read: its import is bounded anyway.
- */
-export async function readXSearch(base: string, opts: { lastId: string | null; backlog: XBacklog[]; subject: string; type?: "Latest" | "Top" }): Promise<XRead> {
-  const { lastId } = opts;
-  const backlog = opts.backlog.map((b) => ({ ...b }));
-  const window = windowKey();
-  const search = (query: string, cursor: string | null) =>
-    searchTweets(query, { purpose: "source_fetch", subject: opts.subject, window, type: opts.type ?? "Latest", cursor });
-  const all: SdTweet[] = [];
-  const query = lastId ? `${base} since_id:${lastId}` : base;
-  let cursor: string | null = null;
-  let pages = 0;
-  let truncated = false;
-  for (;;) {
-    let res: Awaited<ReturnType<typeof search>>;
-    try {
-      res = await search(query, cursor);
-    } catch (error) {
-      // A later page failing keeps the pages already read; the search goes on from there next run.
-      if (!cursor) throw error;
-      truncated = true;
-      backlog.push({ query, next: cursor });
-      break;
-    }
-    pages += 1;
-    all.push(...res.tweets);
-    if (!lastId || !res.nextCursor || res.tweets.length === 0) break;
-    if (pages >= MAX_PAGES) {
-      truncated = true;
-      backlog.push({ query, next: res.nextCursor });
-      break;
-    }
-    cursor = res.nextCursor;
-  }
-
-  // Older stretches, oldest first. Budget, account or passing trouble leaves them for the next run; a
-  // position the provider refuses as a bad request (an expired cursor) is given up.
-  let dropped = 0;
-  while (backlog.length > MAX_BACKLOG) {
-    backlog.shift();
-    dropped += 1;
-  }
-  let backlogPages = 0;
-  while (backlog.length > 0 && backlogPages < MAX_BACKLOG_PAGES) {
-    const stretch = backlog[0]!;
-    let res: Awaited<ReturnType<typeof search>>;
-    try {
-      res = await search(stretch.query, stretch.next);
-    } catch (error) {
-      if (error instanceof ProviderRejectedError && (error.status === 400 || error.status === 422)) {
-        backlog.shift();
-        dropped += 1;
-        continue;
-      }
-      break;
-    }
-    backlogPages += 1;
-    all.push(...res.tweets);
-    if (!res.nextCursor || res.tweets.length === 0) backlog.shift();
-    else stretch.next = res.nextCursor;
-  }
-
-  const seen = new Set<string>();
-  const tweets = all.filter((t) => !t.retweeted_status && !seen.has(t.id_str) && !!seen.add(t.id_str));
-  const maxId = tweets.reduce<string | null>((m, t) => (m === null || BigInt(t.id_str) > BigInt(m) ? t.id_str : m), lastId);
-  return { tweets, lastId: maxId, backlog, pages, truncated, backlogPages, dropped };
-}
-
-/** One account's own search (its first fetch, a query of its own, or a manual run from the admin). */
-export async function fetchXSearch(source: SourceRow): Promise<XFetch> {
-  const base = String(source.config.query ?? "");
-  if (!base) throw new FetchError("query missing");
-  const { tweets, ...read } = await readXSearch(base, {
-    lastId: source.cursor?.lastTweetId ?? null,
-    backlog: Array.isArray(source.cursor?.xBacklog) ? source.cursor.xBacklog : [],
-    subject: `source:${source.id}`,
-    type: source.config.searchType ?? "Latest",
-  });
-  return { candidates: tweets.map(tweetToCandidate), ...read };
-}
+/** Frozen continuation of a bounded newest-first search. */
+export interface XBacklog { query: string; next: string }
 
 // --- Shards: plain account queries read together ------------------------------------------------
 
@@ -245,4 +126,18 @@ export function planXShards(sources: Array<Pick<SourceRow, "id" | "kind" | "conf
     close();
   }
   return shards;
+}
+
+/** Last successful check also bounds quiet accounts; allow ten minutes for search indexing lag. */
+export function coveredTo(source: Pick<SourceRow, "cursor">): bigint {
+  const own = BigInt(source.cursor!.lastTweetId);
+  const checked = Date.parse(String(source.cursor?.lastOkAt ?? ""));
+  if (!Number.isFinite(checked)) return own;
+  const byTime = BigInt(Math.max(0, checked - 10 * 60_000 - 1288834974657)) << 22n;
+  return byTime > own ? byTime : own;
+}
+
+/** Whether a linked X Article is required before processing this source’s post. */
+export function needsXArticleExtraction(kind: string, mode: string, historical: boolean) {
+  return kind === "x_search" && (mode === "editorial" || (mode === "hot_signal" && !historical));
 }

@@ -45,22 +45,33 @@ const loginPage = (returnTo: string, error?: string) => `/admin/login?${new URLS
 
 export type AdminHandler = (req: FastifyRequest, reply: FastifyReply, admin: AdminPrincipal) => Promise<unknown>;
 
+/** Also used by streaming routes before a request body is consumed. */
+export async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<AdminPrincipal | null> {
+  reply.header("Cache-Control", "no-store");
+  const admin = await sessionPrincipal(req.headers.cookie);
+  if (!admin) { sendProblem(req, reply, { status: 401, code: "unauthorized", detail: "Sign in to the admin first." }); return null; }
+  if (req.method !== "GET" && req.method !== "HEAD" && req.headers["x-csrf-token"] !== admin.csrf) {
+    sendProblem(req, reply, { status: 403, code: "forbidden", detail: "Missing or stale CSRF token." }); return null;
+  }
+  return admin;
+}
+
 /** Guard for /api/admin/*: a live session (or the development stand-in); writes need the CSRF token. */
 export function adminHandler(fn: AdminHandler) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    reply.header("Cache-Control", "no-store");
-    const admin = await sessionPrincipal(req.headers.cookie);
-    if (!admin) return sendProblem(req, reply, { status: 401, code: "unauthorized", detail: "Sign in to the admin first." });
-    if (req.method !== "GET" && req.method !== "HEAD" && req.headers["x-csrf-token"] !== admin.csrf) {
-      return sendProblem(req, reply, { status: 403, code: "forbidden", detail: "Missing or stale CSRF token." });
-    }
+    const admin = await requireAdmin(req, reply);
+    if (!admin) return reply;
     try {
       return await fn(req, reply, admin);
     } catch (error) {
       if ((error as { statusCode?: number }).statusCode === 400 || error instanceof SyntaxError || error instanceof ZodError) {
-        return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: String((error as Error).message).slice(0, 300) });
+        const detail = error instanceof ZodError
+          ? error.issues.map(issue => `${issue.path.length ? `${issue.path.join(".")}: ` : ""}${issue.message}`).join("; ")
+          : String((error as Error).message);
+        return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: detail.slice(0, 300) });
       }
       if ((error as { code?: string }).code === "conflict") return sendProblem(req, reply, { status: 409, code: "conflict", detail: (error as Error).message });
+      if ((error as { code?: string }).code === "unsupported_configuration") return sendProblem(req, reply, { status: 422, code: "unsupported_configuration", detail: (error as Error).message });
       req.log.error({ err: error, path: req.url.split("?")[0] }, "admin api error");
       return sendProblem(req, reply, { status: 500, code: "internal_error", detail: String((error as Error).message).slice(0, 300) });
     }

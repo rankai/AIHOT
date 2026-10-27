@@ -7,7 +7,7 @@ import { tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
-import { upsertMaterial } from "@aihot/backend/content/materials";
+import { upsertMaterial, contentHash } from "@aihot/backend/content/materials";
 import { identityKeyForUrl } from "@aihot/backend/lib/url";
 
 const SOURCE = `test-materials-${tag()}`;
@@ -166,4 +166,68 @@ test("characters lost in transit are no revision, lost or restored", async () =>
   assert.equal((await upsertMaterial(edited(garbled[1]!))).revised, true, "a real change is one, lost characters or not");
   for (const report of [edited(clean), edited(garbled[2]!)]) assert.equal((await upsertMaterial(report)).revised, false);
   assert.equal((await state(first.articleId)).revision, 2);
+});
+
+
+test("same-source media fills an empty field without revising content; other sources cannot fill or replace it", async () => {
+  const url=`https://example.com/media-fill-${tag()}`;
+  const input={sourceId:SOURCE,url,title:"Unchanged body",bodyText:"Original body",via:"fetch" as const};
+  const first=await upsertMaterial(input);
+  await sql`UPDATE articles SET processing_state='analyzed' WHERE id=${first.articleId}`;
+  const [before]=await sql`SELECT revision,content_hash,processing_state,source_id,url,identity_key,discovered_at,timeline_at FROM articles WHERE id=${first.articleId}`;
+  const media=[{kind:"image" as const,url:"https://example.com/synthetic.png"}];
+  await upsertMaterial({...input,sourceId:OTHER,media});
+  assert.deepEqual((await sql`SELECT media FROM articles WHERE id=${first.articleId}`)[0]!.media,[]);
+  assert.equal((await upsertMaterial({...input,media})).revised,false);
+  const [after]=await sql`SELECT revision,content_hash,processing_state,source_id,url,identity_key,discovered_at,timeline_at FROM articles WHERE id=${first.articleId}`;
+  assert.deepEqual(after,before);
+  await upsertMaterial({...input,media:[{kind:"image",url:"https://example.com/replacement.png"}]});
+  await upsertMaterial({...input,media:[]});
+  assert.deepEqual((await sql`SELECT media FROM articles WHERE id=${first.articleId}`)[0]!.media,media);
+});
+
+test('fill-missing protects either existing body representation under concurrent discoveries', async () => {
+  for (const pair of [{bodyText:'Full text',bodyHtml:'<p>Full text</p>'},{bodyText:'Full text',bodyHtml:null},{bodyText:null,bodyHtml:'<p>Full HTML</p>'}]) {
+    const url=`https://example.com/body-${tag()}`;
+    const first=await upsertMaterial({sourceId:SOURCE,url,title:'Stable',...pair,bodyStatus:'unconfirmed',via:'fetch'});
+    // Include legacy HTML-only rows, which predate paired input normalization.
+    await sql`UPDATE articles SET body_text=${pair.bodyText},body_html=${pair.bodyHtml},content_hash=${contentHash({title:'Stable',bodyText:pair.bodyText})},processing_state='analyzed' WHERE id=${first.articleId}`;
+    const before=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;
+    await Promise.all([1,2].map(i=>upsertMaterial({sourceId:SOURCE,url,title:'Stable',bodyText:`Short caption ${i}`,bodyUpdate:'fill-missing',bodyStatus:'ok',via:'import'})));
+    const after=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;
+    for(const key of ['body_text','body_html','body_status','content_hash','revision','processing_state','discovered_at','timeline_at']) assert.deepEqual(after[key],before[key],key);
+    assert.equal((await sql`SELECT count(*)::int AS n FROM article_discoveries WHERE article_id=${first.articleId} AND via='import'`)[0]!.n,1);
+  }
+});
+
+test('body pairs fill gaps, replace formal content together, and ignore absent input',async()=>{
+ const url=`https://example.com/pair-${tag()}`,base={sourceId:SOURCE,url,title:'Pair',via:'fetch' as const};
+ const first=await upsertMaterial(base);
+ assert.equal((await upsertMaterial({...base,bodyText:'Caption',bodyUpdate:'fill-missing'})).revised,true);
+ assert.equal((await upsertMaterial({...base,bodyText:'Full body',bodyHtml:'<p>Full body</p>'})).revised,true);
+ await sql`UPDATE articles SET processing_state='analyzed' WHERE id=${first.articleId}`;
+ const before=await state(first.articleId);
+ assert.equal((await upsertMaterial({...base,bodyText:'Full body'})).revised,false);
+ let a=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;
+ assert.equal(a.body_html,null);assert.deepEqual(await state(first.articleId),before);
+ await upsertMaterial({...base,bodyText:'   ',bodyHtml:'\n',bodyStatus:'none'});
+ a=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;assert.equal(a.body_text,'Full body');assert.equal(a.body_status,'ok');
+ assert.equal((await upsertMaterial({...base,bodyHtml:'<p>New HTML body</p>'})).revised,true);
+ a=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;assert.equal(a.body_text,'New HTML body');assert.equal(a.body_html,'<p>New HTML body</p>');
+ await upsertMaterial({...base,bodyText:'Replacement plain text'});
+ a=(await sql`SELECT * FROM articles WHERE id=${first.articleId}`)[0]!;assert.equal(a.body_text,'Replacement plain text');assert.equal(a.body_html,null);
+ await upsertMaterial({...base,sourceId:OTHER,bodyText:'Other body',bodyHtml:'<p>Other</p>'});
+ assert.equal((await sql`SELECT body_text FROM articles WHERE id=${first.articleId}`)[0]!.body_text,'Replacement plain text');
+});
+
+test('legacy baseline stores its effective body pair without scheduling another analysis',async()=>{
+ const url=`https://example.com/baseline-pair-${tag()}`,id=await imported(url);
+ await sql`UPDATE articles SET body_html='<p>legacy body</p>' WHERE id=${id}`;
+ const result=await upsertMaterial({sourceId:SOURCE,url,title:'Legacy title',bodyText:'Current complete plain text',via:'fetch'});
+ assert.equal(result.revised,false);
+ const [a]=await sql`SELECT * FROM articles WHERE id=${id}`;
+ assert.equal(a!.body_text,'Current complete plain text');assert.equal(a!.body_html,null);
+ assert.equal(a!.content_hash,contentHash({title:a!.title,bodyText:a!.body_text,excerpt:a!.excerpt}));
+ assert.equal(a!.revision,1);assert.equal(a!.processing_state,'analyzed');
+ assert.equal((await sql`SELECT body_text FROM article_revisions WHERE article_id=${id}`)[0]!.body_text,a!.body_text);
 });

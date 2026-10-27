@@ -1,3 +1,6 @@
+import { createWriteStream } from "node:fs";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 // Outbound HTTP for collectors, the image proxy and the paid APIs: SSRF guard, routing, limits.
 import net from "node:net";
 import { addAbortListener } from "node:events";
@@ -39,10 +42,10 @@ function dispatcherFor(viaProxy: boolean): Dispatcher | undefined {
 export interface GuardedFetchOptions {
   method?: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | import("undici").FormData;
   timeoutMs?: number;
   maxBytes?: number;
-  /** Follow redirects manually so every hop passes the SSRF guard. */
+  /** Follow redirects manually; zero returns the original response without following. */
   maxRedirects?: number;
   /** "egress" by default; see EgressRoute. */
   route?: EgressRoute;
@@ -60,6 +63,15 @@ export interface GuardedResponse {
 export const DEFAULT_UA = `Mozilla/5.0 (compatible; ${SITE.crawlerName}/1.0; +${config.siteUrl}/about)`;
 
 export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}): Promise<GuardedResponse> {
+  return request(input,opts);
+}
+
+/** Streaming binary download with the same URL/DNS/redirect guard, never supplier credentials. */
+export async function guardedDownload(input:string,file:string,opts:Pick<GuardedFetchOptions,"timeoutMs"|"maxBytes">={}) {
+  const response=await request(input,{...opts,route:"egress"},file);
+  return {status:response.status,url:response.url,headers:response.headers};
+}
+async function request(input:string,opts:GuardedFetchOptions,file?:string):Promise<GuardedResponse> {
   // One budget includes DNS, every redirect and the body. Restarting it at each hop allowed a
   // nominal 20 s image request to occupy the API for minutes.
   const signal = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
@@ -74,17 +86,23 @@ export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}
     const res = await undiciFetch(url, {
       method: opts.method ?? "GET",
       headers: { "user-agent": DEFAULT_UA, "accept-language": "zh-CN,zh;q=0.9,en;q=0.8", ...(opts.headers ?? {}) },
-      body: opts.body,
+      body: opts.body as never,
       redirect: "manual",
       dispatcher: dispatcherFor(proxied(url, route)),
       signal,
     });
-    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+    if (maxRedirects !== 0 && res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       // Release the connection even when the next URL is refused or the redirect limit is reached.
       await res.body?.cancel();
       if (hop >= maxRedirects) throw new Error(`Too many redirects for ${input}`);
       url = await check(new URL(res.headers.get("location")!, url).toString());
       continue;
+    }
+    if(file) {
+      if(res.status!==200 || !res.body){await res.body?.cancel();throw new Error(`Image download HTTP ${res.status}`);}
+      let bytes=0;
+      await pipeline(Readable.fromWeb(res.body as never),new Transform({transform(chunk:Buffer,_encoding,done){bytes+=chunk.length;if(bytes>maxBytes)return done(new Error("Downloaded image exceeds local size limit"));done(null,chunk);}}),createWriteStream(file,{flags:"wx",mode:0o600}),{signal});
+      return {status:res.status,url:url.toString(),headers:res.headers as unknown as Headers,body:Buffer.alloc(0),text:()=>""};
     }
     const chunks: Buffer[] = [];
     let size = 0;
