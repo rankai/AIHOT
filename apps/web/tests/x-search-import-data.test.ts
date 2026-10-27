@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { xSearchImportBody, xSearchImportState } from "../app/features/admin/x-search-import-data.ts";
+import { agentKeyXAccountUsername, xSearchImportBody, xSearchImportState } from "../app/features/admin/x-search-import-data.ts";
 import { collectionConfig, collectionDraft, collectionInputIssue, collectionPreviewBody } from "../app/features/admin/collection-subscription-data.ts";
 import { platformQueryParameters } from "../app/features/admin/platform-query-data.ts";
 import type { PlatformOperation } from "../app/features/admin/platform-types.ts";
@@ -60,4 +60,55 @@ test("5K subscription permits Top/Latest only, while all five ordinary queries a
   }
   assert.equal(collectionInputIssue(operation, { keyword: "query" }), null);
   assert.equal(collectionInputIssue({ ...operation, id: "another-operation" }, { searchType: "Media" }), null);
+});
+
+
+test("unsupported providers and old RF fields cannot grant AgentKey work eligibility", () => {
+  for (const patch of [{ provider: "agentkey" }, { provider: "socialdata" }, { provider: "redfox", importable: false }]) {
+    const research = { ...result, data: { ...result.data, ...patch } };
+    assert.equal(xSearchImportState(research).supported, patch.provider === "agentkey");
+    assert.equal(xSearchImportState(research).canImport, false);
+    assert.throws(() => xSearchImportBody(research, "verified"));
+  }
+  assert.equal(xSearchImportState({ ...result, data: { ...result.data, provider: "redfox" } }).canImport, true);
+});
+
+
+const akRecord = { tweetId: "00123", role: "post", author: { rest_id: "00456", screen_name: "actual_author" }, text: "实收文本", url: "https://x.com/actual_author/status/00123", urlSource: "derived-canonical-permalink" };
+const akResult: OperationResult = { ...result, data: { platform: "x-research", provider: "agentkey", operationId: "5K5EG87P", record: akRecord, importable: false } };
+test("five AgentKey work routes use actual evidence despite stale hints, unknown time and pinned status", async () => {
+  const { selectableWorkResult } = await import("../app/features/admin/work-result-selection-data.ts");
+  for (const operationId of ["5K5EG87P", "x.account_posts", "x.list_posts", "x.community_posts", "x.detail"]) {
+    const row = { ...akResult, kind: operationId === "x.detail" ? "x_detail_work" : "x_research_work", data: { ...akResult.data, operationId, pinned: true } };
+    assert.equal(xSearchImportState(row).canImport, true); assert.equal(selectableWorkResult(row), true);
+    assert.equal(xSearchImportState(row).unknownTime, true); assert.deepEqual(xSearchImportBody(row, " verified "), { reason: "verified" });
+  }
+  for (const created_at of [null, "invalid", "2026-10-23T08:00:00"]) assert.equal(xSearchImportState({ ...akResult, data: { ...akResult.data, record: { ...akRecord, created_at } } }).canImport, true);
+  assert.equal(xSearchImportState({ ...akResult, data: { ...akResult.data, record: { ...akRecord, created_at: "2026-10-23T08:00:00+08:00" } } }).unknownTime, false);
+  for (const kind of ["x_comment", "x_followee", "hotspot_research", "account", "query_summary"]) assert.equal(xSearchImportState({ ...akResult, kind }).supported, false);
+});
+test("AgentKey requires ordinary role, text and consistent actual author identity, context and native URL", () => {
+  const check = (patch: Record<string, unknown>) => xSearchImportState({ ...akResult, data: { ...akResult.data, requestedScope: { rest_id: "00456", screen_name: "actual_author" }, record: { ...akRecord, ...patch }, importable: true } });
+  for (const patch of [{ tweetId: 123 }, { tweetId: "1".repeat(31) }, { author: null }, { author: { rest_id: null, screen_name: "actual_author" } }, { text: "", display_text: "cannot replace" }, { role: "retweet-wrapper" }, { roleLimitations: [] }, { retweeted: null }, { retweeted_tweet: {} }, { url: "https://x.com/wrong/status/00123" }, { urlSource: "received" }]) assert.equal(check(patch).canImport, false, JSON.stringify(patch));
+  const author = { rest_id: "00456", screen_name: null }, authorContext = { rest_id: "00456", screen_name: "actual_author", source: "received-account-context" };
+  assert.equal(check({ author, authorContext }).canImport, true);
+  assert.equal(check({ author, authorContext: { ...authorContext, rest_id: "other" } }).canImport, false);
+  assert.equal(check({ author, authorContext: { ...authorContext, source: "requested" } }).canImport, false);
+  assert.equal(check({ author: undefined, user_info: akRecord.author }).canImport, true);
+  for (const patch of [{ sourceId: "linked" }, { articleId: "linked" }]) assert.equal(xSearchImportState({ ...akResult, ...patch }).canImport, false);
+});
+test("AgentKey quote must independently preserve identity, handle, text and URL and cannot nest another quote", () => {
+  const quoted = { ...akRecord, tweetId: "789", author: { rest_id: "900", screen_name: "quote_author" }, text: "引用原文", url: "https://x.com/quote_author/status/789" };
+  const check = (quote: unknown) => xSearchImportState({ ...akResult, data: { ...akResult.data, record: { ...akRecord, quoted: quote } } }).canImport;
+  assert.equal(check(quoted), true);
+  for (const patch of [{ tweetId: null }, { author: null }, { text: null }, { url: akRecord.url }, { quoted: {} }, { roleLimitations: ["unknown"] }, { role: "retweet-wrapper" }]) assert.equal(check({ ...quoted, ...patch }), false);
+  assert.equal(check(null), false);
+});
+test("AgentKey profile binding uses only actual profile handle and stable identity", () => {
+  const data = { provider: "agentkey", platform: "x-research", operationId: "x.account_profile", record: { rest_id: "00456", profile: "actual_author" }, importable: false };
+  assert.equal(agentKeyXAccountUsername("account", data), "actual_author");
+  assert.equal(agentKeyXAccountUsername("account", { ...data, record: { id: "00456", profile: "actual_author" } }), "actual_author");
+  for (const record of [{ profile: "actual_author" }, { rest_id: "00456" }, { rest_id: "00456", id: "00999", profile: "actual_author" }, { rest_id: 456, profile: "actual_author" }]) assert.equal(agentKeyXAccountUsername("account", { ...data, record, requestedScope: { screen_name: "actual_author" } }), null);
+  assert.equal(agentKeyXAccountUsername("x_followee", data), null);
+  assert.equal(agentKeyXAccountUsername("account", { ...data, provider: "redfox" }), null);
 });

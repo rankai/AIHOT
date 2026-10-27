@@ -30,7 +30,7 @@ test("expired results dispatch before original platform/summary facts and expose
       assert(!html.includes("PRIVATE-OLD-DATA")); assert(!html.includes("采集页摘要")); assert(!html.includes("/api/admin/assets/"));
       assert(!/<(?:button|img|video|audio)\b/.test(html));
       assert(!html.includes("查看可用详情接口")); assert(!html.includes("本地导入作品")); assert(!html.includes("保存TXT附件"));
-      assert(html.includes('href="/admin/redfox?view=platforms"')); assert(html.includes("不会自动重新购买"));
+      assert(html.includes('href="/admin/data-tools?view=platforms"')); assert(html.includes("不会自动重新购买"));
     }
     const parent: OperationResult = { ...base, kind: "subtitle_track", id: 12, data: { platform: "tools", group: "subtitle", operationId: "API_1792051516512", languageTag: "en", record: { urls: [{ format: "srt", url: "https://example.com/subtitle" }] } } };
     const child: OperationResult = { ...base, id: 13, kind: "result_attachment", data: { parentResultId: 12, format: "srt", acquisition: "subtitle-download", bodyUsable: true } };

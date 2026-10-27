@@ -31,7 +31,7 @@ async function query(operationId:string,parameters:Record<string,unknown>){const
 test("five fixed query APIs persist typed results; GET is free and commands are idempotent",async()=>{
   const {buildApp}=await import("../apps/api/src/app.ts");const app=await buildApp();
   try{config.devAdmin=null;assert.equal((await app.inject({url:"/api/admin/redfox/operations"})).statusCode,401);config.devAdmin={displayName:"Weibo test"};const beforeHits=hits;
-    const catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.equal(catalog.statusCode,200);assert.equal(catalog.json().filter((x:{platform:string})=>x.platform==="weibo").length,5);assert.equal(hits,beforeHits);
+    const catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.equal(catalog.statusCode,200);assert.equal(catalog.json().filter((x:{id:string})=>WeiboOperationId.safeParse(x.id).success).length,5);assert.equal(hits,beforeHits);
     const cases:[string,Record<string,unknown>,string][]=[["API_1789098514899",{opusId},"weibo_work"],["API_1789098515117",{userId:uid},"weibo_account"],["API_1789098515245",{page:1,keyword:"synthetic"},"weibo_account"],["TXQPVGJG",{page:"1",keyword:"synthetic",searchType:"3"},"weibo_work"],["UAQ90A1F",{},"weibo_trend"]];
     for(const [operationId,parameters,kind] of cases){const payload={operationId,parameters},headers={"x-csrf-token":"dev","idempotency-key":tag()};
       assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/queries",payload,headers:{"idempotency-key":tag()}})).statusCode,403);

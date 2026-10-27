@@ -37,6 +37,7 @@ export function DouyinResult({ result: r }: { result: OperationResult }) {
     <div className="flex flex-wrap items-center gap-2 text-[14px] font-medium"><span>{typeof r.data.title === "string" ? r.data.title : "抖音查询结果"}</span><Badge>{r.kind === "douyin_account_rank" ? "账号研究榜单" : fields.account ? "抖音账号" : "抖音作品"}</Badge></div>
     {r.kind === "douyin_account_rank" && <p className="text-[12.5px] text-ink-3">账号榜单只作研究，主页和昵称不能证明稳定身份，也不能作为文章导入；请显式查询账号信息核实。</p>}
     <KV items={[["已收到作者 UID", fields.uid ?? "未提供"], ["已收到安全 ID（secUserId）", fields.secUserId ?? "未提供"], ...(fields.work ? [["已收到作品 ID", fields.workId ?? "未提供"], ["原生链接中的作品 ID", fields.native?.id ?? "未确认"]] as Array<[string, string]> : [])]} />
+    {fields.account && r.data.provider === "agentkey" && <KV items={[["响应昵称", typeof record.nickname === "string" ? record.nickname : "未提供"], ["响应粉丝数", typeof record.follower_count === "number" ? String(record.follower_count) : "未提供"]]} />}
     {r.kind === "douyin_account_rank" && <KV items={[["上游排名", typeof record.accountRanking === "number" ? String(record.accountRanking) : "未提供"], ["上游榜单日期原串", typeof record.rankDate === "string" ? record.rankDate : "未提供"], ["上游榜单周期", typeof record.rankPeriod === "string" ? record.rankPeriod : "未提供"]]} />}
     {r.data.provider!=="agentkey" && fields.work && !fields.workId && fields.receivedNative && <p className="text-[12px] text-ink-3">接口未单列已确认作品 ID；本原生链接含作品 ID，可由服务端据此核实。AI photoId 不参与身份确认。</p>}
     <p className="text-[12px] text-ink-4">UID 与安全 ID 分类型保留完整字符串；展示抖音号、AI authorId/photoId 和未确认的 secUid 不作为稳定作者或作品身份。</p>

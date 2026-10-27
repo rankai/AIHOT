@@ -51,7 +51,7 @@ test("schema distinctions retain documented examples, optional ranks and unbound
 });
 test("catalog is read-only; POST creates an idempotent query and wrong command input conflicts",async()=>{
   const {buildApp}=await import("../apps/api/src/app.ts"),app=await buildApp();config.devAdmin={displayName:"Douyin fixture"};fixture=cases[0]!;
-  try{const beforeHits=hits,catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.equal(catalog.json().filter((x:{platform:string})=>x.platform==="douyin").length,14);assert.equal(hits,beforeHits);
+  try{const beforeHits=hits,catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.deepEqual(catalog.json().filter((x:{platform:string;id:string})=>x.platform==="douyin"&&x.id in douyinOperations).map((x:{id:string})=>x.id).sort(),cases.map(c=>c.id).sort());assert.equal(hits,beforeHits);
     const headers={"x-csrf-token":"dev","idempotency-key":tag()},payload={operationId:fixture.id,parameters:fixture.parameters};
     const a=await app.inject({method:"POST",url:"/api/admin/redfox/queries",headers,payload}),b=await app.inject({method:"POST",url:"/api/admin/redfox/queries",headers,payload});assert.equal(a.statusCode,202,a.body);assert.deepEqual(a.json(),b.json());await step(a.json().runId);assert.equal((await row(a.json().runId)).status,"completed");
     assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/queries",headers,payload:{...payload,parameters:{keyword:"other"}}})).statusCode,409);

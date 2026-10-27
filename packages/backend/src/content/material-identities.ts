@@ -3,13 +3,15 @@ import type { Db } from "../db.ts";
 import { toutiaoWorkId, douyinVideoId, xiaohongshuNoteId, tiktokVideoId, bilibiliVideoId, youtubeVideoId, instagramCode, identityKeyForUrl, normalizeUrl } from "../lib/url.ts";
 
 // Supplied only by a backend adapter after validating IDs from the same work record.
-const Confirmation = z.object({
+const WeiboConfirmation = z.object({
   platform: z.literal("weibo"),
   opusId: z.string().regex(/^[0-9]+$/).max(100),
   mblogid: z.string().regex(/^[A-Za-z0-9]+$/).max(100),
   uid: z.string().regex(/^[0-9]+$/).max(100),
   evidence: z.object({ kind: z.enum(["receipt", "result", "audit"]), reference: z.string().trim().min(1).max(200) }).strict(),
 }).strict();
+const WechatConfirmation=z.object({platform:z.literal("wechat"),requestedUrl:z.string(),responseUrl:z.string(),longUrl:z.string(),bizInfo:z.string().min(1),mid:z.string().regex(/^\d+$/),idx:z.string().regex(/^\d+$/),sourceId:z.string().min(1),evidence:z.object({kind:z.literal("result"),reference:z.string().regex(/^[1-9][0-9]*$/)}).strict()}).strict();
+const Confirmation=z.discriminatedUnion("platform",[WeiboConfirmation,WechatConfirmation]);
 export type ConfirmedWorkIdentity = z.infer<typeof Confirmation>;
 export class MaterialIdentityConflict extends Error {
   code = "conflict";
@@ -35,6 +37,23 @@ function urlIdentity(url: string): { keys: string[]; uid?: string } | null {
 
 export async function resolveMaterialIdentity(db: Db, input: { url: string; identityKey: string; confirmedIdentity?: ConfirmedWorkIdentity }) {
   const confirmed = input.confirmedIdentity === undefined ? undefined : Confirmation.parse(input.confirmedIdentity);
+  const address=normalizeUrl(input.url),wechat=address&&new URL(address).hostname==='mp.weixin.qq.com';
+  if(confirmed?.platform==='wechat'||(!confirmed&&wechat&&input.identityKey===identityKeyForUrl(input.url))){
+    const keys=[input.identityKey];
+    if(confirmed?.platform==='wechat'){
+      const requested=normalizeUrl(confirmed.requestedUrl),response=normalizeUrl(confirmed.responseUrl),long=normalizeUrl(confirmed.longUrl);
+      if(!requested||requested!==response||!long||address!==long||input.identityKey!==identityKeyForUrl(long))throw new MaterialIdentityConflict('WeChat same-response URL proof disagrees');
+      const shortUrl=new URL(requested),longUrl=new URL(long);
+      if(shortUrl.hostname!=='mp.weixin.qq.com'||!/^\/s\/[A-Za-z0-9_-]+$/.test(shortUrl.pathname)||longUrl.hostname!=='mp.weixin.qq.com'||longUrl.pathname!=='/s'||longUrl.searchParams.get('__biz')!==confirmed.bizInfo||longUrl.searchParams.get('mid')!==confirmed.mid||longUrl.searchParams.get('idx')!==confirmed.idx)throw new MaterialIdentityConflict('WeChat article tuple proof disagrees');
+      keys.push(identityKeyForUrl(requested)!);
+      const [binding]=await db`SELECT source_id FROM source_account_bindings WHERE platform='wechat' AND id_kind='bizInfo' AND id_value=${confirmed.bizInfo}`;
+      if(binding?.source_id!==confirmed.sourceId)throw new MaterialIdentityConflict('WeChat alias lacks confirmed author binding');
+    }
+    for(const k of [...new Set(keys)].sort())await db`SELECT pg_advisory_xact_lock(hashtextextended(${`material:${k}`},0))`;
+    const rows=await db<{id:string;identity_key:string}[]>`SELECT id,identity_key FROM articles WHERE identity_key IN ${db(keys)} OR id IN (SELECT article_id FROM article_identity_aliases WHERE alias_key IN ${db(keys)}) ORDER BY id FOR UPDATE`;
+    if(rows.length>1)throw new MaterialIdentityConflict('WeChat original URLs belong to different articles');
+    return {identityKey:rows[0]?.identity_key??input.identityKey,aliases:confirmed?keys:[],evidence:confirmed?.evidence};
+  }
   const toutiaoId = toutiaoWorkId(input.url);
   const explicitToutiao = /^toutiao:workId:[0-9]+$/.test(input.identityKey);
   if (!confirmed && (toutiaoId || explicitToutiao)) {
@@ -42,11 +61,14 @@ export async function resolveMaterialIdentity(db: Db, input: { url: string; iden
     const primary = `toutiao:workId:${toutiaoId}`;
     if (!toutiaoId || (explicitToutiao && input.identityKey !== primary)) throw new MaterialIdentityConflict("Toutiao work ID does not match its native original");
     await db`SELECT pg_advisory_xact_lock(hashtextextended(${`material:${primary}`}, 0))`;
-    // Exact expression and predicate of the scoped legacy index; query/path variants share one work.
+    const mobile = `url:https://m.toutiao.com/article/${toutiaoId}`;
+    // Preserve the desktop legacy index expression; mobile lookup stays scoped to this exact work.
     const rows = await db<{ id: string; identity_key: string }[]>`SELECT id, identity_key FROM articles
       WHERE identity_key = ${primary} OR (
         identity_key ~ '^url:https://toutiao[.]com/(?:a|group/|article/|video/)[0-9]+/?([?][^#]*)?$'
         AND substring(identity_key from '^url:https://toutiao[.]com/(?:a|group/|article/|video/)([0-9]+)/?([?][^#]*)?$') = ${toutiaoId})
+        OR (identity_key NOT LIKE '%#%' AND (identity_key IN ${db([mobile, mobile + "/"])}
+          OR identity_key LIKE ${mobile + "?%"} OR identity_key LIKE ${mobile + "/?%"}))
       ORDER BY id LIMIT 2 FOR UPDATE`;
     if (rows.length > 1) throw new MaterialIdentityConflict("Toutiao work already belongs to different articles");
     return { identityKey: rows[0]?.identity_key ?? primary, aliases: [] as string[], evidence: undefined };
@@ -129,13 +151,18 @@ export async function resolveMaterialIdentity(db: Db, input: { url: string; iden
     if (!noteId || (explicitNote && input.identityKey !== primary)) throw new MaterialIdentityConflict("Xiaohongshu note ID does not match its native address");
     await db`SELECT pg_advisory_xact_lock(hashtextextended(${`material:${primary}`}, 0))`;
     const generic = `url:https://xiaohongshu.com/explore/${noteId}`;
+    const discovery = `url:https://xiaohongshu.com/discovery/item/${noteId}`;
     // Escape opaque IDs for LIKE; '?' delimits this exact path, never a longer note ID.
     const escaped = generic.replace(/[\\%_]/g, value => `\\${value}`);
+    const discoveryEscaped = discovery.replace(/[\\%_]/g, value => `\\${value}`);
     const rows = await db<{ id: string; identity_key: string }[]>`SELECT id, identity_key FROM articles
-      WHERE identity_key = ${primary} OR (
-        identity_key LIKE 'url:https://xiaohongshu.com/explore/%' AND identity_key NOT LIKE '%#%'
-        AND (identity_key = ${generic} OR identity_key = ${generic + "/"}
-          OR identity_key LIKE ${escaped + "?%"} OR identity_key LIKE ${escaped + "/?%"}))
+      WHERE identity_key = ${primary} OR (identity_key NOT LIKE '%#%' AND (
+        (identity_key LIKE 'url:https://xiaohongshu.com/explore/%'
+          AND (identity_key = ${generic} OR identity_key = ${generic + "/"}
+            OR identity_key LIKE ${escaped + "?%"} OR identity_key LIKE ${escaped + "/?%"}))
+        OR (identity_key LIKE 'url:https://xiaohongshu.com/discovery/item/%'
+          AND (identity_key = ${discovery} OR identity_key = ${discovery + "/"}
+            OR identity_key LIKE ${discoveryEscaped + "?%"} OR identity_key LIKE ${discoveryEscaped + "/?%"}))))
       ORDER BY id LIMIT 2 FOR UPDATE`;
     if (rows.length > 1) throw new MaterialIdentityConflict("Xiaohongshu native note already belongs to different articles");
     return { identityKey: rows[0]?.identity_key ?? primary, aliases: [] as string[], evidence: undefined };

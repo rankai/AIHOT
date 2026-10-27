@@ -1,3 +1,4 @@
+import {agentKeyXiaohongshuEvidence,xiaohongshuResultSnapshot} from "../agentkey/xiaohongshu-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -34,34 +35,17 @@ function publicationTime(record:Record<string,unknown>):Date|null{
 export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const snapshot=await xiaohongshuResultSnapshot(tx,resultId);
     if(!snapshot)return null;
-    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
-    const operation=XiaohongshuOperationId.safeParse(executionInput.operationId);
-    if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="xiaohongshu"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Xiaohongshu result");
-    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"xiaohongshu",operation.data);
-    const shape=xiaohongshuOperations[operation.data].shape;
-    if(!["xiaohongshu_account","xiaohongshu_work"].includes(snapshot.kind))throw new UnsupportedReplacement("Account ranking links require explicit stable identity verification");
-    let payload:unknown=snapshot.data.record;
-    if(["accounts","works","ai_works"].includes(shape))payload={list:[payload]};
-    else if(["linked_rank","dark_rank"].includes(shape))payload=[payload];
-    else if(shape==="research"){
-      const role=String(snapshot.item_key).split(":")[0];
-      if(!["keyword_match","provider_recommendation"].includes(role)||snapshot.data.role!==role)throw new UnsupportedReplacement("Research result role does not match its received item");
-      payload={articles:role==="keyword_match"?[payload]:[],latestHotArticles:role==="provider_recommendation"?[payload]:[]};
-    }
-    const parsed=parseXiaohongshu(operation.data,payload,executionInput.parameters).find(r=>r.kind===snapshot.kind);
-    if(!parsed||parsed.kind!==snapshot.kind||parsed.data.role!==snapshot.data.role)throw new UnsupportedReplacement("Result kind or role does not match its received operation record");
-    const accountOrigin=executionInput.origin?.kind==="account";
-    if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
-    const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    const {parsed,origin,sourceDiscoveredAt}=snapshot.provider==="agentkey"?await agentKeyXiaohongshuEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="xiaohongshu_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as XiaohongshuIdentity,identity:XiaohongshuIdentity={...received};
+    if(snapshot.provider==="agentkey"&&(input.supplement||!received.userId||!account&&(!parsed.data.workId||!parsed.data.url)))throw new UnsupportedReplacement("AgentKey import requires received native URL and author identity; manual supplements cannot replace evidence");
     if(account&&input.supplement)throw new UnsupportedReplacement("Account import requires received stable IDs");
     for(const kind of ["userId"] as const){const extra=input.supplement?.[kind];if(extra&&received[kind]&&extra!==received[kind])throw new StaleOperationError("Received stable identity cannot be replaced");if(extra)identity[kind]=extra;}
     const original=typeof parsed.data.url==="string"?parsed.data.url:null,url=original??input.supplement?.url;
     if(original&&input.supplement?.url&&normalizeUrl(original)!==normalizeUrl(input.supplement.url))throw new StaleOperationError("Received original URL cannot be replaced");
     const nativeId=url?xiaohongshuNoteId(url):null;
-    if(!account&&(!nativeId||!url))throw new UnsupportedReplacement("A documented native Xiaohongshu explore permalink is required; short links are not resolved");
+    if(!account&&(!nativeId||!url))throw new UnsupportedReplacement("A documented native Xiaohongshu permalink is required; short links are not resolved");
     if(!account&&parsed.data.workId&&parsed.data.workId!==nativeId)throw new StaleOperationError("Received work ID differs from its native original URL");
     const ids=Object.entries(identity).sort(([a],[b])=>a.localeCompare(b));
     if(!ids.length)throw new UnsupportedReplacement("A verified author userId is required");
@@ -84,15 +68,15 @@ export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:
     const intent={sourceId:input.sourceId??null,supplement:input.supplement??null},previous=result!.provenance?.xiaohongshuImport;
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
-    if(!source){const name=String(record.accountName??record.accountNickname??record.authorNickname??record.userName??`小红书 ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"xiaohongshu"})},'isolated',false,false,true,NULL) RETURNING *`;}
+    if(!source){const name=String(record.name??record.authorName??record.accountName??record.accountNickname??record.authorNickname??record.userName??`小红书 ${primary}`).slice(0,200);[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${name},'external',${tx.json({platform:"xiaohongshu"})},'isolated',false,false,true,NULL) RETURNING *`;}
     if(!account&&!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
     for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"xiaohongshu",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
-      const body=record.workDesc??record.desc,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
-      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
-      const author=record.accountNickname??record.authorNickname??record.userName;
-      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`xiaohongshu:noteId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:record.workPublishTime??record.publicTime??record.createTime??record.gmtCreate??null,role:parsed.data.role??null,supplement:input.supplement??null}},tx);
+      const body=record.workDesc??record.desc??(snapshot.provider==="agentkey"?record.description:undefined),publishedAt=snapshot.provider==="agentkey"?null:publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
+      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
+      const author=record.authorName??record.accountNickname??record.authorNickname??record.userName;
+      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`xiaohongshu:noteId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.workPublishTime??record.publicTime??record.createTime??record.gmtCreate??null,role:parsed.data.role??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({xiaohongshuImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
@@ -100,4 +84,27 @@ export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:
     return {resultId,sourceId,articleId};
   };
   return db?execute(db):sql.begin(execute);
+}
+
+async function redfoxEvidence(tx:Tx,snapshot:any){
+    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    const operation=XiaohongshuOperationId.safeParse(executionInput.operationId);
+    if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="xiaohongshu"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Xiaohongshu result");
+    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"xiaohongshu",operation.data);
+    const shape=xiaohongshuOperations[operation.data].shape;
+    if(!["xiaohongshu_account","xiaohongshu_work"].includes(snapshot.kind))throw new UnsupportedReplacement("Account ranking links require explicit stable identity verification");
+    let payload:unknown=snapshot.data.record;
+    if(["accounts","works","ai_works"].includes(shape))payload={list:[payload]};
+    else if(["linked_rank","dark_rank"].includes(shape))payload=[payload];
+    else if(shape==="research"){
+      const role=String(snapshot.item_key).split(":")[0];
+      if(!["keyword_match","provider_recommendation"].includes(role)||snapshot.data.role!==role)throw new UnsupportedReplacement("Research result role does not match its received item");
+      payload={articles:role==="keyword_match"?[payload]:[],latestHotArticles:role==="provider_recommendation"?[payload]:[]};
+    }
+    const parsed=parseXiaohongshu(operation.data,payload,executionInput.parameters).find(r=>r.kind===snapshot.kind);
+    if(!parsed||parsed.kind!==snapshot.kind||parsed.data.role!==snapshot.data.role)throw new UnsupportedReplacement("Result kind or role does not match its received operation record");
+    const accountOrigin=executionInput.origin?.kind==="account";
+    if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    return {parsed,origin,sourceDiscoveredAt};
 }

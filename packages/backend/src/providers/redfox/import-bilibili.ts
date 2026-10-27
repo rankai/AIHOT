@@ -1,3 +1,4 @@
+import {agentKeyBilibiliEvidence} from "../agentkey/bilibili-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -29,20 +30,23 @@ function publicationTime(record:Record<string,unknown>):Date|null{
 export async function importBilibiliResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    const agentkey=snapshot.provider==="agentkey";
+    if(agentkey&&input.supplement)throw new UnsupportedReplacement("AgentKey Bilibili import requires received evidence; manual supplements are not accepted");
+    const verified=agentkey?await agentKeyBilibiliEvidence(tx,snapshot):null;
+    const collected=agentkey?null:await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
     const operation=BilibiliOperationId.safeParse(executionInput.operationId);
-    if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="bilibili"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Bilibili result");
-    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"bilibili",operation.data);
-    const shape=bilibiliOperations[operation.data].shape;
+    if(!verified&&(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="bilibili"||snapshot.data.operationId!==operation.data))throw new UnsupportedReplacement("Not a confirmed Bilibili result");
+    const sourceDiscoveredAt=verified?.sourceDiscoveredAt??collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"bilibili",operation.data!);
+    const shape=verified?undefined:bilibiliOperations[operation.data!].shape;
     if(!["bilibili_account","bilibili_work"].includes(snapshot.kind))throw new UnsupportedReplacement("Bilibili query summaries are not importable accounts or works");
     const payload=shape==="accounts"?{accountList:[snapshot.data.record]}:shape==="works"||shape==="account_works"?{workList:[snapshot.data.record],...(shape==="account_works"?{mid:snapshot.data.accountMid}:{})}:snapshot.data.record;
-    const parsed=parseBilibili(operation.data,payload,executionInput.parameters)[0];
+    const parsed=verified?.parsed??parseBilibili(operation.data!,payload,executionInput.parameters)[0];
     if(!parsed||parsed.kind!==snapshot.kind)throw new UnsupportedReplacement("Result kind does not match its received operation record");
     const accountOrigin=executionInput.origin?.kind==="account";
-    if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
-    const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
+    if(accountOrigin)applyAccountDetailOrigin(operation.data!,executionInput.parameters,parsed!,executionInput.origin);
+    const origin=agentkey||accountOrigin?undefined:applyWorkDetailOrigin(operation.data!,executionInput.parameters,parsed!,executionInput.origin);
     const account=parsed.kind==="bilibili_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as BilibiliIdentity,identity:BilibiliIdentity={...received};
     if(account&&input.supplement)throw new UnsupportedReplacement("Account import requires received stable IDs");
     for(const kind of ["mid"] as const){const extra=input.supplement?.[kind];if(extra&&received[kind]&&extra!==received[kind])throw new StaleOperationError("Received stable identity cannot be replaced");if(extra)identity[kind]=extra;}
@@ -79,9 +83,9 @@ export async function importBilibiliResult(resultId:number,raw:unknown,actor:str
     let articleId:string|null=null;
     if(!account){
       const body=record.description,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
-      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
+      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const author=record.author;
-      const material=await upsertMaterial({sourceId,url:url!,identityKey:`bilibili:bvId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,created:record.created??null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({sourceId,url:url!,identityKey:`bilibili:bvId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,created:record.created??null,...(agentkey?{rawTimes:record.rawTimes??{},descriptionRole:record.descriptionRole??null}:{}),request:executionInput.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({bilibiliImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

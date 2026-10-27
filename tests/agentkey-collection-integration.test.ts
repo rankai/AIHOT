@@ -24,7 +24,7 @@ import {assertConfiguredTestDatabase, gate, stub as httpStub, tag} from "./setup
 
 type JsonRpcRequest = {method?: string; id?: string | number | null};
 
-type StubPage = unknown[] | {items: unknown[]; pagination?: Record<string, unknown>};
+type StubPage = unknown[] | {appBody:Record<string,unknown>} | {items: unknown[]; pagination?: Record<string, unknown>};
 
 async function mcpStub(pages: StubPage[], beforeReply?: (index: number) => Promise<void>) {
   const calls: Array<{name: string; tool: string; params: Record<string, unknown>}> = [];
@@ -58,7 +58,7 @@ async function mcpStub(pages: StubPage[], beforeReply?: (index: number) => Promi
           const page = pages[index] ?? [];
           const data = Array.isArray(page)
             ? {itemList: page, hasMore: index + 1 < pages.length, cursor: (index + 1) * 12}
-            : {itemList: page.items, ...(page.pagination ?? {})};
+            : "appBody" in page ? page.appBody : {itemList: page.items, ...(page.pagination ?? {})};
           return {
             content: [],
             structuredContent: {
@@ -67,7 +67,7 @@ async function mcpStub(pages: StubPage[], beforeReply?: (index: number) => Promi
               credits_charged: 0.2,
               took_ms: 1,
               request_id: `request-${index + 1}`,
-              data: {code: 200, data: {code: 0, msg: "success", data}},
+              data: {code: 200, data: !Array.isArray(page)&&"appBody" in page?data:{code: 0, msg: "success", data}},
             },
           };
         })();
@@ -316,7 +316,7 @@ const collectionConfig = (limits = {pages: 3, items: 10, details: 0}, keyword = 
 });
 async function agentKeyFixture<T>(pages: StubPage[], body: (fixture: {
   stub: Awaited<ReturnType<typeof mcpStub>>;
-  create: (limits?: {pages: number; items: number; details: number}) => Promise<{
+  create: (limits?: {pages: number; items: number; details: number}, overrides?:Record<string,unknown>) => Promise<{
     subscription: Awaited<ReturnType<typeof createPlatformSubscription>>;
     run: Awaited<ReturnType<typeof startPlatformSubscription>>;
     config: ReturnType<typeof collectionConfig>;
@@ -335,8 +335,8 @@ async function agentKeyFixture<T>(pages: StubPage[], body: (fixture: {
   try {
     Object.assign(process.env, values);
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.collect'`;
-    return await body({stub, create: async (limits) => {
-      const config = collectionConfig(limits);
+    return await body({stub, create: async (limits,overrides) => {
+      const config = {...collectionConfig(limits),...overrides};
       const subscription = await createPlatformSubscription(config, "bounded-agentkey", tag());
       ids.push(subscription.id);
       const run = await startPlatformSubscription(subscription.id, "bounded-agentkey", tag());
@@ -845,3 +845,146 @@ for (const limit of ["page", "item"] as const) {
     });
   });
 }
+
+test("account subscription retains page through bounded detail, resumes list and imports original historical results",async()=>{
+  const {douyinAccountPostsRoute:list,douyinDetailRoute:detail}=await import("@aihot/backend/providers/agentkey/douyin-contract");
+  const note=String(Date.now()),uid=`91${note}`,sec=`synthetic-${note}`;
+  const work=(i:number)=>({aweme_id:`92${note}${i}`,desc:`synthetic ${i}`,create_time:1729400000,author:{uid,sec_uid:sec,nickname:"Synthetic APP"}});
+  const stub=await mcpStub([{appBody:{status_code:0,uid,sec_uid:sec,aweme_list:[work(0),work(1)],has_more:1,max_cursor:1730437046000}},
+    {appBody:{aweme_detail:work(0)}},{appBody:{status_code:0,aweme_list:[work(2)],has_more:0}}]);
+  const previous=Object.fromEntries(["AGENTKEY_CALLS_ENABLED","AGENTKEY_API_KEY","AGENTKEY_MCP_URL","COLLECT_ENABLED"].map(key=>[key,process.env[key]]));
+  const [budget]=await sql`SELECT per_minute,per_hour,per_day FROM budgets WHERE service='agentkey.collect'`;
+  let id:number|undefined;
+  try{
+    Object.assign(process.env,{AGENTKEY_CALLS_ENABLED:"true",AGENTKEY_API_KEY:"test-app-collection",AGENTKEY_MCP_URL:stub.url,COLLECT_ENABLED:"true"});
+    await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.collect'`;
+    const sub=await createPlatformSubscription({name:tag(),provider:"agentkey",operationId:"QEQLCKD6",parameters:{sec_user_id:sec},enabled:true,enrichDetails:true,detailOperationId:"FK67XDVQ",limits:{pages:3,items:10,details:1}},"app-integration",tag());id=sub.id;
+    await schedulePlatformSubscriptions();
+    const [s]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`;
+    const step=async()=>{const [run]=await sql`SELECT * FROM operation_runs WHERE id=${s.active_run_id}`;await executeOperationStep(run.id,run.step_version,run.job_id);return (await sql`SELECT * FROM operation_runs WHERE id=${run.id}`)[0];};
+    const first=await step();assert.equal(first.status,"active");assert.equal(first.operation_key,list.operationKey);assert.equal(first.step_key,detail.stepKey);assert.equal(first.progress.retainedReceiptIds.length,1);
+    const [sourceResult]=await sql`SELECT id,article_id,source_id,receipt_id FROM operation_results WHERE run_id=${first.id} AND kind='douyin_work' ORDER BY id LIMIT 1`;
+    await importDouyinResult(sourceResult.id,{reason:"historical list while detail active"},"app-integration",tag());
+    // Simulate a process interruption after raw detail receipt persistence and before business commit.
+    const {paidRequest}=await import("@aihot/backend/providers/receipts");
+    const {receiptOptions}=await import("@aihot/backend/providers/operations/store");
+    const {agentKeyTransport}=await import("@aihot/backend/providers/agentkey/transport");
+    const transport=agentKeyTransport(),params=first.progress.parameters;
+    await paidRequest({service:"agentkey.collect",purpose:detail.operationKey,model:detail.tool,subject:`operation:${first.id}`,
+      identity:{runId:first.id,stepVersion:first.step_version,endpoint:transport.endpoint,contractVersion:1,tool:detail.tool,params},
+      requestSummary:{tool:detail.tool,endpoint:transport.endpoint,params}},()=>transport.execute(params,detail),receiptOptions({runId:first.id,stepVersion:first.step_version,generation:first.generation}));
+    process.env.AGENTKEY_CALLS_ENABLED="false";process.env.COLLECT_ENABLED="false";
+    const second=await step();assert.equal(stub.calls.length,2,"received detail consumed locally without repurchase");
+    process.env.AGENTKEY_CALLS_ENABLED="true";process.env.COLLECT_ENABLED="true";
+    assert.equal(second.status,"active");assert.equal(second.step_key,list.stepKey);assert.equal(second.progress.parameters.max_cursor,1730437046000);
+    const third=await step();assert.equal(third.status,"completed");assert.equal(stub.calls.length,3);
+    assert.deepEqual(stub.calls.map(c=>c.tool),[list.tool,detail.tool,list.tool]);assert.deepEqual(stub.calls[1]!.params,{aweme_id:work(0).aweme_id});
+    const results=await sql`SELECT * FROM operation_results WHERE run_id=${first.id} AND kind='douyin_work' ORDER BY id`;
+    assert.equal(results.length,4);assert.ok(results.every(r=>r.article_id));assert.equal(results[0]!.article_id,results[2]!.article_id);
+    const [receipts]=await sql`SELECT count(*)::int AS n FROM receipts WHERE subject=${`operation:${first.id}`} AND status='completed'`;assert.equal(receipts.n,3);
+    const [closed]=await sql`SELECT active_run_id,progress FROM collection_subscriptions WHERE id=${sub.id}`;assert.equal(closed.active_run_id,null);assert.equal(closed.progress.details,1);assert.equal(closed.progress.pages,2);
+    await importDouyinResult(results[0]!.id,{reason:"historical list after completion"},"app-integration",tag());
+    await sql`UPDATE operation_results SET data=jsonb_set(data,'{title}','"forged"') WHERE id=${results[0]!.id}`;
+    await assert.rejects(importDouyinResult(results[0]!.id,{reason:"reject forged historical result"},"app-integration",tag()),/differs/);
+  }finally{
+    if(id)await sql`UPDATE collection_subscriptions SET enabled=false,next_run_at=NULL WHERE id=${id}`;
+    await sql`UPDATE budgets SET per_minute=${budget.per_minute},per_hour=${budget.per_hour},per_day=${budget.per_day} WHERE service='agentkey.collect'`;
+    for(const [key,value] of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;
+    await stub.close();
+  }
+});
+
+test("account collection completes missing author with chosen detail and keeps discovery time",async()=>{
+  const id=`93${Date.now()}`,sec=`synthetic-${id}`;
+  const partial={aweme_id:id,desc:"list description"};
+  const complete={...partial,create_time:1729400000,author:{uid:`94${id}`,sec_uid:sec,nickname:"Synthetic recovered author"}};
+  await agentKeyFixture([{appBody:{status_code:0,aweme_list:[partial],has_more:0}},{appBody:{aweme_detail:complete}}],async({create,stub})=>{
+    const {run}=await create({pages:1,items:10,details:1},{operationId:"QEQLCKD6",parameters:{sec_user_id:sec},enrichDetails:true,detailOperationId:"FK67XDVQ"});
+    await step(run.id);
+    const [original]=await sql`SELECT z.*,p.received_at FROM operation_results z JOIN receipts p ON p.id=z.receipt_id WHERE z.run_id=${run.id} AND z.kind='douyin_work'`;
+    assert.equal(original.article_id,null);assert.match(original.data.pendingReason,/stable author/);
+    assert.equal((await finish(run.id)).status,"completed");assert.equal(stub.calls.length,2);
+    const [detail]=await sql`SELECT z.article_id,a.discovered_at FROM operation_results z JOIN articles a ON a.id=z.article_id WHERE z.run_id=${run.id} AND z.kind='douyin_work'`;
+    assert.ok(detail.article_id);assert.equal(detail.discovered_at.toISOString(),original.received_at.toISOString());
+  });
+});
+
+test("account pagination retains invalid continuation evidence but ignores unused continuation",async()=>{
+  for(const pages of [1,2])await agentKeyFixture([{appBody:{status_code:0,aweme_list:[],has_more:1}}],async({create,stub})=>{
+    const {run,subscription}=await create({pages,items:10,details:0},{operationId:"QEQLCKD6",parameters:{sec_user_id:"synthetic-empty"}});
+    const done=await finish(run.id);assert.equal(done.status,pages===1?"completed":"needs_review");assert.equal(stub.calls.length,1);
+    const [summary]=await sql`SELECT z.data,p.status FROM operation_results z JOIN receipts p ON p.id=z.receipt_id WHERE z.run_id=${run.id} AND kind='query_summary'`;
+    assert.equal(summary.data.count,0);assert.equal(summary.status,pages===1?"completed":"received");
+    const [sub]=await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${subscription.id}`;assert.equal(sub.active_run_id,pages===1?null:run.id);
+  });
+});
+
+test("account switch maps only supported identity and sort, fences old run and preserves rejected configs",async()=>{
+  await agentKeyFixture([{appBody:{status_code:0,aweme_list:[],has_more:0}}],async({create,stub})=>{
+    const previous=process.env.REDFOX_API_KEY;process.env.REDFOX_API_KEY="test-switch-redfox";
+    try{
+      const {run,subscription}=await create({pages:2,items:7,details:0},{provider:"redfox",operationId:"QEQLCKD6",parameters:{secUserId:"synthetic-switch",sortType:"_4"}});
+      const preflight=await preflightPlatformSubscriptionProvider(subscription.id,{editVersion:1,targetProvider:"agentkey"});assert.equal(preflight?.supported,true);assert.equal(stub.calls.length,0);
+      const switched=await switchPlatformSubscriptionProvider(subscription.id,{editVersion:1,targetProvider:"agentkey",reason:"Synthetic account switch"},"account-switch");
+      assert.deepEqual(switched?.config.parameters,{sec_user_id:"synthetic-switch",max_cursor:0,count:20,sort_type:1,channel:"normal"});
+      assert.equal((await runOf(run.id)).status,"stopped");assert.deepEqual(await step(run.id),{skipped:true});
+      const fresh=await startPlatformSubscription(subscription.id,"account-switch",tag());assert.equal((await finish(fresh.id)).status,"completed");assert.equal(stub.calls[0]?.params.sort_type,1);
+      const back=await switchPlatformSubscriptionProvider(subscription.id,{editVersion:2,targetProvider:"redfox",reason:"Synthetic switch back"},"account-switch");assert.deepEqual(back?.config.parameters,{secUserId:"synthetic-switch",sortType:"_4"});
+      for(const parameters of [{accountId:"display-only"},{secUserId:"synthetic-switch",sortType:"_0"},{secUserId:"synthetic-switch",sortType:"default"},{secUserId:"synthetic-switch",offset:20}]){
+        await sql`UPDATE collection_subscriptions SET config=jsonb_set(config,'{parameters}',${sql.json(parameters)}) WHERE id=${subscription.id}`;
+        const [before]=await sql`SELECT config FROM collection_subscriptions WHERE id=${subscription.id}`;
+        assert.equal((await preflightPlatformSubscriptionProvider(subscription.id,{editVersion:3,targetProvider:"agentkey"}))?.supported,false);
+        await assert.rejects(switchPlatformSubscriptionProvider(subscription.id,{editVersion:3,targetProvider:"agentkey",reason:"Unsupported config"},"account-switch"));
+        assert.deepEqual((await sql`SELECT config FROM collection_subscriptions WHERE id=${subscription.id}`)[0],before);
+      }
+      await sql`UPDATE collection_subscriptions SET config=jsonb_set(config,'{parameters}',${sql.json({secUserId:"synthetic-switch"})}) WHERE id=${subscription.id}`;
+      assert.equal((await preflightPlatformSubscriptionProvider(subscription.id,{editVersion:3,targetProvider:"agentkey"}))?.supported,true,"unused optional sort permits disclosed latest default");
+    }finally{if(previous===undefined)delete process.env.REDFOX_API_KEY;else process.env.REDFOX_API_KEY=previous;}
+  });
+});
+
+test("account provider switch fences a late paid response without discarding receipt usage",async()=>{
+  const started=gate(),release=gate(),id=`95${Date.now()}`,sec=`synthetic-${id}`;
+  await agentKeyFixture([{appBody:{status_code:0,aweme_list:[{aweme_id:id,author:{uid:id,sec_uid:sec}}],has_more:0}}],async({create,stub})=>{
+    const {subscription,run}=await create({pages:1,items:10,details:0},{operationId:"QEQLCKD6",parameters:{sec_user_id:sec}});
+    const previous=process.env.REDFOX_API_KEY;process.env.REDFOX_API_KEY="test-late-switch";
+    let pending:ReturnType<typeof step>|undefined;
+    try{
+      pending=step(run.id);await started.promise;
+      const active=await runOf(run.id);
+      await switchPlatformSubscriptionProvider(subscription.id,{editVersion:1,targetProvider:"redfox",reason:"Synthetic in-flight switch"},"account-switch");
+      release.open();assert.deepEqual(await pending,{skipped:true});
+      const stopped=await runOf(run.id);assert.equal(stopped.status,"stopped");assert.equal(stopped.current_receipt_id,active.current_receipt_id);
+      const [receipt]=await sql`SELECT status,response,usage FROM receipts WHERE id=${stopped.current_receipt_id}`;
+      assert.equal(receipt.status,"received");assert.ok(receipt.response);assert.equal(receipt.usage.chargedCredits,0.2);
+      assert.equal((await sql`SELECT id FROM operation_results WHERE run_id=${run.id}`).length,0);
+      assert.equal((await sql`SELECT id FROM articles WHERE identity_key=${`douyin:aweme_id:${id}`}`).length,0);
+      assert.equal(stub.calls.length,1);
+    }finally{release.open();await pending;if(previous===undefined)delete process.env.REDFOX_API_KEY;else process.env.REDFOX_API_KEY=previous;}
+  },async()=>{started.open();await release.promise;});
+});
+
+test("research API exposes truthful nonschedulable variants and freezes only supported query inputs",async()=>{
+  const {buildApp}=await import("../apps/api/src/app.ts"),app=await buildApp(),previous=backendConfig.devAdmin;
+  backendConfig.devAdmin={displayName:"Synthetic research API"};
+  const headers={"x-csrf-token":"dev","idempotency-key":tag()};
+  try{
+    const reply=await app.inject({method:"GET",url:"/api/admin/redfox/operations"});assert.equal(reply.statusCode,200,reply.body);
+    const operations=reply.json() as Array<import("@aihot/contracts/redfox").PlatformOperationDescriptor>;
+    const suggest=operations.find(o=>o.id==="douyin.suggest")!,account=operations.find(o=>o.id==="P5CHB3BZ")!;
+    assert.equal(suggest.schedulableType,null);assert.deepEqual(suggest.collectionProviders?.map(p=>p.id),["agentkey"]);assert.deepEqual(suggest.fields.map(f=>f.name),["keyword"]);assert.equal(suggest.collectionPrice?.amount,0.2);assert.equal(suggest.collectionPrice?.currency,"credits");
+    assert.equal(account.schedulableType,null);assert.deepEqual(account.collectionProviders?.map(p=>p.id),["redfox","agentkey"]);
+    const agentkey=account.collectionProviders?.find(p=>p.id==="agentkey")!;assert.deepEqual(agentkey.fields?.map(f=>f.name),["keyword"]);assert.match(agentkey.purpose!,/不支持筛选或续页/);
+    for(const operationId of ["P5CHB3BZ","douyin.suggest"]){
+      const result=await app.inject({method:"POST",url:"/api/admin/redfox/queries",headers:{...headers,"idempotency-key":tag()},payload:{provider:"agentkey",operationId,parameters:{keyword:" synthetic "}}});assert.equal(result.statusCode,202,result.body);
+      const run=await runOf(result.json().runId);assert.equal(run.input.mode,"query");assert.equal(run.provider,"agentkey");assert.equal(run.input.operationId,operationId);
+      assert.deepEqual(run.input.parameters,operationId==="P5CHB3BZ"?{keyword:"synthetic",cursor:0,douyin_user_fans:"",douyin_user_type:"",search_id:""}:{keyword:"synthetic"});
+      assert.equal((await sql`SELECT id FROM receipts WHERE subject=${`operation:${run.id}`}`).length,0);
+      await sql.begin(tx=>abandonRun(tx,{runId:run.id,stepVersion:run.step_version,generation:run.generation},"Synthetic API input check complete"));
+      const collection=await app.inject({method:"POST",url:"/api/admin/redfox/collections",headers:{...headers,"idempotency-key":tag()},payload:{...collectionConfig(),provider:"agentkey",operationId}});assert.equal(collection.statusCode,400,collection.body);
+    }
+    for(const patch of [{cursor:1},{douyin_user_type:"1"},{search_id:"arbitrary"}]){
+      const result=await app.inject({method:"POST",url:"/api/admin/redfox/queries",headers:{...headers,"idempotency-key":tag()},payload:{provider:"agentkey",operationId:"P5CHB3BZ",parameters:{keyword:"synthetic",...patch}}});assert.equal(result.statusCode,400,result.body);
+    }
+  }finally{backendConfig.devAdmin=previous;await app.close();}
+});

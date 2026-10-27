@@ -1,3 +1,4 @@
+import {agentKeyWechatEvidence} from "../agentkey/wechat-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
@@ -33,29 +34,10 @@ function published(raw:unknown):Date|null{
 export async function importWechatResult(resultId:number,raw:unknown,actor:string,key:unknown,db?:Tx){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),input=Input.parse(raw);
   const execute=async(tx:Tx)=>{
-    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
+    const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
-    const op=WechatOperationId.safeParse(executionInput.operationId);
-    if(snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||!op.success||snapshot.receipt_model!==op.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.operationId!==op.data||snapshot.data.platform!=="wechat")throw new UnsupportedReplacement("Not a confirmed WeChat query result");
-    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"wechat",op.data);
-    const shape=wechatOperations[op.data].shape;
-    let payload:unknown=snapshot.data.record;
-    if(shape==="accounts"||shape==="works")payload={list:[payload]};
-    else if(["work_rank","account_rank","headline_rank","growth_rank"].includes(shape)){
-      if(shape==="growth_rank"&&snapshot.kind==="wechat_work"){
-        const parentKey=String(snapshot.item_key).replace(/:(maxWork|minWork)$/,"");
-        const [parent]=await tx`SELECT data FROM operation_results WHERE run_id=${snapshot.run_id} AND receipt_id=${snapshot.receipt_id} AND ((${snapshot.operation_key}='redfox.sync.query' AND step_version=${snapshot.step_version}) OR (${snapshot.operation_key}='redfox.platform.collection' AND provenance->>'sourcePageResultId'=${String(snapshot.provenance?.sourcePageResultId??'')})) AND item_key=${parentKey} AND kind='wechat_account_rank'`;
-        if(!parent)throw new UnsupportedReplacement("Growth work lacks its received account evidence");
-        const role=String(snapshot.item_key).endsWith(":maxWork")?"maxWork":"minWork";
-        payload=[{...parent.data.record,[role]:payload}];
-      }else payload=[payload];
-    }
-    const parsed=parseWechat(op.data,payload,executionInput.parameters).find(r=>r.kind===snapshot.kind&&(shape!=="growth_rank"||snapshot.kind!=="wechat_work"||r.itemKey.endsWith(String(snapshot.item_key).endsWith(":maxWork")?":maxWork":":minWork")));
-    if(!parsed)throw new UnsupportedReplacement("This result cannot be imported as an account or work");
-    const accountOrigin=executionInput.origin?.kind==="account";
-    if(accountOrigin)applyAccountDetailOrigin(op.data,executionInput.parameters,parsed!,executionInput.origin);
-    const origin=accountOrigin?undefined:applyWorkDetailOrigin(op.data,executionInput.parameters,parsed!,executionInput.origin);
+    if(snapshot.provider==='agentkey'&&input.supplement)throw new UnsupportedReplacement("AgentKey imports require received identity, not manual supplements");
+    const {parsed,origin,sourceDiscoveredAt}=snapshot.provider==='agentkey'?await agentKeyWechatEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind!=="wechat_work",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as WechatIdentity;
     if(account&&input.supplement)throw new UnsupportedReplacement("Accounts require received stable identities");
     const identity:WechatIdentity={...received};
@@ -96,14 +78,16 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
     if(previous?.key===commandKey&&stableJson(previous.intent)!==stableJson(intent))throw new StaleOperationError("Import key reused with different input");
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
     if(!source){[source]=await tx`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled,next_fetch_at) VALUES (${sourceId},${String(parsed.data.title).slice(0,200)},'external',${tx.json({platform:"wechat"})},'isolated',false,false,true,NULL) RETURNING *`;}
-    if(!account&&!source!.enabled)throw new UnsupportedReplacement("Author source is disabled; material import is paused");
+    if(!account&&!source!.enabled&&!(snapshot.provider==="agentkey"&&snapshot.input.mode==="collection"&&snapshot.input.forceSourceId===sourceId))throw new UnsupportedReplacement("Author source is disabled; material import is paused");
     for(const [idKind,idValue] of ids)await bindSourceAccount(tx,{platform:"wechat",idKind,idValue,sourceId,evidence:{kind:"result",reference:String(resultId)}});
     let articleId:string|null=null;
     if(!account){
       const body=record.articleContent??record.content,publishTime=record.publishDate??record.publishTime??record.publicTime;
       const discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt),publishedAt=published(publishTime);
-      const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
-      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:address!.url,title:String(parsed.data.title).slice(0,200),author:typeof record.authorName==="string"?record.authorName:typeof record.author==="string"?record.author:null,bodyHtml:typeof body==="string"?sanitizeBody(body,address!.url):null,bodyText:typeof body==="string"?stripTags(sanitizeBody(body,address!.url)):null,bodyStatus:body?"ok":"pending",excerpt:typeof record.articleSummary==="string"?record.articleSummary:typeof record.summary==="string"?record.summary:null,publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:publishTime??null,supplement:input.supplement??null}},tx);
+      const sourceCollection=snapshot.provider==='agentkey'&&snapshot.input.mode==='collection'&&snapshot.input.source?.id===sourceId;
+      const backfill=sourceCollection&&!snapshot.input.source.cursor?.lastCheckedAt?'first-import':decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
+      const confirmation=snapshot.provider==='agentkey'&&parsed.data.aliasConfirmed===true&&parsed.data.requestedUrl!==address!.url&&typeof parsed.data.requestedUrl==='string'&&!wechatArticleUrl(parsed.data.requestedUrl)?.bizInfo?{platform:'wechat' as const,requestedUrl:parsed.data.requestedUrl,responseUrl:parsed.data.requestedUrl,longUrl:address!.url,bizInfo:identity.bizInfo!,mid:String(record.mid),idx:String(record.idx),sourceId,evidence:{kind:'result' as const,reference:String(resultId)}}:undefined;
+      const material=await upsertMaterial({confirmedIdentity:confirmation,bodyUpdate:origin?"fill-missing":undefined,sourceId,url:address!.url,title:String(parsed.data.title).slice(0,200),author:typeof record.authorName==="string"?record.authorName:typeof record.author==="string"?record.author:null,bodyHtml:typeof body==="string"?sanitizeBody(body,address!.url):null,bodyText:typeof body==="string"?stripTags(sanitizeBody(body,address!.url)):null,bodyStatus:body?"ok":sourceCollection?"none":"pending",excerpt:typeof record.articleSummary==="string"?record.articleSummary:typeof record.summary==="string"?record.summary:null,publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:publishTime??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({wechatImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
@@ -111,4 +95,29 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
     return {resultId,sourceId,articleId};
   };
   return db?execute(db):sql.begin(execute);
+}
+
+async function redfoxEvidence(tx:Tx,snapshot:any){
+    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    const op=WechatOperationId.safeParse(executionInput.operationId);
+    if(snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||!op.success||snapshot.receipt_model!==op.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.operationId!==op.data||snapshot.data.platform!=="wechat")throw new UnsupportedReplacement("Not a confirmed WeChat query result");
+    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"wechat",op.data);
+    const shape=wechatOperations[op.data].shape;
+    let payload:unknown=snapshot.data.record;
+    if(shape==="accounts"||shape==="works")payload={list:[payload]};
+    else if(["work_rank","account_rank","headline_rank","growth_rank"].includes(shape)){
+      if(shape==="growth_rank"&&snapshot.kind==="wechat_work"){
+        const parentKey=String(snapshot.item_key).replace(/:(maxWork|minWork)$/,"");
+        const [parent]=await tx`SELECT data FROM operation_results WHERE run_id=${snapshot.run_id} AND receipt_id=${snapshot.receipt_id} AND ((${snapshot.operation_key}='redfox.sync.query' AND step_version=${snapshot.step_version}) OR (${snapshot.operation_key}='redfox.platform.collection' AND provenance->>'sourcePageResultId'=${String(snapshot.provenance?.sourcePageResultId??'')})) AND item_key=${parentKey} AND kind='wechat_account_rank'`;
+        if(!parent)throw new UnsupportedReplacement("Growth work lacks its received account evidence");
+        const role=String(snapshot.item_key).endsWith(":maxWork")?"maxWork":"minWork";
+        payload=[{...parent.data.record,[role]:payload}];
+      }else payload=[payload];
+    }
+    const parsed=parseWechat(op.data,payload,executionInput.parameters).find(r=>r.kind===snapshot.kind&&(shape!=="growth_rank"||snapshot.kind!=="wechat_work"||r.itemKey.endsWith(String(snapshot.item_key).endsWith(":maxWork")?":maxWork":":minWork")));
+    if(!parsed)throw new UnsupportedReplacement("This result cannot be imported as an account or work");
+    const accountOrigin=executionInput.origin?.kind==="account";
+    if(accountOrigin)applyAccountDetailOrigin(op.data,executionInput.parameters,parsed!,executionInput.origin);
+    const origin=accountOrigin?undefined:applyWorkDetailOrigin(op.data,executionInput.parameters,parsed!,executionInput.origin);
+    return {parsed,origin,sourceDiscoveredAt};
 }

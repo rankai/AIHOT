@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { importSelectedWorks, pageWorkCandidates, selectableWorkResult, workResultTitle } from "../app/features/admin/work-result-selection-data.ts";
-import { weiboImportFields } from "../app/features/admin/weibo-result-data.ts";
+import { weiboImportFields, weiboReceivedRows, weiboTextNote } from "../app/features/admin/weibo-result-data.ts";
+import { operationLabel } from "../app/features/admin/operation-types.ts";
 import type { OperationResult } from "../app/features/admin/operation-types.ts";
 export const work = (id: number, kind = "weibo_work", data: Record<string, unknown> = {}): OperationResult => ({ id, kind, data: { platform: "weibo", opusId: "900719925474099312345", uid: "123", opusUrl: "https://weibo.com/123/received", ...data }, receiptId: 1, sourceId: null, articleId: null, fileKey: null, file: null, imported: false });
 const nativeWorks = [
@@ -69,4 +70,36 @@ test("navigation/unmount stops later commands while allowing the in-flight comma
   assert.deepEqual(calls, [1]); assert.deepEqual(outcome, { succeeded: [1], remaining: [2], failedId: null, interrupted: true });
   const before = await importSelectedWorks({ results: [work(1)], selectedIds: [1], reason: "reason", isCurrent: () => false, submit: async () => { throw new Error("must not run"); } });
   assert.deepEqual(before.succeeded, []); assert.equal(before.interrupted, true);
+});
+
+const agentKeyWeibo = { provider: "agentkey", platform: "weibo", operationId: "TXQPVGJG", tool: "TikHub/fetch_search_all_api_v1_weibo_app_fetch_search_all_get", uid: "123", opusId: "900719925474099312345", opusUrl: "https://weibo.com/123/900719925474099312345", role: "status", urlSource: "derived-canonical-permalink" };
+test("AgentKey Weibo uses exact received identity and canonical numeric URL, without trusting old importable/missing hints", () => {
+  const eligible = { ...agentKeyWeibo, importable: false, missing: ["old hint"] };
+  assert.equal(weiboImportFields("weibo_work", eligible).canImport, true);
+  assert.equal(selectableWorkResult(work(1, "weibo_work", eligible)), true);
+  for (const patch of [{ uid: null }, { uid: "requested-user" }, { opusId: 42 }, { opusId: "mBlogId" }, { opusUrl: "https://weibo.com/123/mBlogId" }, { opusUrl: "sinaweibo://detail?id=42" }, { role: "outer-status-unparsed-retweet" }, { tool: "other" }, { platform: "other" }, { operationId: "weibo.comments" }]) {
+    const data = { ...agentKeyWeibo, ...patch, importable: true };
+    assert.equal(weiboImportFields("weibo_work", data).canImport, false, JSON.stringify(patch));
+    assert.equal(selectableWorkResult(work(1, "weibo_work", data)), false, JSON.stringify(patch));
+    assert.equal(weiboImportFields("weibo_work", data).allowSupplement, false);
+  }
+  const profile = { provider: "agentkey", platform: "weibo", operationId: "API_1789098515117", tool: "TikHub/fetch_user_info_api_v1_weibo_app_fetch_user_info_get", uid: "123", importable: false };
+  assert.equal(weiboImportFields("weibo_account", profile).canImport, true);
+  assert.equal(weiboImportFields("weibo_account", { ...profile, uid: null, importable: true }).canImport, false);
+  for (const kind of ["social_comment", "social_followee", "hotspot_research", "search_suggestion"]) assert.equal(weiboImportFields(kind, agentKeyWeibo).canImport, false);
+  assert.equal(weiboImportFields("weibo_work", { opusId: "42" }).allowSupplement, true);
+});
+test("Weibo count zero and received text scope stay explicit without inventing missing profile fields or complete body", () => {
+  const rows = weiboReceivedRows({ record: { description: "收到简介", followers_count: 0, friends_count: 0, attitudes_count: 0, verified: false, privateField: "not displayed" } });
+  assert(rows.some(([label, value]) => label.includes("followers_count") && value === "0"));
+  assert(rows.some(([label, value]) => label.includes("verified") && value.includes("false")));
+  assert(!rows.some(([label]) => label.includes("statuses_count") || label.includes("privateField")));
+  assert.match(weiboTextNote({ isLongText: true, textScope: "received-excerpt" }), /片段.*待补/);
+  assert.match(weiboTextNote({}), /未证实完整正文/);
+  assert.match(weiboTextNote({ isLongText: false }), /非长微博/);
+});
+
+test("all eight successful AgentKey Weibo operation keys have reader labels without exposing unverified followers", () => {
+  for (const key of ["search", "account_posts", "detail", "account_profile", "comments", "following", "trending", "related_search"]) assert.match(operationLabel[`agentkey.weibo.${key}`]!, /AgentKey 微博/);
+  assert.equal(operationLabel["agentkey.weibo.followers"], undefined);
 });

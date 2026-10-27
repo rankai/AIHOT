@@ -2,7 +2,8 @@ import { Client, StreamableHTTPClientTransport, type FetchLike } from "@modelcon
 import { ProviderRejectedError, type CallOutcome } from "../receipts.ts";
 import { AGENTKEY_MAX_RESPONSE_BYTES, AGENTKEY_TIMEOUT_MS, agentKeyConfig } from "./config.ts";
 import { agentKeyOutcome, explicitAgentKeyError, object, parseLosslessJson, redactEvidence, wireMessage, type AgentKeyResponse, type WireEvidence } from "./response.ts";
-import { douyinSearchInput, douyinSearchRoute, type DouyinSearchInput } from "./douyin-contract.ts";
+import { douyinSearchRoute } from "./douyin-contract.ts";
+import { agentKeyRouteInput, type AgentKeyRoute } from "./routes.ts";
 
 export interface AgentKeyTransportOptions { env?: NodeJS.ProcessEnv; fetch?: FetchLike }
 
@@ -11,8 +12,8 @@ export function agentKeyTransport(options: AgentKeyTransportOptions = {}) {
   const { key, url } = agentKeyConfig(options.env);
   return {
     endpoint: url.href,
-    async execute(input: DouyinSearchInput): Promise<CallOutcome> {
-      const params = douyinSearchInput.parse(input);
+    async execute(input: unknown, route: AgentKeyRoute = douyinSearchRoute): Promise<CallOutcome> {
+      const params = agentKeyRouteInput(route,input);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), AGENTKEY_TIMEOUT_MS);
       let toolRequestId: unknown;
@@ -36,7 +37,7 @@ export function agentKeyTransport(options: AgentKeyTransportOptions = {}) {
             toolRequestId = request.id;
           }
         }
-        const response = await (options.fetch ?? fetch)(input, { ...init, redirect: "error",
+        const response = await (options.fetch ?? fetch)(input, { ...init, redirect: "manual",
           signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
         const wire: WireEvidence = { status: response.status, contentType: response.headers.get("content-type") ?? "",
           body: "", complete: !response.body, requestId: response.headers.get("x-request-id") ?? undefined,
@@ -67,13 +68,13 @@ export function agentKeyTransport(options: AgentKeyTransportOptions = {}) {
         return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
       };
       const transport = new StreamableHTTPClientTransport(url, { fetch: boundedFetch,
-        requestInit: { headers: { Authorization: `Bearer ${key}` }, redirect: "error" },
+        requestInit: { headers: { Authorization: `Bearer ${key}` }, redirect: "manual" },
         reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 0, maxReconnectionDelay: 0, reconnectionDelayGrowFactor: 1 },
         onInsufficientScope: "throw", maxStepUpRetries: 0 });
       const client = new Client({ name: "aihot-agentkey", version: "1" }, { capabilities: {}, versionNegotiation: { mode: "legacy" } });
       try {
         await client.connect(transport, { timeout: AGENTKEY_TIMEOUT_MS, signal: controller.signal });
-        const result = await client.callTool({ name: "execute_tool", arguments: { name: douyinSearchRoute.tool, params } },
+        const result = await client.callTool({ name: "execute_tool", arguments: { name: route.tool, params } },
           { timeout: AGENTKEY_TIMEOUT_MS, signal: controller.signal });
         // The SDK authorizes protocol success; captured JSON supplies unrounded integer tokens.
         const raw = wireMessage(toolWire, toolRequestId);
@@ -85,7 +86,8 @@ export function agentKeyTransport(options: AgentKeyTransportOptions = {}) {
       } catch (error) {
         if (error instanceof ProviderRejectedError) throw error;
         if (deterministicRejection) throw deterministicRejection;
-        const wire = toolWire ?? lastWire;
+        // After execute_tool is sent, auxiliary GET/handshake evidence cannot classify the tool call.
+        const wire = sentTool ? toolWire : lastWire;
         const message = wireMessage(wire, sentTool ? toolRequestId : lastRequestId);
         if (message && object(message.error)) {
           const outcome = agentKeyOutcome({ structuredContent: object(message.error)?.data ?? message.error, error: message.error }, wire, key);

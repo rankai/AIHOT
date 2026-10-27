@@ -80,5 +80,5 @@ export function imageUploadReferenceLink(result: Pick<OperationResult, "id" | "k
   if (!options || result.kind !== "media_upload" || result.data.operationId !== "6L178PZD" || !Number.isSafeInteger(result.id) || result.id <= 0 || result.file?.key !== result.fileKey) return null;
   const asset = operationFileAsset(result.file);
   if (!asset || referenceIssue(asset, options)) return null;
-  return `/admin/redfox?${new URLSearchParams({ view: "images", imageModel: "gptImage25", reference: asset.key, referenceUploadResult: String(result.id) })}`;
+  return `/admin/data-tools?${new URLSearchParams({ view: "images", imageModel: "gptImage25", reference: asset.key, referenceUploadResult: String(result.id) })}`;
 }

@@ -38,7 +38,7 @@ export function videoQueryBody(taskId: string) { if (!taskId.trim() || taskId.le
 export function videoUploadReferenceLink(result: Pick<OperationResult, "id" | "kind" | "data" | "file" | "fileKey">, options: ImageOptions | null) {
   // Both creation paths require exactly the same qualified local image upload.
   if (!imageUploadReferenceLink(result, options)) return null;
-  return `/admin/redfox?${new URLSearchParams({ view: "videos", reference: result.fileKey!, referenceUploadResult: String(result.id) })}`;
+  return `/admin/data-tools?${new URLSearchParams({ view: "videos", reference: result.fileKey!, referenceUploadResult: String(result.id) })}`;
 }
 export const videoProviderStatuses: Record<string, string> = { processing: "生成中", completed: "供应商生成完成", failed: "生成失败" };
 export function videoFailureRows(data: Record<string, unknown>): Array<[string, string]> { return data.status === "failed" || typeof data.failReason === "string" && !!data.failReason.trim() ? [["上游失败原因", Object.hasOwn(data, "failReason") ? researchFactText(data.failReason) : "未提供"]] : []; }

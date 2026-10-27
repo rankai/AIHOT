@@ -55,7 +55,7 @@ test("all 17 fixed operations use their documented method and parameter location
 });
 test("GET catalog stays free; schemas reject account ambiguity, wrong types, offset steps, sort namespaces and calendar errors",async()=>{
   const {buildApp}=await import("../apps/api/src/app.ts");const app=await buildApp();config.devAdmin={displayName:"Wechat fixture"};const beforeHits=hits;
-  try{const catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.equal(catalog.statusCode,200);assert.equal(catalog.json().filter((x:{platform:string})=>x.platform==="wechat").length,17);assert.equal(hits,beforeHits);
+  try{const catalog=await app.inject({url:"/api/admin/redfox/operations"});assert.equal(catalog.statusCode,200);assert.equal(catalog.json().filter((x:{id:string})=>x.id in wechatOperations).length,17);assert.equal(hits,beforeHits);
     for(const [id,input] of [["KUQYSQNX",{}],["KUQYSQNX",{account:"a",wxId}],["5Y84NI1D",{keyword:"test",offset:1}],["DNVPQZEZ",{keyword:"test",sortType:"2"}],["FVQ8D4W5",{keyword:"test",sortType:"_2"}],["IE0887SO",{keyword:"test",pageNum:"1",pageSize:20}],["API_1789637464311",{page:6,rank_date:"2026-10-19 00:00:00"}],["API_1789637464311",{page:1,rank_date:"2026-10-20 00:00:00"}],["API_1789637464311",{}],["XNV30XZ3",{account:"test",publishTimeStart:"2026-03-31"}],["JBGBKQ4B",{rankType:"weeks",rankDate:"2026-10-19",category:"科技数码"}]] as [WechatOperation,unknown][]){assert.equal(wechatOperations[id].schema.safeParse(input).success,false,id);}
   }finally{config.devAdmin=null;await app.close();}
 });

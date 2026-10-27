@@ -27,3 +27,11 @@ test("article link hints reject credentialed or wrong-host URLs without replacin
   for (const value of ["https://user:secret@mp.weixin.qq.com/s/a", "https://mp.weixin.qq.com.evil.test/s/a", "javascript:alert(1)", "https://mp.weixin.qq.com:8443/s/a"]) assert.equal(wechatArticleLink(value), null);
   assert.equal(wechatArticleLink("https://mp.weixin.qq.com/s/article"), "https://mp.weixin.qq.com/s/article");
 });
+test("AgentKey article imports require received URL and identity rather than manual supplement", () => {
+  const data = { provider: "agentkey", identity: {}, url: "https://mp.weixin.qq.com/s/short" };
+  assert.equal(wechatImportFields("wechat_work", data).canImport, false);
+  assert.equal(wechatImportFields("wechat_work", { ...data, identity: { wxId: "gh_verified@app" } }).canImport, true);
+  assert.equal(wechatImportFields("wechat_work", { ...data, url: "https://mp.weixin.qq.com/s?__biz=verified&mid=123&idx=1" }).canImport, true);
+  assert.equal(wechatImportFields("wechat_work", { ...data, url: null, identity: { wxId: "gh_verified" } }).canImport, false);
+  for (const kind of ["wechat_comment", "wechat_reply", "wechat_stats"]) assert.equal(wechatImportFields(kind, { ...data, identity: { wxId: "gh_verified" } }).canImport, false);
+});

@@ -37,10 +37,11 @@ export function normalizeUrl(input: string): string | null {
 
 /** Documented Toutiao work permalinks only; no token/profile or short-link inference. */
 export function toutiaoWorkId(raw: unknown): string | null {
-  if (typeof raw !== "string" || !/^https?:\/\/(?:www\.)?toutiao\.com\//i.test(raw.trim()) || raw.includes("#")) return null;
+  if (typeof raw !== "string" || !/^https?:\/\/(?:(?:www\.)?toutiao\.com|m\.toutiao\.com)\//i.test(raw.trim()) || raw.includes("#")) return null;
   try {
     const u = new URL(raw);
     if (u.username || u.password || u.port || u.hash) return null;
+    if (u.hostname === 'm.toutiao.com') return u.protocol === 'https:' ? /^\/article\/([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null : null;
     return /^\/(?:a|group\/|article\/|video\/)([0-9]+)\/?$/.exec(u.pathname)?.[1] ?? null;
   } catch { return null; }
 }
@@ -88,10 +89,10 @@ export function tiktokVideoId(raw: string): string | null {
   } catch { return null; }
 }
 
-/** Documented explore permalinks only; no short-link resolution or other path inference. */
+/** Native explore links and witnessed HTTPS discovery links; never resolves short links. */
 export function xiaohongshuNoteId(raw:string):string|null{
   try{const u=new URL(raw.trim());if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.port||u.hash||u.hostname.replace(/^www\./,"")!=="xiaohongshu.com")return null;
-    return /^\/explore\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]??null;
+    return /^\/explore\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]??(u.protocol==="https:"?/^\/discovery\/item\/([A-Za-z0-9_-]+)\/?$/.exec(u.pathname)?.[1]:null)??null;
   }catch{return null;}
 }
 

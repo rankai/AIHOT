@@ -50,7 +50,7 @@ function XiaohongshuIdentityResult({ result: r }: { result: OperationResult }) {
   const fields = xiaohongshuImportFields(r.kind, r.data, url);
   const record = object(r.data.record);
   const missing = Array.isArray(r.data.missing) ? r.data.missing.filter((item): item is string => typeof item === "string") : [];
-  const body = record.workDesc ?? record.desc;
+  const body = record.workDesc ?? record.description ?? record.desc;
   const time = record.workPublishTime ?? record.publicTime ?? record.createTime ?? record.gmtCreate;
   const upstream = fields.receivedNative?.url ?? safeExternalUrl(fields.receivedUrl);
   const media = [...new Set([record.coverUrl, record.cover, record.accountAvatar, record.accountLink, record.userJumpUrl].map(safeExternalUrl).filter((address): address is string => address !== null))];
@@ -62,21 +62,24 @@ function XiaohongshuIdentityResult({ result: r }: { result: OperationResult }) {
   return <article className="space-y-3 border-b border-line pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center gap-2 text-[14px] font-medium"><span>{text(r.data.title, "小红书查询结果")}</span><Badge>{rank ? "账号研究榜单" : fields.account ? "小红书账号" : "小红书作品"}</Badge>{role && <Badge>{role}</Badge>}</div>
     {rank && <p className="text-[12.5px] text-ink-3">账号榜单只作研究，不作为文章导入；主页与昵称不自动证明稳定作者身份，请显式查询账号详情核实。</p>}
-    <KV items={[["已收到作者 userId", fields.userId ?? "未提供"], ["展示小红书号", text(record.accountId)], ["上游账号名称", text(record.accountName ?? record.accountNickname ?? record.authorNickname ?? record.userName)], ...(fields.work ? [["已收到作品 ID", fields.workId ?? "未提供"], ["原生链接可确认作品 ID", fields.native?.id ?? "未确认"]] as Array<[string, string]> : []), ...(rank ? [["上游排名", text(record.accountRanking)]] as Array<[string, string]> : [])]} />
+    <KV items={[["已收到作者 userId", fields.userId ?? "未提供"], ["展示小红书号", text(record.accountId ?? record.red_id)], ["上游账号名称", text(record.accountName ?? record.accountNickname ?? record.authorNickname ?? record.userName ?? record.authorName ?? record.name)], ...(fields.work ? [["已收到作品 ID", fields.workId ?? "未提供"], ["原生链接可确认作品 ID", fields.native?.id ?? "未确认"]] as Array<[string, string]> : []), ...(rank ? [["上游排名", text(record.accountRanking)]] as Array<[string, string]> : [])]} />
+    {fields.agentKey && fields.account && <KV items={Object.entries(object(record.stats)).flatMap(([key, value]): Array<[string,string]> => key === "note_num_stat" ? Object.entries(object(value)).map(([name,count]) => [({liked:"点赞过的笔记数",collected:"收藏过的笔记数",posted:"发布笔记数"} as Record<string,string>)[name] ?? `note_num_stat.${name}`,text(count)]) : [[({fans:"粉丝数",follows:"关注数",liked:"获赞数",collected:"被收藏数"} as Record<string,string>)[key] ?? key, text(value)]])} />}
     {fields.work && !fields.workId && fields.receivedNative && <p className="text-[12px] text-ink-3">接口未单列已确认作品 ID；服务端可据原生链接核实笔记 ID。AI photoId 不直接作为原生身份。</p>}
     {!rank && <p className="text-[12px] text-ink-4">userId 与作品 ID 保留完整字符串；展示号、昵称、AI authorId/photoId 不用于自行推断身份。</p>}
     {typeof body === "string" && <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-ink-2">{body}</p>}
+    {fields.agentKey && fields.work && typeof body === "string" && <p className="text-[12px] text-ink-4">以上为笔记自带文字说明，不是视频转写或字幕。</p>}
     {(typeof time === "string" || typeof time === "number") && <p className="text-[12px] text-ink-3">上游原始时间：{String(time)}</p>}
+    {fields.agentKey && Object.keys(object(record.rawTimes)).length > 0 && <KV items={Object.entries(object(record.rawTimes)).map(([key,value]) => [`原始 ${key}（单位未确认）`,text(value)])} />}
     {fields.work && <p className="text-[12px] text-ink-4">未知时区或缺少可信时间时，不把发现时间当作发表时间或今天发生；新增材料按既有历史/回填语义处理。</p>}
     {upstream && <a className="inline-block break-all text-[13px] text-accent" href={upstream} target="_blank" rel="noreferrer">{fields.receivedNative ? "原生笔记原文" : "收到的上游地址（不作为入库原文）"} ↗</a>}
     {media.length > 0 && <div className="flex flex-wrap gap-3 text-[12px]">{media.map((address, index) => <a key={address} className="text-accent" href={address} target="_blank" rel="noreferrer">上游媒体或主页 {index + 1} ↗</a>)}</div>}
     {missing.length > 0 && <div><p className="mb-1 text-[12px] text-ink-4">上游缺项记录（导入仍由服务端据原文复核）</p><ul className="space-y-1 rounded-control bg-amber/10 p-3 text-[12.5px] text-amber">{missing.map(item => <li key={item}>{item}</li>)}</ul></div>}
     {fields.blockedReason && <p className="rounded-control bg-amber/10 p-3 text-[13px] text-amber">{fields.blockedReason}</p>}
-    <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>{fields.account ? "查看已绑定信源" : "查看作者绑定信源"}</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!imported && !rank && <Button size="sm" disabled={!fields.canImport || !!pending} onClick={() => setOpen(true)}>{fields.account ? "绑定账号信源" : "本地导入作品"}</Button>}</div>
+    <div className="flex flex-wrap gap-3 text-[13px]">{r.sourceId && <Link className="text-accent" to={`/admin/sources/${encodeURIComponent(r.sourceId)}`}>{fields.account ? "查看已绑定信源" : "查看作者绑定信源"}</Link>}{r.articleId && <Link className="text-accent" to={`/admin/content/${encodeURIComponent(r.articleId)}`}>{r.articleTitle || "查看已关联文章"}（保留文章原归属）</Link>}{!imported && !rank && !fields.recommendation && <Button size="sm" disabled={!fields.canImport || !!pending} onClick={() => setOpen(true)}>{fields.account ? "绑定账号信源" : "本地导入作品"}</Button>}</div>
     {!imported && fields.account && !fields.canImport && <p className="text-[12px] text-amber">账号必须在详情中收到稳定 userId 才可绑定，不能人工补账号身份；请用展示小红书号显式查询账号详情。</p>}
-    <DetailQueryActions result={r} />
+    {fields.agentKey ? !fields.recommendation && <p className="text-[12px] text-ink-3">如需单独查询，请到<Link className="text-accent" to="/admin/data-tools?view=platforms">平台查询</Link>显式选择 AgentKey 的统一笔记详情或账号资料并填写已收 ID。此操作会创建独立查询；采集订阅可显式开启同轮有界详情。</p> : <DetailQueryActions result={r} />}
     <Json value={{ resultId: r.id, receiptId: r.receiptId, operationId: r.data.operationId, workId: r.data.workId, identity: r.data.identity, role: r.data.role, record }} label="原始字段与溯源诊断" />
-    <ReasonDialog open={open} title={fields.account ? "绑定小红书账号身份" : "本地导入小红书作品"} description={fields.account ? "仅使用已收到的稳定 userId，按绑定复用，否则新建隔离 external 信源并关闭全文权限。可显式选择已核实为同一账号的 external 信源，不按昵称匹配。此命令不请求供应商。" : "作品按真实作者身份归属，不指定任意目标信源。收到的身份、作品 ID 和地址不可替换；只补缺失项并记录证据。人工作者身份不能继承已有非隔离权限，文章去重后保留原归属。此命令不请求供应商。"} busy={!!pending} onClose={close} onSubmit={async reason => {
+    <ReasonDialog open={open} title={fields.account ? "绑定小红书账号身份" : "本地导入小红书作品"} description={fields.account ? "仅使用已收到的稳定 userId，按绑定复用，否则新建隔离 external 信源并关闭全文权限。可显式选择已核实为同一账号的 external 信源，不按昵称匹配。此命令不请求供应商。" : fields.agentKey ? "仅使用原回执中已核实的作者、笔记 ID 和原生链接，不接受手工补证或替换。新作者先隔离并关闭全文权限，重复文章保留原归属。此命令不请求供应商。" : "作品按真实作者身份归属，不指定任意目标信源。收到的身份、作品 ID 和地址不可替换；只补缺失项并记录证据。人工作者身份不能继承已有非隔离权限，文章去重后保留原归属。此命令不请求供应商。"} busy={!!pending} onClose={close} onSubmit={async reason => {
       setError(null);
       if (!fields.canImport) { setError(fields.blockedReason ?? "此结果暂不能导入，请显式查询并核实"); return false; }
       if (fields.account && target === "existing" && !candidateSelectionValid(sourceId, candidates.state, "external", "external", list?.rows)) { setError(candidates.state !== "idle" ? "请等待候选搜索完成后重新选择信源" : "请从当前候选列表重新选择已核实为同一账号的信源"); return false; }

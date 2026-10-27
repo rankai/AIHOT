@@ -17,6 +17,6 @@ export interface SourceActiveOperation { id: number; status: string; step: strin
 
 export function sourceHistoryFacts(row: SourceHistoryRun) {
   return row.kind === "operation"
-    ? { timeLabel: "任务创建", time: row.occurred_at, href: `/admin/operations/${row.id}`, provider: row.provider || "未记录", quantityLabel: "该源关联材料", quantity: String(row.related_material_count), elapsed: null }
+    ? { timeLabel: "执行记录创建", time: row.occurred_at, href: `/admin/operations/${row.id}`, provider: row.provider || "未记录", quantityLabel: "该源关联材料", quantity: String(row.related_material_count), elapsed: null }
     : { timeLabel: "抓取开始", time: row.occurred_at, href: null, provider: "未记录", quantityLabel: "发现 / 新增", quantity: `${row.found_count ?? "—"} / ${row.new_count ?? "—"}`, elapsed: duration(row.started_at, row.finished_at) };
 }

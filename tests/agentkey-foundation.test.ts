@@ -138,7 +138,7 @@ test("text fallback and SSE preserve integer literals; an empty successful page 
     try {
       const result = await executeDouyinSearch(await runFor(), { env: envFor(server.url) });
       assert.equal(result.candidates[0].data.aweme_id, big);
-      assert.equal(result.candidates[0].data.author.uid, big);
+      assert.deepEqual(result.candidates[0].data.author, {uid:big,sec_uid:"test-sec"});
     } finally { await server.close(); }
   }
   const server = await mcpStub(() => ({ result: { content: [], structuredContent: envelope() } }));
@@ -273,11 +273,12 @@ test("a complete unrecognized payload stays received and reusable; incomplete pr
   }
 });
 
-test("deterministic byte limits and redirects fail receipts without entering unknown replay", async () => {
+test("deterministic byte limits and redirects fail receipts without entering unknown replay", async (t) => {
   for (const spec of [
     { result: { content: [{ type: "text", text: "x".repeat(AGENTKEY_MAX_RESPONSE_BYTES + 1) }] } },
     { status: 307, redirect: "http://192.0.2.1/never-follow", raw: "{}" },
   ]) {
+    await t.test(spec.status===307?"redirect is a complete rejection":"oversize is a deterministic rejection",async()=>{
     const server = await mcpStub(() => spec);
     try {
       const execution = await runFor();
@@ -286,9 +287,10 @@ test("deterministic byte limits and redirects fail receipts without entering unk
       assert.equal(run.status, "needs_review");
       const [receipt] = await sql`SELECT status,error FROM receipts WHERE id=${run.current_receipt_id}`;
       assert.equal(receipt.status, "failed");
-      assert.match(receipt.error, /byte limit|HTTP/);
+      assert.match(receipt.error, spec.status===307?/HTTP/:/byte limit/);
       assert.equal(server.requests.filter((r) => r.body.method === "tools/call").length, 1);
     } finally { await server.close(); }
+    });
   }
 });
 
@@ -471,7 +473,12 @@ test("recovery uses exact profiles, permits one timed unknown release and queues
       await sql`UPDATE operation_runs SET status='stopped' WHERE id=${bad.runId}`;
     }
     const local = await runFor();
-    await paidRequest({ ...req, identity: tag() }, async () => ({ response: { envelope: envelope() } }), receiptOptions(local));
+    const localParams=douyinSearchInput.parse({keyword:"测试"}),localEndpoint="http://127.0.0.1:10000/v1/mcp";
+    await paidRequest({...req,subject:`operation:${local.runId}`,
+      identity:{runId:local.runId,stepVersion:local.stepVersion,endpoint:localEndpoint,contractVersion:1,
+        tool:douyinSearchRoute.tool,params:localParams},
+      requestSummary:{tool:douyinSearchRoute.tool,endpoint:localEndpoint,params:localParams},
+    },async () => ({ response: { envelope: envelope() } }), receiptOptions(local));
     process.env.AGENTKEY_CALLS_ENABLED = "false";
     await recoverFrom(local.runId);
     const queued = await runRow(local.runId); assert.ok(queued.job_id);
@@ -552,4 +559,162 @@ test("dispatcher retries the same paid receipt after an unknown request is relea
     assert.equal(calls, 2);
     assert.equal((await sql`SELECT count(*)::int AS n FROM receipts WHERE subject=${`operation:${run.runId}`}`)[0].n, 1);
   }); } finally { await server.close(); }
+});
+
+
+test("APP account query uses the fixed tool and persists linked importable receipt evidence",async()=>{
+  const {douyinAccountPostsRoute}=await import("@aihot/backend/providers/agentkey/douyin-contract");
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");
+  const server=await mcpStub(()=>({result:{content:[],structuredContent:{provider:"TikHub",credits_charged:0.2,data:{code:200,data:{status_code:0,uid:"7000123",sec_uid:"synthetic-account",aweme_list:[{aweme_id:"7000123456789",desc:"synthetic description",create_time:1729400000,author:{uid:"7000123",sec_uid:"synthetic-account",nickname:"Synthetic"}}],has_more:0}}}}}));
+  try{
+    const run=await sql.begin(tx=>createRun(tx,{actor,commandKey:tag(),provider:"agentkey",operationKey:douyinAccountPostsRoute.operationKey,stepKey:douyinAccountPostsRoute.stepKey,contractVersion:1,input:{mode:"query",operationId:"QEQLCKD6",parameters:{sec_user_id:"synthetic-account"}}}));
+    await executeDouyinSearch({runId:run.id,stepVersion:run.step_version,generation:run.generation},{env:envFor(server.url)});
+    const [result]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_work'`;
+    assert.ok(result.data.querySummaryId);
+    assert.equal(server.requests.find(r=>r.body.method==="tools/call")?.body.params.arguments.name,douyinAccountPostsRoute.tool);
+    const imported=await importDouyinResult(result.id,{reason:"Synthetic APP query test"},actor,tag());
+    assert.ok(imported?.articleId);
+    const [source]=await sql`SELECT participation_mode,site_fulltext FROM sources WHERE id=${imported!.sourceId}`;
+    assert.equal(source.participation_mode,"isolated");assert.equal(source.site_fulltext,false);
+  }finally{await server.close();}
+});
+
+test("standalone detail query and unavailable response use the exact contract with no fallback purchase",async()=>{
+  const {createAgentKeyQuery}=await import("@aihot/backend/providers/agentkey/queries");
+  const {douyinDetailRoute}=await import("@aihot/backend/providers/agentkey/douyin-contract");
+  for(const available of [true,false]){
+    const server=await mcpStub(()=>({result:{content:[],structuredContent:{provider:"TikHub",data:{code:200,data:available?{aweme_detail:{aweme_id:"76543210001",desc:"synthetic detail",author:{uid:"7654321",sec_uid:"synthetic-detail"}}}:{filter_list:[{reason:8}]}}}}}));
+    try{
+      const run=await createAgentKeyQuery({provider:"agentkey",operationId:"FK67XDVQ",parameters:{aweme_id:"76543210001"}},actor,tag());
+      const execution={runId:run.id,stepVersion:run.step_version,generation:run.generation};
+      if(available)await executeDouyinSearch(execution,{env:envFor(server.url)});
+      else await assert.rejects(executeDouyinSearch(execution,{env:envFor(server.url)}),AgentKeyPayloadError);
+      const calls=server.requests.filter(r=>r.body.method==="tools/call");assert.equal(calls.length,1);assert.equal(calls[0]!.body.params.arguments.name,douyinDetailRoute.tool);
+      const [state]=await sql`SELECT status FROM operation_runs WHERE id=${run.id}`;assert.equal(state.status,available?"completed":"needs_review");
+      const [receipt]=await sql`SELECT status FROM receipts WHERE subject=${`operation:${run.id}`}`;assert.equal(receipt.status,available?"completed":"received");
+    }finally{await server.close();}
+  }
+  for(const parameters of [{videoId:"76543210001"},{aweme_id:76543210001},{aweme_id:"76543210001",fallback:true}])await assert.rejects(createAgentKeyQuery({provider:"agentkey",operationId:"FK67XDVQ",parameters},actor,tag()));
+});
+
+test("research queries freeze parameters, retain receipts across interruption and bind accounts only explicitly",async()=>{
+  const {createAgentKeyQuery}=await import("@aihot/backend/providers/agentkey/queries");
+  const {agentKeyOperation}=await import("@aihot/backend/providers/agentkey/douyin-contract");
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");
+  const suffix=String(Date.now()),uid=`96${suffix}`,sec=`synthetic-research-${suffix}`;
+  for(const operationId of ["douyin.suggest","P5CHB3BZ"]){
+    const account=operationId==="P5CHB3BZ",body=account?{status_code:0,user_list:[{dynamic_patch:{raw_data:JSON.stringify({user_info:{uid,sec_uid:sec,nickname:"Synthetic research",follower_count:12},room_id:9007199254740992}),schema:"https://example.invalid/never-fetch"}}],has_more:1,cursor:20}:{status_code:0,sug_list:[{content:"synthetic suggestion"}]};
+    const server=await mcpStub(()=>({result:{content:[],structuredContent:{provider:"TikHub",credits_charged:0.2,data:{code:200,data:body}}}}));
+    try{
+      const run=await createAgentKeyQuery({provider:"agentkey",operationId,parameters:{keyword:" synthetic "}},actor,tag());
+      const route=agentKeyOperation(operationId)!.route,params=run.input.parameters as Record<string,unknown>,transport=agentKeyTransport({env:envFor(server.url)});
+      const expected=account?{keyword:"synthetic",cursor:0,douyin_user_fans:"",douyin_user_type:"",search_id:""}:{keyword:"synthetic"};
+      assert.deepEqual(params,expected);
+      const execution={runId:run.id,stepVersion:run.step_version,generation:run.generation};
+      // A completed raw receipt survives process interruption before business consumption.
+      await paidRequest({service:"agentkey.query",purpose:route.operationKey,model:route.tool,subject:`operation:${run.id}`,
+        identity:{runId:run.id,stepVersion:run.step_version,endpoint:transport.endpoint,contractVersion:1,tool:route.tool,params},
+        requestSummary:{tool:route.tool,endpoint:transport.endpoint,params}},()=>transport.execute(params,route),receiptOptions(execution));
+      await executeDouyinSearch(execution,{env:{...envFor(server.url),AGENTKEY_CALLS_ENABLED:"false",COLLECT_ENABLED:"false"}});
+      const calls=server.requests.filter(r=>r.body.method==="tools/call");assert.equal(calls.length,1);assert.equal(calls[0]!.body.params.arguments.name,route.tool);assert.deepEqual(calls[0]!.body.params.arguments.params,expected);
+      const rows=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`;assert.equal(rows.length,2);
+      const summary=rows.find(r=>r.kind==="query_summary")!,result=rows.find(r=>r.kind!=="query_summary")!;
+      assert.equal(summary.data.count,1);assert.equal(summary.data.operationId,operationId);
+      for(const field of ["returnedPage","selectedCount","unprocessedDueToLimit","nextParameters"])assert.equal(Object.hasOwn(summary.data,field),false,`query summary must omit collection field ${field}`);
+      assert.equal(summary.data.stopReason,"single-request");assert.equal(result.data.querySummaryId,summary.id);assert.equal(result.source_id,null);assert.equal(result.article_id,null);
+      assert.equal((await sql`SELECT status FROM operation_runs WHERE id=${run.id}`)[0].status,"completed");
+      assert.equal((await sql`SELECT status FROM receipts WHERE id=${result.receipt_id}`)[0].status,"completed");
+      if(account){
+        assert.equal((await sql`SELECT source_id FROM source_account_bindings WHERE platform='douyin' AND id_kind='uid' AND id_value=${uid}`).length,0);
+        const key=tag(),bound=await importDouyinResult(result.id,{reason:"Explicit synthetic account bind"},actor,key);assert.ok(bound?.sourceId);assert.equal(bound.articleId,null);
+        const [source]=await sql`SELECT kind,participation_mode,site_fulltext,syndicate_fulltext FROM sources WHERE id=${bound.sourceId}`;
+        assert.deepEqual(source,{kind:"external",participation_mode:"isolated",site_fulltext:false,syndicate_fulltext:false});
+        assert.equal((await sql`SELECT id FROM articles WHERE source_id=${bound.sourceId}`).length,0);
+        assert.deepEqual(await importDouyinResult(result.id,{reason:"Repeat synthetic bind"},actor,key),bound);
+        await assert.rejects(importDouyinResult(result.id,{reason:"Changed intent",sourceId:bound.sourceId},actor,key),/key reused/);
+        await assert.rejects(importDouyinResult(result.id,{reason:"No invented account IDs",supplement:{uid:"111",evidence:"synthetic"}},actor,tag()),/received stable IDs/);
+        await sql`UPDATE operation_results SET data=jsonb_set(data,'{identity,uid}','"111"') WHERE id=${result.id}`;
+        await assert.rejects(importDouyinResult(result.id,{reason:"Forged account"},actor,tag()),/differs/);
+      }else{
+        await assert.rejects(importDouyinResult(result.id,{reason:"Suggestion is not an account"},actor,tag()),/importable/);
+        await sql`UPDATE operation_results SET kind='douyin_account' WHERE id=${result.id}`;
+        await assert.rejects(importDouyinResult(result.id,{reason:"Forged suggestion kind"},actor,tag()),/kind/);
+      }
+    }finally{await server.close();}
+  }
+});
+
+test("research queries preserve valid empty summaries and reject malformed account patches without repurchase",async()=>{
+  const {createAgentKeyQuery}=await import("@aihot/backend/providers/agentkey/queries");
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");
+  for(const spec of [
+    {operationId:"douyin.suggest",body:{status_code:0,sug_list:[]},valid:true},
+    {operationId:"P5CHB3BZ",body:{status_code:0,user_list:[]},valid:true},
+    {operationId:"P5CHB3BZ",body:{status_code:0,user_list:[{user_info:{nickname:"No stable ID"}}]},valid:true},
+    {operationId:"P5CHB3BZ",body:{status_code:0,user_list:[{dynamic_patch:{raw_data:"malformed"}}]},valid:false},
+  ]){
+    const server=await mcpStub(()=>({result:{content:[],structuredContent:{provider:"TikHub",data:{code:200,data:spec.body}}}}));
+    try{
+      const run=await createAgentKeyQuery({provider:"agentkey",operationId:spec.operationId,parameters:{keyword:"synthetic"}},actor,tag());
+      const execution={runId:run.id,stepVersion:run.step_version,generation:run.generation};
+      if(spec.valid)await executeDouyinSearch(execution,{env:envFor(server.url)});
+      else{
+        await assert.rejects(executeDouyinSearch(execution,{env:envFor(server.url)}),AgentKeyPayloadError);
+        await sql`UPDATE operation_runs SET status='active' WHERE id=${run.id}`;
+        await assert.rejects(executeDouyinSearch(execution,{env:{...envFor(server.url),AGENTKEY_CALLS_ENABLED:"false"}}),AgentKeyPayloadError);
+      }
+      assert.equal(server.requests.filter(r=>r.body.method==="tools/call").length,1);
+      const [receipt]=await sql`SELECT status FROM receipts WHERE subject=${`operation:${run.id}`}`;assert.equal(receipt.status,spec.valid?"completed":"received");
+      const summaries=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='query_summary'`;
+      if(spec.valid){assert.equal(summaries.length,1);assert.equal(summaries[0]!.data.count,spec.body.user_list?.length??0);
+        const [result]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND kind='douyin_account'`;
+        if(result)await assert.rejects(importDouyinResult(result.id,{reason:"Missing stable account ID"},actor,tag()),/stable/);
+      }else assert.equal(summaries.length,0);
+    }finally{await server.close();}
+  }
+});
+
+test("research query zero budget and unsupported kwargs block before transport",async()=>{
+  const {createAgentKeyQuery}=await import("@aihot/backend/providers/agentkey/queries");
+  const server=await mcpStub(()=>({result:{content:[]}}));
+  try{
+    await sql`UPDATE budgets SET per_minute=0,per_hour=0,per_day=0 WHERE service='agentkey.query'`;
+    for(const operationId of ["douyin.suggest","P5CHB3BZ"]){
+      const run=await createAgentKeyQuery({provider:"agentkey",operationId,parameters:{keyword:"synthetic"}},actor,tag());
+      await assert.rejects(executeDouyinSearch({runId:run.id,stepVersion:run.step_version,generation:run.generation},{env:envFor(server.url)}),BudgetExceededError);
+    }
+    assert.equal(server.requests.length,0);
+    for(const parameters of [{keyword:"x",cursor:1},{keyword:"x",search_id:"not-proven"},{keyword:"x",douyin_user_fans:"1"},{keyword:"x",offset:0}])await assert.rejects(createAgentKeyQuery({provider:"agentkey",operationId:"P5CHB3BZ",parameters},actor,tag()));
+    await assert.rejects(createAgentKeyQuery({provider:"agentkey",operationId:"douyin.suggest",parameters:{keyword:"x",cursor:0}},actor,tag()));
+  }finally{await sql`UPDATE budgets SET per_minute=1000,per_hour=1000,per_day=1000 WHERE service='agentkey.query'`;await server.close();}
+});
+
+test("research account binding serializes competing targets and preserves existing permissions on conflicts",async()=>{
+  const {createAgentKeyQuery}=await import("@aihot/backend/providers/agentkey/queries");
+  const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin");
+  const suffix=String(Date.now()),uid=`97${suffix}`,sec=`synthetic-cas-${suffix}`,targets=[`research-left-${suffix}`,`research-right-${suffix}`];
+  let user={uid,sec_uid:sec,nickname:"Synthetic binding race"};
+  const server=await mcpStub(()=>({result:{content:[],structuredContent:{provider:"TikHub",data:{code:200,data:{status_code:0,user_list:[{user_info:user}]}}}}}));
+  const query=async()=>{
+    const run=await createAgentKeyQuery({provider:"agentkey",operationId:"P5CHB3BZ",parameters:{keyword:"synthetic"}},actor,tag());
+    await executeDouyinSearch({runId:run.id,stepVersion:run.step_version,generation:run.generation},{env:envFor(server.url)});
+    return (await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='douyin_account'`)[0]!;
+  };
+  try{
+    for(const sourceId of targets)await sql`INSERT INTO sources(id,name,kind,config,participation_mode,site_fulltext,syndicate_fulltext,enabled) VALUES(${sourceId},'Synthetic existing source','external',${sql.json({platform:"douyin"})},'isolated',false,false,false)`;
+    const result=await query();
+    const outcomes=await Promise.allSettled(targets.map(sourceId=>importDouyinResult(result.id,{sourceId,reason:"Competing explicit bind"},actor,tag())));
+    assert.equal(outcomes.filter(o=>o.status==="fulfilled").length,1);assert.equal(outcomes.filter(o=>o.status==="rejected").length,1);
+    const [bound]=await sql`SELECT source_id,article_id FROM operation_results WHERE id=${result.id}`;assert.ok(targets.includes(bound.source_id));assert.equal(bound.article_id,null);
+    const bindings=await sql`SELECT DISTINCT source_id FROM source_account_bindings WHERE platform='douyin' AND (id_value=${uid} OR id_value=${sec})`;
+    assert.deepEqual([...bindings],[{source_id:bound.source_id}]);
+    const before=await sql`SELECT id,participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id IN ${sql(targets)} ORDER BY id`;
+    assert.ok(before.every(s=>s.participation_mode==="isolated"&&!s.site_fulltext&&!s.syndicate_fulltext&&!s.enabled));
+    user={...user,sec_uid:`conflicting-${sec}`};
+    const conflict=await query();
+    await assert.rejects(importDouyinResult(conflict.id,{reason:"Conflicting received identity"},actor,tag()),/another identity/);
+    assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${conflict.id}`)[0].source_id,null);
+    assert.deepEqual(await sql`SELECT id,participation_mode,site_fulltext,syndicate_fulltext,enabled FROM sources WHERE id IN ${sql(targets)} ORDER BY id`,before);
+    assert.equal((await sql`SELECT id FROM articles WHERE source_id IN ${sql(targets)}`).length,0);
+  }finally{await server.close();}
 });

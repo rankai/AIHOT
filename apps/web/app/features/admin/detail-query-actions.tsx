@@ -48,7 +48,7 @@ export function DetailQueryActions({ result: r }: { result: OperationResult }) {
       <p className="text-[12px] text-ink-3">点击将创建一次新独立查询，不重开原任务、不推进原采集游标；所选接口可补作品或作者账号详情；结果回来后仍需显式导入或绑定。身份冲突不能用人工依据覆盖，不会自动换库或回退。</p>
       {choice && <Json value={{ sourceResultId: r.id, operationId: choice.operationId, parameters: choice.parameters }} label="冻结查询参数（只读）" />}
       {unsupported && <p className="text-[12px] text-amber">{unsupported}</p>}
-      <Button type="submit" size="sm" tone="primary" disabled={!choice || !!unsupported || !!pending || loading} busy={!!pending}>查询补充详情并查看任务</Button>
+      <Button type="submit" size="sm" tone="primary" disabled={!choice || !!unsupported || !!pending || loading} busy={!!pending}>查询补充详情并查看执行记录</Button>
     </form> : <p className="whitespace-pre-wrap break-words text-[12px] text-ink-3">{current.reason ?? "本结果没有返回可用补全选项；不会自动尝试其他接口。"}</p>)}
     {error && <p role="alert" className="whitespace-pre-wrap break-words text-[13px] text-hot">{error}</p>}
   </section>;

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { FetchLike } from "@modelcontextprotocol/client";
 import { agentKeyConfig, AGENTKEY_MAX_RESPONSE_BYTES } from "@aihot/backend/providers/agentkey/config";
 import { agentKeyTransport } from "@aihot/backend/providers/agentkey/transport";
-import { parseLosslessJson, type AgentKeyResponse } from "@aihot/backend/providers/agentkey/response";
+import { redactEvidence, parseLosslessJson, type AgentKeyResponse } from "@aihot/backend/providers/agentkey/response";
 import { douyinSearchInput, parseDouyinSearch } from "@aihot/backend/providers/agentkey/douyin-search";
 import { ProviderRejectedError } from "@aihot/backend/providers/receipts";
 
@@ -51,7 +51,7 @@ test("real SDK uses Bearer and fixed execute_tool once, retaining unrounded stru
     params: { keyword: "测试", cursor: 0 },
   } });
   assert.ok(stub.calls.every((call) => new Headers(call.init.headers).get("authorization") === `Bearer ${key}`));
-  assert.ok(stub.calls.every((call) => call.init.redirect === "error"));
+  assert.ok(stub.calls.every((call) => call.init.redirect === "manual"));
   const parsed = parseDouyinSearch(outcome.response, { keyword: "测试" });
   assert.equal(parsed.candidates[0].data.aweme_id, big);
   assert.equal(parsed.candidates[0].data.author.uid, big);
@@ -122,4 +122,37 @@ test("malformed and oversized responses fail conservatively without implicit rep
     return true;
   });
   assert.equal(oversized.calls.filter((call) => call.request.method === "tools/call").length, 1);
+});
+
+test("a tool disconnect stays incomplete when an auxiliary GET has complete 405 evidence", async () => {
+  let auxiliaryGets = 0;
+  const stub: FetchLike = async (_url, init) => {
+    const request = JSON.parse(String(init?.body || "{}"));
+    if (init?.method === "GET") {
+      auxiliaryGets++;
+      return new Response(null, { status: 405 });
+    }
+    if (request.method === "initialize") {
+      return Response.json({ jsonrpc: "2.0", id: request.id,
+        result: { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "test-injected-mcp", version: "1" } } });
+    }
+    if (request.method?.startsWith("notifications/")) return new Response(null, { status: 202 });
+    if (request.method === "tools/call") throw new TypeError("synthetic tool socket reset");
+    return new Response(null, { status: 404 });
+  };
+
+  await assert.rejects(agentKeyTransport({ env, fetch: stub }).execute({ keyword: "x" }), (error: unknown) => {
+    assert.ok(!(error instanceof ProviderRejectedError), "auxiliary GET 405 must not become a complete tool rejection");
+    assert.match(String(error), /transport\/protocol outcome incomplete \(execute sent\)/);
+    return true;
+  });
+  assert.ok(auxiliaryGets > 0, "the SDK must have observed its auxiliary GET channel");
+});
+
+test("documented comment_token and yt_raw_token redact object and MCP JSON text without hiding pagination tokens",()=>{
+  const payload={comment_token:"fake-comment-secret",yt_raw_token:"fake-youtube-secret",page_token:"opaque+/=",next_token:"continuation",comment_token_count:4};
+  const object=redactEvidence(payload,key) as Record<string,unknown>;
+  assert.equal(object.comment_token,"[redacted]");assert.equal(object.yt_raw_token,"[redacted]");assert.equal(object.page_token,payload.page_token);assert.equal(object.comment_token_count,4);
+  const text=redactEvidence({content:[{type:"text",text:JSON.stringify(payload)}]},key) as {content:{text:string}[]};
+  const decoded=JSON.parse(text.content[0]!.text);assert.equal(decoded.comment_token,"[redacted]");assert.equal(decoded.yt_raw_token,"[redacted]");assert.equal(decoded.next_token,"continuation");
 });

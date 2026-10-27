@@ -4,7 +4,7 @@ import { preflightXReplacement,switchXCollection,UnsupportedReplacement } from "
 import { preflightMpReplacement,switchMpCollection } from "./mp-replacement.ts";
 export async function preflightCollection(sourceId:string,target:unknown,library?:unknown){
   const [source]=await sql`SELECT kind FROM sources WHERE id=${sourceId}`;if(!source)return null;
-  if(source.kind==="mp_account")return preflightMpReplacement(sourceId,z.enum(["redfox","dajiala"]).parse(target),library);
+  if(source.kind==="mp_account")return preflightMpReplacement(sourceId,z.enum(["redfox","dajiala","agentkey"]).parse(target),library);
   if(source.kind==="x_search")return preflightXReplacement(sourceId,z.enum(["redfox","socialdata"]).parse(target));
   throw new UnsupportedReplacement("This source kind has no collection replacement");
 }

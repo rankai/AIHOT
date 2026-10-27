@@ -6,10 +6,11 @@ function object(value: unknown): Record<string, unknown> {
 function string(value: unknown): string | null { return typeof value === "string" && value ? value : null; }
 
 export function toutiaoNativeWork(value: unknown): { url: string; id: string } | null {
-  if (typeof value !== "string" || !/^https?:\/\/(?:www\.)?toutiao\.com\//i.test(value.trim()) || value.includes("#")) return null;
+  if (typeof value !== "string" || !/^(?:https?:\/\/(?:www\.)?toutiao\.com\/|https:\/\/m\.toutiao\.com\/article\/)/i.test(value.trim()) || value.includes("#")) return null;
   try {
     const url = new URL(value);
     if (url.username || url.password || url.port || url.hash) return null;
+    if (url.hostname.toLowerCase() === "m.toutiao.com" && !/^\/article\/[0-9]+\/?$/.test(url.pathname)) return null;
     const match = /^\/(?:a|group\/|article\/|video\/)([0-9]+)\/?$/.exec(url.pathname);
     return match ? { url: value, id: match[1]! } : null;
   } catch { return null; }
@@ -42,7 +43,7 @@ export function toutiaoImportFields(kind: string, data: Record<string, unknown>)
     : work && native && workId && native.id !== workId ? "已确认作品 ID 与收到的原文不一致，不能导入或替换。"
     : work && data.operationId === "PAB6Z75Y" && requestedWorkId && (!/^[0-9]+$/.test(requestedWorkId) || native && native.id !== requestedWorkId) ? "原文不能对应本次请求的作品 ID，请核实输入后重新查询。" : null;
   return { account, work, uid, secUid, workId, requestedWorkId, receivedUrl, native, record, blockedReason,
-    canImport: account ? !!uid : work && !blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !uid && !secUid };
+    canImport: data.provider === "agentkey" ? work && !blockedReason && !!uid && !!workId && !!native : account ? !!uid : work && !blockedReason, needsUrl: work && !receivedUrl, needsIdentity: work && !uid && !secUid };
 }
 
 export function toutiaoTargetCandidates<T extends { id: string; participation_mode: string }>(rows: readonly T[] | null | undefined, work: boolean): T[] {
