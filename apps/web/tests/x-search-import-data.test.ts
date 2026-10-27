@@ -53,7 +53,7 @@ test("5K subscription permits Top/Latest only, while all five ordinary queries a
     assert.equal(collectionInputIssue(operation, values) === null, allowed);
     const parameters = platformQueryParameters(operation, values);
     assert.equal(parameters.searchType, searchType); assert.equal(parameters.cursor, values.cursor);
-    assert.deepEqual(collectionPreviewBody(operation, values), { operationId: operation.id, parameters });
+    assert.deepEqual(collectionPreviewBody(operation, values), { provider: "redfox", operationId: operation.id, parameters });
     const draft = { ...collectionDraft(operation), name: "订阅", values };
     if (allowed) assert.deepEqual(collectionConfig(operation, draft).parameters, parameters);
     else assert.throws(() => collectionConfig(operation, draft));

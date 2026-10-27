@@ -8,5 +8,5 @@ export async function loader({ request }: Route.LoaderArgs) { return adminGet<{ 
 export const meta: Route.MetaFunction = () => [{ title: `采集与查询任务 · ${SITE.name} 后台` }];
 export default function Operations({ loaderData: { rows } }: Route.ComponentProps) {
   const refresh = useOperationPolling(rows.some(r => !operationEnded(r.status) && r.status !== "stopped"));
-  return <AdminPage title="采集与查询任务" subtitle="SocialData、大加辣、Redfox 共用任务记录。显示最近 100 项；进行中的任务在页面可见时每 20 秒刷新。" actions={<><Button busy={refresh.state !== "idle"} onClick={() => refresh.revalidate()}>刷新</Button><ButtonLink to="/admin/runs">预算、回执与队列</ButtonLink></>}><Card pad={false}><OperationTable rows={rows} /></Card></AdminPage>;
+  return <AdminPage title="采集与查询任务" subtitle="SocialData、大加辣、Redfox、AgentKey 共用任务记录。显示最近 100 项；进行中的任务在页面可见时每 20 秒刷新。" actions={<><Button busy={refresh.state !== "idle"} onClick={() => refresh.revalidate()}>刷新</Button><ButtonLink to="/admin/runs">预算、回执与队列</ButtonLink></>}><Card pad={false}><OperationTable rows={rows} /></Card></AdminPage>;
 }

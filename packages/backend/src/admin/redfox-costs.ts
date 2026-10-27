@@ -13,6 +13,8 @@ export const RedfoxCostsQuery = z.object({
 interface CostGroup {
   service: string; model: string | null; origin: string; base: string | null; currency: string | null;
   costBasis: 'actual' | 'estimated' | null; attempts: number; knownCost: string | null; unknownCostCount: number;
+  estimatedCredits: string | null; chargedCredits: string | null;
+  unknownEstimatedCreditsCount: number; unknownChargedCreditsCount: number;
   statusCounts: { pending: number; received: number; failed: number; unknown: number };
 }
 const environmentOf = (base: string | null): 'production' | 'other' | 'unknown' => base === 'https://redfox.hk' ? 'production' : base ? 'other' : 'unknown';
@@ -84,10 +86,14 @@ export async function redfoxCosts(input: z.input<typeof RedfoxCostsQuery>) {
   const query = RedfoxCostsQuery.parse(input);
   const groups = await sql<CostGroup[]>`SELECT a.service,a.model,a.origin,r.request->>'base' AS base,a.currency,a.cost_basis AS "costBasis",
       count(*)::int AS attempts, sum(a.cost)::text AS "knownCost",count(*) FILTER (WHERE a.cost IS NULL)::int AS "unknownCostCount",
+      sum(CASE WHEN jsonb_typeof(a.usage->'estimatedCredits')='number' THEN (a.usage->>'estimatedCredits')::numeric END)::text AS "estimatedCredits",
+      sum(CASE WHEN jsonb_typeof(a.usage->'chargedCredits')='number' THEN (a.usage->>'chargedCredits')::numeric END)::text AS "chargedCredits",
+      count(*) FILTER (WHERE jsonb_typeof(a.usage->'estimatedCredits') IS DISTINCT FROM 'number')::int AS "unknownEstimatedCreditsCount",
+      count(*) FILTER (WHERE jsonb_typeof(a.usage->'chargedCredits') IS DISTINCT FROM 'number')::int AS "unknownChargedCreditsCount",
       jsonb_build_object('pending',count(*) FILTER (WHERE a.status='pending'),'received',count(*) FILTER (WHERE a.status='received'),
         'failed',count(*) FILTER (WHERE a.status='failed'),'unknown',count(*) FILTER (WHERE a.status='unknown')) AS "statusCounts"
     FROM receipt_attempts a JOIN receipts r ON r.id=a.receipt_id
-    WHERE a.service LIKE 'redfox.%' AND a.started_at>=${new Date(query.start)} AND a.started_at<${new Date(query.end)}
+    WHERE (a.service LIKE 'redfox.%' OR a.service LIKE 'agentkey.%') AND a.started_at>=${new Date(query.start)} AND a.started_at<${new Date(query.end)}
     GROUP BY a.service,a.model,a.origin,r.request->>'base',a.currency,a.cost_basis
     ORDER BY a.service,a.model,a.origin,base,a.currency,a.cost_basis`;
   const recent = await sql`SELECT r.id AS "runId",p.id AS "receiptId",r.created_at AS "queriedAt",p.received_at AS "receivedAt",r.input->'parameters' AS parameters

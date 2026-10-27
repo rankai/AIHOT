@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { subscriptionExecutionChanges, type CollectionSubscriptionConfig } from "../app/features/admin/collection-subscription-types.ts";
-const current: CollectionSubscriptionConfig = { name: "微博研究", operationId: "TXQPVGJG", parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: true, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } };
+const current: CollectionSubscriptionConfig = { name: "微博研究", provider: "redfox", operationId: "TXQPVGJG", parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: true, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } };
 test("name and interval edits explain that the in-flight round is retained", () => {
   assert.equal(subscriptionExecutionChanges(current, { ...current, name: "新名称", intervalMinutes: 30 }), false);
   assert.equal(subscriptionExecutionChanges(current, { ...current, parameters: { page: "1", searchType: "61", keyword: "AI" } }), false);

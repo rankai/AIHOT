@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { billParameterText, billRecordPage, redfoxCostBasis, redfoxCostEnvironment, redfoxCostInputKey, redfoxCostQuery, redfoxCostText } from "./redfox-cost-data";
 import type { RedfoxCostInput, RedfoxCostInterval, RedfoxCostsData, RedfoxSelectedBill } from "./redfox-cost-types";
 import { Button, Card, DataTable, Empty, Field, Input, Json, KV, Select, Time } from "./ui";
-const services: Record<string, string> = { "redfox.collect": "采集", "redfox.query": "单次查询", "redfox.account": "账户查询", "redfox.media": "媒体处理 / 上传", "redfox.image": "图片创作", "redfox.video": "视频创作", "redfox.poll": "任务查询", "redfox.transcript": "语音转写", "redfox.ai_search": "AI 搜索" };
+const services: Record<string, string> = { "redfox.collect": "Redfox 采集", "redfox.query": "Redfox 单次查询", "redfox.account": "Redfox 账户查询", "redfox.media": "Redfox 媒体处理 / 上传", "redfox.image": "Redfox 图片创作", "redfox.video": "Redfox 视频创作", "redfox.poll": "Redfox 任务查询", "redfox.transcript": "Redfox 语音转写", "redfox.ai_search": "Redfox AI 搜索", "agentkey.collect": "AgentKey 采集", "agentkey.query": "AgentKey 单次查询" };
 export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostInterval }) {
   const [input, setInput] = useState<RedfoxCostInput>(() => ({ ...initialInterval, billRunId: "" }));
   const [snapshot, setSnapshot] = useState<{ key: string; data: RedfoxCostsData } | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null);
@@ -13,7 +13,7 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
   const current = snapshot?.key === redfoxCostInputKey(input);
   return <div className="min-w-0 space-y-5">
     <Card title="费用与账单（已存数据）">
-      <p className="mb-4 text-[13px] text-ink-3">读取本地已存数据不触发 Redfox。要更新上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/redfox?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询账单；本页不发起供应商请求。</p>
+      <p className="mb-4 text-[13px] text-ink-3">读取本地已存数据不触发 Redfox 或 AgentKey。要更新 Redfox 上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/redfox?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询账单；本页不发起供应商请求。</p>
       <form aria-label="已存费用查询条件" className="space-y-4" onSubmit={async event => {
         event.preventDefault(); if (loading) return;
         let url: string;
@@ -44,12 +44,12 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
 export function RedfoxCostReport({ data }: { data: RedfoxCostsData }) {
   return <div className="min-w-0 space-y-5">
     <Card title="本地登记的外发尝试" pad={false}>
-      <div className="space-y-2 border-b border-line p-4 text-[12.5px] text-ink-3"><p className="break-all">本次读取范围：{data.local.interval.start} 至 {data.local.interval.end}（外发尝试开始时间，含开始、不含结束）。</p><p>登记的外发尝试不证明上游收到。live 只是来源标记，不等于真实付费；分组按服务、模型、来源、地址、环境、币种与成本依据分别展示，不混加。</p></div>
-      <DataTable rows={data.local.groups} rowKey={row => JSON.stringify([row.service, row.model, row.origin, row.base, row.currency, row.costBasis])} empty="所选本地时间范围没有登记的 Redfox 外发尝试。" columns={[
+      <div className="space-y-2 border-b border-line p-4 text-[12.5px] text-ink-3"><p className="break-all">本次读取范围：{data.local.interval.start} 至 {data.local.interval.end}（外发尝试开始时间，含开始、不含结束）。</p><p>登记的外发尝试不证明上游收到。live 只是来源标记，不等于真实付费；分组按服务、模型、来源、地址、环境、币种与成本依据分别展示，不混加。AgentKey 积分来自已存响应，缺失值显示未知。</p></div>
+      <DataTable rows={data.local.groups} rowKey={row => JSON.stringify([row.service, row.model, row.origin, row.base, row.currency, row.costBasis])} empty="所选本地时间范围没有登记的 Redfox 或 AgentKey 外发尝试。" columns={[
         { key: "service", label: "服务 / 模型", render: row => <div className="space-y-1"><p>{services[row.service] ?? row.service}</p><p className="break-all text-[11px] text-ink-4">{row.service} · {row.model ?? "模型未知"}</p></div> },
         { key: "origin", label: "来源 / 环境 / 地址", render: row => <div className="max-w-64 space-y-1 whitespace-normal break-all"><p>{row.origin}</p><p className="text-[12px] text-ink-3">{redfoxCostEnvironment(row.environment)}</p><p className="text-[11px] text-ink-4">{row.base ?? "base 未记录"}</p></div> },
         { key: "basis", label: "币种 / 依据", render: row => <div><p>{row.currency ?? "币种未知"}</p><p className="text-[12px] text-ink-3">{redfoxCostBasis(row.costBasis)}</p></div> },
-        { key: "cost", label: "已知成本 / 未知条数", render: row => <div className="max-w-52 break-all"><p>{redfoxCostText(row.knownCost)}</p><p className="text-[12px] text-ink-3">未知成本 {row.unknownCostCount} 条</p></div> },
+        { key: "cost", label: "成本 / 积分", render: row => <div className="max-w-56 break-all"><p>{redfoxCostText(row.knownCost)}</p><p className="text-[12px] text-ink-3">未知成本 {row.unknownCostCount} 条</p>{row.service.startsWith("agentkey.") && <><p className="mt-1">估价 {redfoxCostText(row.estimatedCredits)} credits</p><p className="text-[12px] text-ink-3">实扣 {redfoxCostText(row.chargedCredits)} credits · 未知 {row.unknownEstimatedCreditsCount}/{row.unknownChargedCreditsCount} 条</p></>}</div> },
         { key: "attempts", label: "尝试 / 登记状态", render: row => <div><p>{row.attempts} 次</p><p className="text-[12px] text-ink-3">待定 {row.statusCounts.pending} · 收到 {row.statusCounts.received}<br />失败 {row.statusCounts.failed} · 未知 {row.statusCounts.unknown}</p></div> },
       ]} />
     </Card>

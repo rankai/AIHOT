@@ -61,7 +61,7 @@ export default function Operation({ loaderData: r }: Route.ComponentProps) {
   const [command, setCommand] = useState<"resume" | "stop" | "abandon" | null>(null);
   const close = useCallback(() => setCommand(null), []);
   const [showRecords, setShowRecords] = useState(false);
-  const collectionTask = isCollectionOperationKey(r.operationKey);
+  const collectionTask = isCollectionOperationKey(r.operationKey, r.provider, r.inputs.mode);
   const xhsCommentTask = isXhsCommentOperation(r.operationKey);
   const videoTask = isVideoOperation(r.operationKey);
   const aiSearchTask = isAiSearchOperation(r.operationKey);
@@ -96,7 +96,7 @@ export default function Operation({ loaderData: r }: Route.ComponentProps) {
         <p>文章列表 T+1；本轮只处理最新第一页中最多 8 条需要处理的材料，不自动跨库或失败回退。已知链接的实时详情不等于实时发现。</p>
         <p>{mpCollectionCost}</p><p>新增材料缺少可信时区或发表时间时按历史/回填语义处理，不把发现时间当作发表时间。{r.inputs.mode === "preview" ? "本轮为预览，不保存材料或推进主订阅。" : ""}</p>
       </div>}
-      <KV items={[["等待 / 停止原因", r.waitReason || "—"], ["下一动作", invalidatedSubscription ? "返回订阅，按当前配置运行新轮次" : operationAction[r.nextAction] ?? r.nextAction], ["下次尝试", <Time at={r.nextAttemptAt} />], [r.currentReceiptId ? "当前回执" : r.receipt ? "最近已收回执" : "当前步骤回执", r.receipt ? <Link className="text-accent" to="/admin/runs">#{r.receiptId} · {r.receipt.status} · {r.receipt.attempts} 次尝试</Link> : "尚未创建"], ["创建", <Time at={r.createdAt} />]]} />
+      <KV items={[["固定工具 / 上游", [r.receipt?.model??r.inputs.tool,r.inputs.upstream].filter(Boolean).join(" · ")||"—"], ["等待 / 停止原因", r.waitReason || "—"], ["下一动作", invalidatedSubscription ? "返回订阅，按当前配置运行新轮次" : operationAction[r.nextAction] ?? r.nextAction], ["下次尝试", <Time at={r.nextAttemptAt} />], [r.currentReceiptId ? "当前回执" : r.receipt ? "最近已收回执" : "当前步骤回执", r.receipt ? <Link className="text-accent" to="/admin/runs">#{r.receiptId} · {r.receipt.status} · {r.receipt.attempts} 次尝试</Link> : "尚未创建"], ["创建", <Time at={r.createdAt} />]]} />
       {collectionTask && r.subscriptionId && <div className="my-3 text-[13px]"><Link className="text-accent" to={collectionSubscriptionsHref(r.subscriptionId)}>返回采集任务 · 订阅 #{r.subscriptionId}</Link>{invalidatedSubscription && <p className="mt-2 text-amber">此轮因订阅执行配置变化已停止，旧响应保留；不能恢复成新配置。请回信源页的采集任务视图按当前配置开启新轮次。</p>}</div>}
       {["weibo", "wechat", "douyin", "xiaohongshu", "tiktok", "bilibili", "youtube", "instagram", "toutiao", "qichezhijia", "dongchedi", "yiche", "baijiahao", "zhihu", "x-research", "hot-research", "redfox-account", "tools"].includes(r.inputs.platform ?? "") && <details className="my-3 rounded-control bg-bg-sunk p-3"><summary className="cursor-pointer text-[12px] text-ink-3">{platformLabel}{socialQuery ? "评论 / 关注研究" : "操作与查询"}参数</summary><div className="mt-2"><Json value={{ operationId: r.inputs.operationId, parameters: r.inputs.parameters }} label="冻结查询参数" /></div></details>}
       {r.inputs.sources?.length ? <div className="mt-3 flex flex-wrap gap-3 text-[13px]">{r.inputs.sources.map(s => r.inputs.draft ? <span key={s.id}>草稿 {s.id}（未保存）</span> : <Link key={s.id} className="text-accent" to={`/admin/sources/${encodeURIComponent(s.id)}`}>{s.name ?? s.id}</Link>)}</div> : null}

@@ -1,3 +1,4 @@
+import {createAgentKeyQuery} from "@aihot/backend/providers/agentkey/queries";
 import {CollectionDetailTarget,collectionDetailTargets} from "@aihot/backend/providers/redfox/collection-detail";
 import {importXDetailResult} from "@aihot/backend/providers/redfox/import-x-detail";
 import {importXSearchResult} from "@aihot/backend/providers/redfox/import-x-search";
@@ -39,7 +40,7 @@ import { xiaohongshuDescriptors } from "@aihot/backend/providers/redfox/xiaohong
 import { importDouyinResult } from "@aihot/backend/providers/redfox/import-douyin";
 import { douyinDescriptors } from "@aihot/backend/providers/redfox/douyin-contract";
 import { wechatDescriptors } from "@aihot/backend/providers/redfox/wechat-contract";
-import { collectionOperationIds,listPlatformSubscriptions,createPlatformSubscription,updatePlatformSubscription,startPlatformSubscription } from "@aihot/backend/sources/platform-subscriptions";
+import { collectionOperationIds,collectionProviderOptions,listPlatformSubscriptions,createPlatformSubscription,updatePlatformSubscription,startPlatformSubscription,preflightPlatformSubscriptionProvider,switchPlatformSubscriptionProvider } from "@aihot/backend/sources/platform-subscriptions";
 import { listWeiboSubscriptions,createWeiboSubscription,updateWeiboSubscription,startWeiboSubscription } from "@aihot/backend/sources/weibo-subscriptions";
 import { sql } from "@aihot/backend/db";
 import { importWechatResult } from "@aihot/backend/providers/redfox/import-wechat";
@@ -74,6 +75,8 @@ export function registerAdminRedfox(app: FastifyInstance) {
   app.get("/api/admin/redfox/collections",adminHandler(async()=>listPlatformSubscriptions()));
   app.post("/api/admin/redfox/collections",adminHandler(async(req,reply,admin)=>reply.code(201).send(await createPlatformSubscription(req.body,actorOf(admin),req.headers["idempotency-key"]))));
   app.patch("/api/admin/redfox/collections/:id",adminHandler(async(req,reply,admin)=>{const result=await updatePlatformSubscription(z.coerce.number().int().positive().parse((req.params as {id:string}).id),req.body,actorOf(admin));return result??sendProblem(req,reply,{status:404,code:"not_found",detail:"Subscription not found"});}));
+  app.post("/api/admin/redfox/collections/:id/provider/preflight",adminHandler(async(req,reply)=>{const result=await preflightPlatformSubscriptionProvider(z.coerce.number().int().positive().parse((req.params as {id:string}).id),req.body);return result??sendProblem(req,reply,{status:404,code:"not_found",detail:"Subscription not found"});}));
+  app.post("/api/admin/redfox/collections/:id/provider/switch",adminHandler(async(req,reply,admin)=>{const result=await switchPlatformSubscriptionProvider(z.coerce.number().int().positive().parse((req.params as {id:string}).id),req.body,actorOf(admin));return result??sendProblem(req,reply,{status:404,code:"not_found",detail:"Subscription not found"});}));
   app.post("/api/admin/redfox/collections/:id/run",adminHandler(async(req,reply,admin)=>{const run=await startPlatformSubscription(z.coerce.number().int().positive().parse((req.params as {id:string}).id),actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.get("/api/admin/redfox/subscriptions",adminHandler(async()=>listWeiboSubscriptions()));
   app.post("/api/admin/redfox/subscriptions",adminHandler(async(req,reply,admin)=>reply.code(201).send(await createWeiboSubscription(req.body,actorOf(admin),req.headers["idempotency-key"]))));
@@ -86,10 +89,10 @@ export function registerAdminRedfox(app: FastifyInstance) {
       if(!(collectionOperationIds as readonly string[]).includes(operation.id))return operation;
       const price=prices.find(p=>p.model===operation.id);
       const detailOperations=collectionDetailTargets(operation.id).map(operationId=>{const definition=operations.find(o=>o.id===operationId),p=prices.find(x=>x.model===operationId);return {operationId,label:definition?.label??operationId,fields:operationId==="LLCI8QTE"?(definition?.fields??[]).filter(f=>f.name==="page"):[],price:p?{amount:p.per_request==null?null:Number(p.per_request),currency:p.currency,basis:"estimated" as const}:null};});
-      return {...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionCapabilities:{detailEnrichment:detailOperations.length>0,detailOperations}};
+      return {...operation,collectionPrice:price?{amount:price.per_request==null?null:Number(price.per_request),currency:price.currency,basis:"estimated" as const}:null,collectionProviders:collectionProviderOptions(operation.id),collectionCapabilities:{detailEnrichment:detailOperations.length>0,detailOperations}};
     });
   }));
-  app.post("/api/admin/redfox/queries",adminHandler(async(req,reply,admin)=>{const run=await createSynchronousQuery(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
+  app.post("/api/admin/redfox/queries",adminHandler(async(req,reply,admin)=>{const {provider,...body}=z.object({provider:z.enum(["redfox","agentkey"]).default("redfox")}).passthrough().parse(req.body);const run=provider==="agentkey"?await createAgentKeyQuery({...body,provider},actorOf(admin),req.headers["idempotency-key"]):await createSynchronousQuery(body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.get("/api/admin/redfox/images/options",adminHandler(async()=>imageOptions()));
   app.post("/api/admin/redfox/images",adminHandler(async(req,reply,admin)=>{const run=await createImageGeneration(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.post("/api/admin/redfox/images/query",adminHandler(async(req,reply,admin)=>{const run=await createImageQuery(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));

@@ -29,14 +29,16 @@ export class ReceiptUnknownError extends Error {
   }
 }
 
-/** Raised by a call when the provider clearly did not accept (and will not bill) the request. */
+/** A complete, classified provider rejection. Rejection alone does not establish zero cost. */
 export class ProviderRejectedError extends Error {
   readonly status: number | null;
   readonly retryable: boolean;
-  constructor(message: string, status: number | null, retryable: boolean) {
+  readonly evidence?: CallOutcome;
+  constructor(message: string, status: number | null, retryable: boolean, evidence?: CallOutcome) {
     super(message);
     this.status = status;
     this.retryable = retryable;
+    this.evidence = evidence;
   }
 }
 
@@ -58,6 +60,8 @@ export interface ReceiptRequest {
   requestSummary?: Record<string, unknown>;
   /** Distinguishes an explicit re-run (e.g. admin "re-evaluate") from recovery of the same request. */
   attemptTag?: string;
+  /** Non-monetary usage estimate frozen before dispatch; not part of request identity. */
+  estimatedUsage?: Record<string, unknown>;
 }
 
 export interface ReceiptResult {
@@ -96,7 +100,7 @@ async function checkBudget(tx: Db, service: string): Promise<void> {
   const [budget] = await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`
     SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`;
   if (!budget) {
-    if (service.startsWith("redfox.")) throw new BudgetExceededError(service, "unconfigured", 3600);
+    if (service.startsWith("redfox.") || service.startsWith("agentkey.")) throw new BudgetExceededError(service, "unconfigured", 3600);
     return; // Existing providers retain their missing-row semantics.
   }
   // Every request sent counts, retries of the same logical request included.
@@ -150,16 +154,24 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
       // failed: the provider did not take the request, or its answer was unusable; a new attempt is allowed.
       await checkBudget(tx, req.service);
       const [r] = await tx<{ attempts: number }[]>`
-        UPDATE receipts SET status = 'pending', attempts = attempts + 1, error = NULL, updated_at = now() WHERE id = ${existing.id} RETURNING attempts`;
+        UPDATE receipts SET status = 'pending', attempts = attempts + 1, error = NULL,
+          usage = ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : tx`usage`},
+          response = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE response END,
+          request_id = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE request_id END,
+          cost = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE cost END,
+          currency = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE currency END,
+          cost_basis = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE cost_basis END,
+          received_at = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE received_at END,
+          completed_at = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE completed_at END, updated_at = now() WHERE id = ${existing.id} RETURNING attempts`;
       const attemptId = await startAttempt(tx, existing.id, r!.attempts, req);
       await options.onReceipt?.(tx, existing.id, { kind: "call" });
       return { kind: "call" as const, id: existing.id, attemptId, attempt: r!.attempts };
     }
     await checkBudget(tx, req.service);
     const [row] = await tx<{ id: number }[]>`
-      INSERT INTO receipts (logical_key, service, model, purpose, subject, status, request, attempts)
+      INSERT INTO receipts (logical_key, service, model, purpose, subject, status, request, attempts, usage)
       VALUES (${logicalKey}, ${req.service}, ${req.model ?? null}, ${req.purpose}, ${req.subject ?? null}, 'pending',
-              ${tx.json((req.requestSummary ?? {}) as never)}, 1)
+              ${tx.json((req.requestSummary ?? {}) as never)}, 1, ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : null})
       RETURNING id`;
     const attemptId = await startAttempt(tx, row!.id, 1, req);
     await options.onReceipt?.(tx, row!.id, { kind: "call" });
@@ -174,6 +186,7 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
 
   const { id: receiptId, attemptId, attempt } = claimed;
   const started = Date.now();
+  const usageFor = (actual: CallOutcome["usage"]) => req.estimatedUsage ? { ...req.estimatedUsage, ...actual } : actual;
   let outcome: CallOutcome;
   try {
     outcome = await call();
@@ -181,9 +194,21 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
     const status = error instanceof ProviderRejectedError ? "failed" : "unknown";
     // "unknown": the request may have reached the provider (timeout, reset): do not re-send automatically.
     const message = (error instanceof ProviderRejectedError ? error.message : String(error)).slice(0, 2000);
+    const evidence = error instanceof ProviderRejectedError ? error.evidence : undefined;
     await sql.begin(async (tx) => {
       await tx`UPDATE receipts SET status = ${status}, error = ${message}, updated_at = now() WHERE id = ${receiptId} AND attempts = ${attempt} AND status IN ('pending', 'unknown')`;
       await tx`UPDATE receipt_attempts SET status = ${status}, error = ${message}, latency_ms = ${Date.now() - started}, finished_at = now() WHERE id = ${attemptId} AND status IN ('pending', 'unknown')`;
+      if (evidence) {
+        // The attempt owns late evidence even if a newer attempt now owns the receipt head.
+        await tx`UPDATE receipt_attempts SET response = ${tx.json((evidence.response ?? null) as never)},
+          request_id = ${evidence.requestId ?? null}, usage = ${usageFor(evidence.usage) ? tx.json(usageFor(evidence.usage) as never) : null},
+          cost = ${evidence.cost?.amount ?? null}, currency = ${evidence.cost?.currency ?? null}, cost_basis = ${evidence.cost?.basis ?? null}
+          WHERE id = ${attemptId}`;
+        await tx`UPDATE receipts SET response = ${tx.json((evidence.response ?? null) as never)},
+          request_id = ${evidence.requestId ?? null}, usage = ${usageFor(evidence.usage) ? tx.json(usageFor(evidence.usage) as never) : null},
+          cost = ${evidence.cost?.amount ?? null}, currency = ${evidence.cost?.currency ?? null}, cost_basis = ${evidence.cost?.basis ?? null},
+          received_at = now() WHERE id = ${receiptId} AND attempts = ${attempt} AND status = 'failed'`;
+      }
     });
     throw error;
   }
@@ -194,7 +219,7 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
         status = 'received',
         response = ${tx.json((outcome.response ?? null) as never)},
         request_id = ${outcome.requestId ?? null},
-        usage = ${outcome.usage ? tx.json(outcome.usage as never) : null},
+        usage = ${usageFor(outcome.usage) ? tx.json(usageFor(outcome.usage) as never) : null},
         cost = ${outcome.cost?.amount ?? null},
         currency = ${outcome.cost?.currency ?? null},
         cost_basis = ${outcome.cost?.basis ?? null},
@@ -203,10 +228,10 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
       WHERE id = ${receiptId} AND attempts = ${attempt} AND status IN ('pending', 'unknown') RETURNING id`;
     await tx`
       UPDATE receipt_attempts SET
-        status = 'received', request_id = ${outcome.requestId ?? null}, usage = ${outcome.usage ? tx.json(outcome.usage as never) : null},
+        status = CASE WHEN status IN ('pending', 'unknown') THEN 'received' ELSE status END, request_id = ${outcome.requestId ?? null}, usage = ${usageFor(outcome.usage) ? tx.json(usageFor(outcome.usage) as never) : null},
         cost = ${outcome.cost?.amount ?? null}, currency = ${outcome.cost?.currency ?? null}, cost_basis = ${outcome.cost?.basis ?? null},
         latency_ms = ${Date.now() - started}, finished_at = now()
-      WHERE id = ${attemptId} AND status IN ('pending', 'unknown')`;
+      WHERE id = ${attemptId} AND (status IN ('pending', 'unknown') OR ${!!req.estimatedUsage})`;
     if (!rows.length) {
       await tx`UPDATE receipt_attempts SET response = ${tx.json((outcome.response ?? null) as never)} WHERE id = ${attemptId}`;
     }
@@ -218,7 +243,7 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
 
 async function startAttempt(tx: Db, receiptId: number, attempt: number, req: ReceiptRequest): Promise<number> {
   const [row] = await tx<{ id: number }[]>`
-    INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status) VALUES (${receiptId}, ${attempt}, ${req.service}, ${req.model ?? null}, 'pending')
+    INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status, usage) VALUES (${receiptId}, ${attempt}, ${req.service}, ${req.model ?? null}, 'pending', ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : null})
     RETURNING id`;
   return row!.id;
 }

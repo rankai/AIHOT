@@ -3,6 +3,7 @@ export interface RedfoxCostInput extends RedfoxCostInterval { billRunId: string 
 export interface RedfoxCostGroup {
   service: string; model: string | null; origin: string; base: string | null; environment: "production" | "other" | "unknown";
   currency: string | null; costBasis: "actual" | "estimated" | null; attempts: number; knownCost: string | null; unknownCostCount: number;
+  estimatedCredits: string | null; chargedCredits: string | null; unknownEstimatedCreditsCount: number; unknownChargedCreditsCount: number;
   statusCounts: { pending: number; received: number; failed: number; unknown: number };
 }
 export interface RedfoxBillPage {

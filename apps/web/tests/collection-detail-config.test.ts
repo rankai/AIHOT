@@ -6,7 +6,7 @@ import type { PlatformOperation } from "../app/features/admin/platform-types.ts"
 const target = (operationId: string) => ({ operationId, label: `${operationId}详情库`, fields: operationId === "LLCI8QTE" ? [{ name: "page", label: "页码", type: "integer" as const, required: true }] : [], price: { amount: 0, currency: "CNY", basis: "estimated" as const } });
 const operation: PlatformOperation = { id: "PW97QFBS", platform: "wechat", label: "优质搜索", purpose: "query", schedulableType: "search", fields: [{ name: "keyword", label: "关键词", type: "string", required: true }], collectionCapabilities: { detailEnrichment: true, detailOperations: [target("XEO0QQNF"), target("I3CIBRI2")] } };
 const draft = () => ({ ...collectionDraft(operation), name: "订阅", values: { keyword: "原参数" }, enrichDetails: true });
-const current: CollectionSubscription = { id: 3, platform: "weibo", operationId: "TXQPVGJG", name: "旧微博", parameters: {}, enabled: false, intervalMinutes: 30, enrichDetails: true, detailOperationId: null, detailPage: null, limits: { pages: 3, items: 100, details: 20 }, editVersion: 1, executionVersion: 1, nextRunAt: null, activeRun: null };
+const current: CollectionSubscription = { id: 3, provider: "redfox", platform: "weibo", operationId: "TXQPVGJG", name: "旧微博", parameters: {}, enabled: false, intervalMinutes: 30, enrichDetails: true, detailOperationId: null, detailPage: null, limits: { pages: 3, items: 100, details: 20 }, editVersion: 1, executionVersion: 1, nextRunAt: null, activeRun: null };
 test("new enrichment always requires explicit metadata target without choosing first; disabled commands strip all detail fields", () => {
   const initial = draft(); assert.equal(initial.detailOperationId, ""); assert.equal(initial.detailPage, ""); assert.throws(() => collectionConfig(operation, initial));
   const config = collectionConfig(operation, { ...initial, detailOperationId: "I3CIBRI2", detailPage: "99" });
@@ -45,7 +45,7 @@ test("CAS execution impact includes target/page but not period/name; previews re
   assert.equal(subscriptionExecutionChanges(config, { ...config, name: "改名", intervalMinutes: 60 }), false);
   assert.equal(subscriptionExecutionChanges(config, { ...config, detailOperationId: "I3CIBRI2" }), true);
   assert.equal(subscriptionExecutionChanges({ ...config, detailPage: 0 }, { ...config, detailPage: 1 }), true);
-  assert.deepEqual(collectionPreviewBody(operation, { keyword: "条件" }), { operationId: operation.id, parameters: { keyword: "条件" } });
+  assert.deepEqual(collectionPreviewBody(operation, { keyword: "条件" }), { provider:"redfox",operationId: operation.id, parameters: { keyword: "条件" } });
   assert.match(collectionDetailPriceNote(target("XEO0QQNF")), /0 CNY/); assert.match(collectionDetailPriceNote({ ...target("XEO0QQNF"), price: null }), /未知/);
   assert.match(collectionDetailPriceNote({ ...target("XEO0QQNF"), price: { amount: null, currency: "CNY", basis: "estimated" } }), /未知/);
 });
