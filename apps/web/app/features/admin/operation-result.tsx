@@ -42,6 +42,8 @@ import type { ImageOptions } from "./image-types";
 import type { OperationResult } from "./operation-types";
 import { mpLibrary, mpLibraryLabel } from "./operation-switch-data";
 import { Json } from "./ui";
+import { SubscriptionVideoResult } from "./subscription-video-result";
+import { videoDownloadRunIds } from "./subscription-video-data";
 import { XAccountBinding } from "./x-search-import";
 const resultLabels: Record<string, string> = { search_suggestion: "搜索建议", account: "账号", article: "文章", page: "分页摘要", filtered: "已过滤", control: "处理记录", image: "生成图片", image_reference: "参考图片", image_task: "生成进度记录" };
 const filterReasons: Record<string, string> = { reply: "回复内容已按配置排除" };
@@ -51,7 +53,7 @@ interface ResultProps { result: OperationResult; bindingSources?: BindingSource[
 export function OperationResultItem(props: ResultProps) {
   const r = props.result;
   const ownAnchor = r.kind === "result_attachment" || isTranscriptionResult(r.kind, r.data) || isMediaToolResult(r.kind, r.data);
-  return <div id={ownAnchor ? undefined : `result-${r.id}`} className="min-w-0 [&>article:last-child]:border-b [&>article:last-child]:pb-4 [&:last-child>article:last-child]:border-0 [&:last-child>article:last-child]:pb-0"><OperationResultView {...props} /></div>;
+  return <div id={ownAnchor ? undefined : `result-${r.id}`} className="min-w-0 [&>article:last-child]:border-b [&>article:last-child]:pb-4 [&:last-child>article:last-child]:border-0 [&:last-child>article:last-child]:pb-0"><OperationResultView {...props} />{r.kind !== "result_expired" && videoDownloadRunIds(r).length > 0 && <div className="my-3 flex flex-wrap gap-3 text-[13px]">{videoDownloadRunIds(r).map(id => <Link key={id} className="text-accent" to={`/admin/operations/${id}`}>视频保存记录 #{id}</Link>)}</div>}</div>;
 }
 export function OperationResultView(props: ResultProps) {
   if (props.result.kind === "result_expired") {
@@ -64,6 +66,7 @@ export function OperationResultView(props: ResultProps) {
       <Json value={{ resultId: r.id, receiptId: r.receiptId, originalKind: r.data.originalKind, expiredAt: r.data.expiredAt }} label="本地保留元数据" />
     </article>;
   }
+  if (["subscription_video", "subscription_video_parse", "subscription_video_summary"].includes(props.result.kind)) return <SubscriptionVideoResult result={props.result} />;
   if (isAgentKeyXResearch(props.result.data) && isServiceResearchResult(props.result.kind, props.result.data)) return <ServiceResearchResult result={props.result} bindingSources={props.bindingSources} />;
   if (props.result.data.provider === "agentkey" && props.result.data.platform === "bilibili" && (props.result.kind === "bilibili_dynamic" || props.result.kind === "query_summary" && props.result.data.operationId === "bilibili.relation_stats")) return <BilibiliResearchResult result={props.result} />;
   const collection = collectionPageSummary(props.result.kind, props.result.data);

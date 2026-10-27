@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, useRevalidator } from "react-router";
 import { Badge, DataTable } from "./ui";
-import { operationEnded, operationLabel, operationStatus, type OperationAccepted, type OperationRow } from "./operation-types";
+import { operationEnded, operationLabel, operationProviderLabel, operationStatus, type OperationAccepted, type OperationRow } from "./operation-types";
 import { Time } from "./ui";
 
 export function OperationLink({ operation, newTab = false }: { operation: OperationAccepted; newTab?: boolean }) {
@@ -13,7 +13,7 @@ export function OperationBadge({ status }: { status: string }) {
 export function OperationTable({ rows, empty = "还没有执行记录" }: { rows: OperationRow[]; empty?: string }) {
   return <DataTable rows={rows} rowKey={r => r.id} empty={empty} columns={[
     { key: "id", label: "记录编号", render: r => <Link className="text-accent" to={`/admin/operations/${r.id}`}>#{r.id}</Link> },
-    { key: "provider", label: "供应商 / 操作", render: r => <span>{r.provider}<span className="mt-1 block text-[12px] text-ink-3">{operationLabel[r.operationKey] ?? r.operationKey}</span></span> },
+    { key: "provider", label: "供应商 / 操作", render: r => <span>{operationProviderLabel(r.provider)}<span className="mt-1 block text-[12px] text-ink-3">{operationLabel[r.operationKey] ?? r.operationKey}</span></span> },
     { key: "status", label: "状态", render: r => <OperationBadge status={r.status} /> },
     { key: "reason", label: "等待原因", render: r => r.waitReason || "—" },
     { key: "next", label: "下次尝试", render: r => <Time at={r.nextAttemptAt} /> },

@@ -1,3 +1,4 @@
+import { NativeVideoDownloadSetting } from "../../features/admin/subscription-video-ui";
 import { SITE } from "@aihot/industry/site";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -100,6 +101,7 @@ export default function NewSource() {
             <Field label="采集配置（JSON）">
               <Textarea className="font-mono !text-[12px]" rows={10} value={config} onChange={(e) => setConfig(e.target.value)} spellCheck={false} />
             </Field>
+            {["x_search", "mp_account"].includes(form.kind) && <NativeVideoDownloadSetting json={config} disabled={!!pending} onChange={setConfig} />}
             {error && <div className="mt-1 text-[12.5px] text-hot">{error}</div>}
           </div>
           {duplicate && (
@@ -114,7 +116,7 @@ export default function NewSource() {
               onClick={async () => {
                 const c = parsed();
                 if (!c) return;
-                const r = await run<PreviewResponse>("POST", "/api/admin/sources/preview", { id: form.id || "draft", kind: form.kind, config: c }, { label: "preview", revalidate: false });
+                const r = await run<PreviewResponse>("POST", "/api/admin/sources/preview", { id: form.id || "draft", kind: form.kind, config: Object.fromEntries(Object.entries(c).filter(([key]) => key !== "autoDownloadVideo")) }, { label: "preview", revalidate: false });
                 if (r) setPreview(r);
               }}
             >

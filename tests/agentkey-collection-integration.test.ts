@@ -658,7 +658,7 @@ test("explicit Redfox to AgentKey switch preserves the subscription and history,
       process.env.AGENTKEY_CALLS_ENABLED = "false";
       const preflight = await preflightPlatformSubscriptionProvider(subscription.id, {editVersion: 1, targetProvider: "agentkey"});
       assert.equal(preflight!.supported, true);
-      assert.deepEqual(preflight!.checks.map(check => check.key), ["operation", "parameters", "details", "credentials", "execution"]);
+      assert.deepEqual(preflight!.checks.map(check => check.key), ["operation", "parameters", "details", "credentials", "execution", "videoDownload"]);
       assert.equal(stub.calls.length, 0);
       assert.deepEqual((await sql`SELECT * FROM collection_subscriptions WHERE id=${subscription.id}`)[0], before, "preflight is read only");
       const switched = await switchPlatformSubscriptionProvider(subscription.id, {editVersion: 1, targetProvider: "agentkey", reason: "Synthetic explicit provider choice"}, "switch-test");

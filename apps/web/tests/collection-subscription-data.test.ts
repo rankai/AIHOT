@@ -21,7 +21,7 @@ test("only explicit schedulable metadata exposes operations, without assuming pl
 });
 test("legacy Weibo bodies retain string page, flags and original defaults; UA alone is the no-param snapshot", () => {
   const initial = collectionDraft(weibo); initial.name = " 微博研究 "; initial.values.keyword = "AI";
-  assert.deepEqual(collectionConfig(weibo, initial), { name: "微博研究", provider: "redfox", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: false, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } });
+  assert.deepEqual(collectionConfig(weibo, initial), { autoDownloadVideo: false, name: "微博研究", provider: "redfox", operationId: weibo.id, parameters: { keyword: "AI", searchType: "61", page: "1" }, enabled: false, intervalMinutes: 15, enrichDetails: false, limits: { pages: 3, items: 100, details: 20 } });
   assert.equal(isWeiboSnapshot(snapshot), true); assert.equal(isWeiboSnapshot(trend), false);
   const snapDraft = { ...collectionDraft(snapshot), name: "热搜" };
   assert.deepEqual(collectionConfig(snapshot, snapDraft).parameters, {}); assert.deepEqual(collectionConfig(snapshot, snapDraft).limits, { pages: 3, items: 100, details: 20 });
@@ -289,4 +289,20 @@ test("X collection summaries retain count, selected entries and omitted entries 
   assert.deepEqual(summary.next, [["nextParameters", "null（本页不续页）"]]);
   assert.equal(collectionPageSummary("query_summary", { ...data, returnedPage: {}, count: 0, selectedCount: 0, unprocessedDueToLimit: 0 })!.rows[0]?.[1], "0");
   assert.equal(summary.rows.some(([label]) => label.includes("文章")), false);
+});
+
+test("video saving defaults off, roundtrips in execution config and never enters one-off preview", () => {
+  const draft = { ...collectionDraft(douyin), name: "视频订阅", values: { keyword: "AI" } };
+  assert.equal(draft.autoDownloadVideo, false);
+  assert.equal(collectionDraft(weibo, current).autoDownloadVideo, false);
+  const enabled = collectionConfig(douyin, { ...draft, autoDownloadVideo: true });
+  const command = collectionSaveCommand(null, null, enabled);
+  assert.equal("config" in command.body ? command.body.config.autoDownloadVideo : command.body.autoDownloadVideo, true);
+  const saved: CollectionSubscription = { ...enabled, id: 91, platform: "douyin", editVersion: 2, executionVersion: 2, nextRunAt: null, activeRun: null };
+  const readback = collectionDraft(douyin, saved);
+  assert.equal(readback.autoDownloadVideo, true);
+  assert.equal(subscriptionExecutionChanges(saved, collectionConfig(douyin, { ...readback, name: "改名" })), false);
+  assert.equal(subscriptionExecutionChanges(saved, collectionConfig(douyin, { ...readback, autoDownloadVideo: false })), true);
+  assert.equal(subscriptionExecutionChanges({ ...saved, autoDownloadVideo: undefined }, { ...enabled, autoDownloadVideo: false }), false);
+  assert(!Object.hasOwn(collectionPreviewBody(douyin, readback.values), "autoDownloadVideo"));
 });

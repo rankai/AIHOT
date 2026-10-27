@@ -41,7 +41,7 @@ import {parseShipinhao} from "./shipinhao.ts";
 import {ShipinhaoOperationId,shipinhaoOperations} from "./shipinhao-contract.ts";
 import {collectedDetailContext,applyCollectedDetail} from "./collection-detail.ts";
 import {collectionDiscoveredAt} from "./collection-page-proof.ts";
-import {redfoxDouyinHasVideo,redfoxXHasVideo,redfoxToutiaoHasVideo,redfoxXiaohongshuHasVideo,redfoxTiktokHasVideo,redfoxInstagramHasVideo} from "./video-media.ts";
+import {redfoxDouyinHasVideo,redfoxXHasVideo,redfoxToutiaoHasVideo,redfoxXiaohongshuHasVideo,redfoxTiktokHasVideo,redfoxInstagramHasVideo,redfoxShipinhaoHasVideo} from "./video-media.ts";
 
 interface Work {kind:string;data:Record<string,unknown>}
 export interface HistoricalVideoProof {platform:string;identityKey:string|null;identity:Record<string,string>;hasVideo:boolean;manualAttribution?:boolean}
@@ -138,9 +138,9 @@ export async function redfoxHistoryProof(tx:Tx,s:any,articleUrl:string):Promise<
  case "baijiahao":hasVideo=op==="API_1789097000761";if(!url){const intent=s.provenance?.baijiahaoImport?.intent;if(typeof intent?.supplement?.evidence==="string")url=intent.supplement.url;}break;
  case "kuaishou":case "shipinhao":{
   const imported=s.provenance?.manualWorkImport,intent=imported?.intent;
-  if(!intent||intent.sourceId!==s.source_id||typeof intent.supplement?.evidence!=="string"||!intent.supplement.evidence.trim()||imported.receivedWorkId!==workId)fail("manual-original-evidence-missing");
+  if(!intent||intent.sourceId!==s.source_id||typeof intent.supplement?.evidence!=="string"||!intent.supplement.evidence.trim()||(imported.receivedWorkId??null)!==(workId??null))fail("manual-original-evidence-missing");
   url=intent.supplement.url;manualAttribution=true;
-  hasVideo=!!mediaUrl(record.videoUrl)&&(platform==="kuaishou"?record.workType==="1":op==="OE4KUEUO"&&record.workType!=="normal"&&record.workType!=="图文");break;
+  hasVideo=platform==="kuaishou"?!!mediaUrl(record.videoUrl)&&record.workType==="1":redfoxShipinhaoHasVideo(op,record);break;
  }
  }
  // These are the same verified full-body fields consumed by the importers, before HTML sanitization.

@@ -47,5 +47,5 @@ export function mergeAssetRows(previous: readonly PrivateAsset[], incoming: read
   return [...rows.values()];
 }
 export function operationFileAsset(file: OperationFile | null): PrivateAsset | null {
-  return file ? { key: file.key, content_type: file.contentType, bytes: file.bytes, purpose: "operation-output", status: file.status, metadata: { filename: file.filename, width: file.width, height: file.height } } : null;
+  return file ? { key: file.key, content_type: file.contentType, bytes: file.bytes, purpose: "operation-output", status: file.status, created_at: file.createdAt, expires_at: file.expiresAt, expired: file.expired, source: file.source, metadata: { kind: file.kind, origin: file.origin, filename: file.filename, width: file.width, height: file.height } } : null;
 }

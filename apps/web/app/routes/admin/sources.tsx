@@ -1,3 +1,5 @@
+import { VideoDownloadLatestView } from "../../features/admin/subscription-video-ui";
+import type { VideoDownloadLatest } from "../../features/admin/subscription-video-data";
 import { SITE } from "@aihot/industry/site";
 import { Form, Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import type { Route } from "./+types/sources";
@@ -11,6 +13,7 @@ import type { CollectionSubscription } from "../../features/admin/collection-sub
 import type { PlatformOperation } from "../../features/admin/platform-types";
 
 interface SourceRow {
+  videoDownloads?: VideoDownloadLatest | null;
   id: string;
   name: string;
   kind: string;
@@ -118,6 +121,7 @@ export default function Sources({ loaderData }: Route.ComponentProps) {
                   </Link>
                   <div className="font-mono text-[11.5px] text-ink-4">{r.id}</div>
                   {r.health === "failing" && r.last_error && <div className="mt-1 line-clamp-1 text-[12px] text-hot">{r.last_error}</div>}
+                  {r.videoDownloads && <div className="mt-2" onClick={e => e.stopPropagation()}><VideoDownloadLatestView value={r.videoDownloads} /></div>}
                 </div>
               ),
             },

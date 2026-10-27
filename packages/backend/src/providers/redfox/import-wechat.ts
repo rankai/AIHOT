@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {agentKeyWechatEvidence} from "../agentkey/wechat-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -32,6 +33,7 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     if(snapshot.provider==='agentkey'&&input.supplement)throw new UnsupportedReplacement("AgentKey imports require received identity, not manual supplements");
     const {parsed,origin,sourceDiscoveredAt}=snapshot.provider==='agentkey'?await agentKeyWechatEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind!=="wechat_work",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as WechatIdentity;
@@ -88,6 +90,7 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({wechatImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
+    if(articleId){const videoHtml=record.articleContent??record.content;await registerImportedVideo(tx,resultId,{platform:"wechat",operationId:String(parsed.data.operationId),record,confirmed:(snapshot.provider==="agentkey"?record._content_type==="video":parsed.data.operationId==="I3CIBRI2"&&!!mediaUrl(record.videoLink)),singleVideo:false,videoProof:"verified-current-work-or-owned-body",...(typeof videoHtml==="string"?{html:videoHtml}:{})});}
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

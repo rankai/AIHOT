@@ -1,3 +1,6 @@
+import { registerImportedVideo } from "./subscription-video.ts";
+import { frozenVideoManifest } from "./subscription-video-candidates.ts";
+import { videoResourcesFromHtml, confirmedVideoMedia } from "../content/media.ts";
 import {recordCollectionFailure} from "./collection-health.ts";
 import { settleUnknownReceipt } from "../providers/operations/recovery.ts";
 // One native external request per job. Raw responses, material writes and continuation are distinct boundaries.
@@ -11,7 +14,7 @@ import { advanceRun, claimRun, requireExecution, receiptOptions, retainCurrentRe
 import { eligibleMembers } from "./subscriptions.ts";
 import { type NativeSourceInput } from "./native-commands.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
-import { tweetToCandidate, type XBacklog } from "./x.ts";
+import { tweetToCandidate, verifiedQuotedVideo, type XBacklog } from "./x.ts";
 import type { SourceRow } from "./types.ts";
 import { noiseFiltered, rewriteUrl } from "./collect.ts";
 import { allowed } from "./web-list.ts";
@@ -107,8 +110,15 @@ async function xPage(execution: Execution, snapshot: RunRow) {
       }
       for (const candidate of candidates) {
         const result = input.mode === "collection" ? await upsertMaterial({ ...candidate, sourceId: memberSource.id, via: "fetch", discoveredAt: new Date(input.startedAt), backfill: !memberSource.cursor?.initializedAt ? "first-import" : null }, tx) : null;
-        await saveResult(tx, execution, { itemKey: `${memberSource.id}:${candidate.identityKey}`, kind: "article", data: input.mode === "preview" ? candidate as unknown as Record<string, unknown> : {},
+        const resultId=await saveResult(tx, execution, { itemKey: `${memberSource.id}:${candidate.identityKey}`, kind: "article", data: input.mode === "preview" ? candidate as unknown as Record<string, unknown> : {},
           receiptId: page.receiptId, ...(result ? { articleId: result.articleId, sourceId: memberSource.id } : {}) });
+        if(result){
+          const tweet=tweets.find(t=>`x:${t.id_str}`===candidate.identityKey);
+          if(tweet)for(const [mediaRole,target] of [["own",tweet],["quoted",verifiedQuotedVideo(tweet)]] as const){
+            if(!target)continue;const videos=(target.extended_entities?.media??target.entities?.media??[]).filter(m=>m.type==="video");
+            await registerImportedVideo(tx,resultId,{platform:"x",operationId:"socialdata.search",record:target,confirmed:videos.length>0,singleVideo:videos.length===1,videoProof:mediaRole==="own"?"socialdata-own-media-type":"socialdata-verified-quote",mediaRole,workId:target.id_str,originalUrl:`https://x.com/${target.user.screen_name}/status/${target.id_str}`});
+          }
+        }
         if (result && (result.created || result.revised)) await queueProcessing(result.articleId, { db: tx });
       }
     }
@@ -196,14 +206,21 @@ async function saveMpMaterial(tx: Tx, execution: Execution, input: NativeInput, 
     await saveResult(tx, execution, { itemKey: identityKeyForUrl(post.url) ?? post.url, kind: "article", data: { bodyMissing: true }, receiptId: body.receiptId, articleId: known.id, sourceId: source.id });
     return;
   }
-  const result = await upsertMaterial({ sourceId: source.id, url: post.url, title: post.title, author: body.author,
+  const videos=body.content?videoResourcesFromHtml(body.content,post.url):[];
+  const result = await upsertMaterial({ media:videos.some(v=>v.length)?confirmedVideoMedia():undefined, sourceId: source.id, url: post.url, title: post.title, author: body.author,
     language: "zh", publishedAt: post.post_time ? new Date(post.post_time * 1000) : null, discoveredAt: new Date(input.startedAt),
     excerpt: post.digest ?? body.desc, bodyHtml: body.content ? sanitizeBody(body.content, post.url) : null, bodyText: text,
     bodyStatus: text ? "ok" : "none", via: "fetch", backfill: !source.cursor?.lastCheckedAt ? "first-import" : null,
     raw: { dajiala: { position: post.position, sn: post.sn ?? null, original: post.original ?? null, itemShowType: post.item_show_type ?? null, cover: post.cover_url ?? null, ...(passing ? { bodyRetry: { attempts: 1, error: passing } } : {}) } },
   }, tx);
   if (body.content) await tx`UPDATE articles SET raw = raw #- '{dajiala,bodyRetry}' WHERE id = ${result.articleId} AND source_id = ${source.id}`;
-  await saveResult(tx, execution, { itemKey: identityKeyForUrl(post.url) ?? post.url, kind: "article", data: {}, receiptId: body.receiptId, articleId: result.articleId, sourceId: source.id });
+  const resultId=await saveResult(tx, execution, { itemKey: identityKeyForUrl(post.url) ?? post.url, kind: "article", data: {}, receiptId: body.receiptId, articleId: result.articleId, sourceId: source.id });
+  if(videos.some(v=>v.length)) {
+    const [receipt]=await tx`SELECT attempts FROM receipts WHERE id=${body.receiptId}`;
+    const singleVideo=videos.length===1;
+    const manifest=frozenVideoManifest(body.receiptId,receipt!.attempts,videos,videos.map(urls=>({candidates:urls.map(url=>({url,provider:"dajiala",field:"video.src/source.src",quality:"unknown" as const}))})),singleVideo);
+    await registerImportedVideo(tx,resultId,{platform:"wechat",operationId:"mp.body",record:{},confirmed:true,singleVideo,videoProof:"owned-body-video-elements",manifest});
+  }
   if (result.created || result.revised) await queueProcessing(result.articleId, { db: tx });
 }
 

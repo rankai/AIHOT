@@ -1,3 +1,5 @@
+import { NativeVideoDownloadSetting, VideoDownloadLatestView } from "../../features/admin/subscription-video-ui";
+import type { VideoDownloadLatest } from "../../features/admin/subscription-video-data";
 import { SITE } from "@aihot/industry/site";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -14,6 +16,7 @@ import { HEALTH_LABEL, KIND_LABEL, MODE_LABEL, TIER_LABEL, VISIBILITY_LABEL } fr
 import { AdminPage, Badge, Button, Card, DataTable, Dot, Empty, Field, healthTone, Input, Json, KV, ReasonDialog, Select, Stat, Textarea, Time } from "../../features/admin/ui";
 
 interface Source {
+  videoDownloads?: VideoDownloadLatest | null;
   id: string;
   name: string;
   kind: string;
@@ -253,6 +256,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
               <Field label="采集配置（JSON）">
                 <Textarea className="font-mono !text-[12px]" rows={Math.min(18, draft.config.split("\n").length + 1)} value={draft.config} onChange={(e) => setDraft({ ...draft, config: e.target.value })} spellCheck={false} />
               </Field>
+              {["x_search", "mp_account"].includes(s.kind) && <NativeVideoDownloadSetting json={draft.config} disabled={!!pending || !!s.collection_issue} onChange={config => setDraft({ ...draft, config })} />}
               {configError && <div className="mt-1 text-[12.5px] text-hot">{configError}</div>}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
@@ -286,6 +290,8 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
 
         <div className="min-w-0 space-y-5">
           <Card title="采集订阅">
+            {["x_search", "mp_account"].includes(s.kind) && <p className="mb-3 text-[13px] text-ink-3">自动保存已入库视频：{s.config.autoDownloadVideo === true ? "开启" : "关闭"}</p>}
+            <VideoDownloadLatestView value={s.videoDownloads} />
             <KV items={[["供应商", s.collection_provider ?? (s.kind === "external" ? "外部上报" : ["x_search", "mp_account"].includes(s.kind) ? "尚未迁移" : "原生采集")], ["主订阅", s.subscription_id ?? "—"], ["当前执行记录", s.active_run_id ? <Link className="text-accent" to={`/admin/operations/${s.active_run_id}`}>#{s.active_run_id}</Link> : "无在途正式执行"]]} />
             {activeOperation && <div className="mt-3 min-w-0 space-y-2 border-t border-line pt-3"><KV items={[
               ["执行状态", <OperationBadge status={activeOperation.status} />],
@@ -351,7 +357,7 @@ export default function SourceDetail({ loaderData }: Route.ComponentProps) {
       <ReasonDialog
         open={dialog === "save"}
         title="保存信源设置"
-        description={`将修改：${Object.keys(patchPreview(draft, s)).join("、") || "无"}`}
+        description={`将修改：${Object.keys(patchPreview(draft, s)).join("、") || "无"}${["x_search", "mp_account"].includes(s.kind) ? "。主订阅执行配置（含视频保存）变化将停止旧轮及其视频保存任务，已收响应与历史保留。" : ""}`}
         busy={pending === "save"}
         onClose={() => setDialog(null)}
         onSubmit={async (reason) => {

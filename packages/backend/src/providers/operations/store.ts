@@ -3,6 +3,7 @@ import type { Tx } from "../../db.ts";
 import { sha256, stableJson } from "../../lib/ids.ts";
 import { eligibleMembers, lockSubscription, releaseSubscriptions, type SubscriptionMember } from "../../sources/subscriptions.ts";
 import { completeReceipt, type PaidRequestOptions } from "../receipts.ts";
+import { SUBSCRIPTION_VIDEO_DOWNLOAD, lockVideoDownloadOwners, eligibleVideoDownloadMembers, type VideoDownloadOwnership } from "../../sources/subscription-video-ownership.ts";
 
 export class StaleOperationError extends Error { readonly code = "conflict"; }
 export interface Execution { runId: number; stepVersion: number; generation: number }
@@ -10,7 +11,7 @@ export interface OperationProgress extends Record<string, unknown> {
   /** Unconsumed source pages survive switching the current request to enrichment. */
   retainedReceiptIds?: number[];
 }
-export interface RunInput extends Record<string, unknown> { members: SubscriptionMember[]; forceSourceId?: string | null }
+export interface RunInput extends Record<string, unknown> { members: SubscriptionMember[]; forceSourceId?: string | null; videoDownloadOwnership?: VideoDownloadOwnership }
 export interface RunRow {
   id: number; provider: string; status: string; step_key: string; step_version: number; generation: number;
   operation_key?: string; contract_version?: number;
@@ -23,6 +24,10 @@ export async function createRun(tx: Tx, command: {
   input: Record<string, unknown>; stepKey: string; subscriptionIds?: number[]; limits?: Record<string, unknown>; forceSourceId?: string;
 }): Promise<RunRow> {
   const ids = [...new Set(command.subscriptionIds ?? [])].sort((a, b) => a - b);
+  const download = command.operationKey === SUBSCRIPTION_VIDEO_DOWNLOAD;
+  if (download && (command.provider !== "local" || command.contractVersion !== 1 || ids.length !== 1 || command.forceSourceId || typeof command.input.articleId !== "string")) {
+    throw new StaleOperationError("Video download requires one subscription and material owner");
+  }
   const hash = sha256(stableJson({ ...command, subscriptionIds: ids }));
   await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${command.actor}:${command.commandKey}`}))`;
   const [existing] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor = ${command.actor} AND command_key = ${command.commandKey}`;
@@ -32,8 +37,15 @@ export async function createRun(tx: Tx, command: {
   }
   await lockAssetInputs(tx, command.input.fileKeys);
   const members: SubscriptionMember[] = [];
+  let videoDownloadOwnership: VideoDownloadOwnership | undefined;
+  if (download) {
+    const owners = await lockVideoDownloadOwners(tx, ids[0]!, command.input.articleId as string);
+    if (!owners) throw new StaleOperationError("Video download subscription or material is no longer eligible");
+    members.push(owners.member);
+    videoDownloadOwnership = owners.ownership;
+  }
   const subscriptions = [];
-  for (const id of ids) subscriptions.push(await lockSubscription(tx, id));
+  for (const id of download ? [] : ids) subscriptions.push(await lockSubscription(tx, id));
   const sources = new Map<string, { enabled: boolean; execution_version: number }>();
   for (const id of [...new Set(subscriptions.flatMap((sub) => sub.control_source_id ? [sub.control_source_id as string] : []))].sort()) {
     const [source] = await tx<{ enabled: boolean; execution_version: number }[]>`SELECT enabled, execution_version FROM sources WHERE id = ${id} FOR SHARE`;
@@ -52,9 +64,10 @@ export async function createRun(tx: Tx, command: {
   const [run] = await tx<RunRow[]>`INSERT INTO operation_runs(actor, command_key, subscription_id, provider, operation_key,
     contract_version, input, input_hash, step_key, limits)
     VALUES (${command.actor}, ${command.commandKey}, ${ids.length === 1 ? ids[0]! : null}, ${command.provider},
-    ${command.operationKey}, ${command.contractVersion}, ${tx.json({ ...command.input, members, forceSourceId: command.forceSourceId ?? null } as never)}, ${hash},
+    ${command.operationKey}, ${command.contractVersion}, ${tx.json({ ...command.input, members, forceSourceId: command.forceSourceId ?? null,
+      ...(download ? { videoDownloadOwnership } : {}) } as never)}, ${hash},
     ${command.stepKey}, ${tx.json((command.limits ?? {}) as never)}) RETURNING *`;
-  if (ids.length) await tx`UPDATE collection_subscriptions SET active_run_id = ${run!.id}, updated_at = now() WHERE id IN ${tx(ids)}`;
+  if (ids.length && !download) await tx`UPDATE collection_subscriptions SET active_run_id = ${run!.id}, updated_at = now() WHERE id IN ${tx(ids)}`;
   return run!;
 }
 
@@ -62,7 +75,9 @@ export async function lockRun(tx: Tx, id: number): Promise<{ run: RunRow; eligib
   // Frozen input may be read without locking; lock order is subscriptions, sources, run, receipt.
   const [snapshot] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE id = ${id}`;
   if (!snapshot) throw new StaleOperationError("Operation not found");
-  const eligible = await eligibleMembers(tx, id, snapshot.input.members, snapshot.input.forceSourceId);
+  const eligible = snapshot.operation_key === SUBSCRIPTION_VIDEO_DOWNLOAD
+    ? await eligibleVideoDownloadMembers(tx, snapshot.input.members, snapshot.input.videoDownloadOwnership)
+    : await eligibleMembers(tx, id, snapshot.input.members, snapshot.input.forceSourceId);
   const [run] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE id = ${id} FOR UPDATE`;
   if (!run) throw new StaleOperationError("Operation not found");
   return { run, eligible };
@@ -71,7 +86,7 @@ export async function lockRun(tx: Tx, id: number): Promise<{ run: RunRow; eligib
 export async function requireExecution(tx: Tx, execution: Execution): Promise<RunRow> {
   const { run, eligible } = await lockRun(tx, execution.runId);
   if (!run || run.status !== "active" || run.step_version !== execution.stepVersion || run.generation !== execution.generation) throw new StaleOperationError("Operation execution is stale");
-  if (run.input.members.length && !eligible.length) throw new StaleOperationError("No eligible subscription members");
+  if ((run.input.members.length || run.operation_key === SUBSCRIPTION_VIDEO_DOWNLOAD) && !eligible.length) throw new StaleOperationError("No eligible subscription members");
   return run;
 }
 
@@ -98,7 +113,9 @@ export async function saveResult(tx: Tx, execution: Execution, result: {
   articleId?: string; sourceId?: string; fileKey?: string;
 }): Promise<number> {
   const run = await requireExecution(tx, execution);
-  if (result.sourceId && run.input.members.some((m) => m.sourceId === result.sourceId)) {
+  if (run.operation_key === SUBSCRIPTION_VIDEO_DOWNLOAD && ((result.sourceId && result.sourceId !== run.input.videoDownloadOwnership!.sourceId)
+    || (result.articleId && result.articleId !== run.input.videoDownloadOwnership!.articleId))) throw new StaleOperationError("Video download result owner changed");
+  if (run.operation_key !== SUBSCRIPTION_VIDEO_DOWNLOAD && result.sourceId && run.input.members.some((m) => m.sourceId === result.sourceId)) {
     const eligible = await eligibleMembers(tx, run.id, run.input.members, run.input.forceSourceId);
     if (!eligible.some((m) => m.sourceId === result.sourceId)) throw new StaleOperationError("Result source is no longer eligible");
   }
@@ -153,7 +170,7 @@ export async function advanceRun(tx: Tx, execution: Execution, next: { stepKey: 
 export async function resumeRun(tx: Tx, expected: Execution): Promise<void> {
   const { run, eligible } = await lockRun(tx, expected.runId);
   if (!run || !["waiting", "needs_review", "stopped"].includes(run.status) || run.step_version !== expected.stepVersion || run.generation !== expected.generation) throw new StaleOperationError("Run cannot resume");
-  if (run.input.members.length && !eligible.length) throw new StaleOperationError("No eligible subscription members");
+  if ((run.input.members.length || run.operation_key === SUBSCRIPTION_VIDEO_DOWNLOAD) && !eligible.length) throw new StaleOperationError("No eligible subscription members");
   await tx`UPDATE operation_runs SET status = 'active', generation = generation + 1, wait_reason = NULL,
     next_attempt_at = NULL, job_id = NULL, updated_at = now() WHERE id = ${run.id}`;
 }

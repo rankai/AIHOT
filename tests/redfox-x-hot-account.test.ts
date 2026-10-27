@@ -8,12 +8,14 @@ import {config} from '@aihot/backend/config';
 import {stopBoss} from '@aihot/backend/jobs/queue';
 import {createSynchronousQuery} from '@aihot/backend/providers/redfox/synchronous';
 import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
-import {resumeRun} from '@aihot/backend/providers/operations/store';
+import {receiptOptions,resumeRun} from '@aihot/backend/providers/operations/store';
 import {xResearchOperations} from '@aihot/backend/providers/redfox/x-research-contract';
 import {hotResearchOperations} from '@aihot/backend/providers/redfox/hot-research-contract';
 import {redfoxAccountOperations} from '@aihot/backend/providers/redfox/redfox-account-contract';
 import {parseXResearch} from '@aihot/backend/providers/redfox/x-research';
 import {parseHotResearch} from '@aihot/backend/providers/redfox/hot-research';
+import {parseRedfoxAccount} from '@aihot/backend/providers/redfox/redfox-account';
+import {redfoxRequest} from '@aihot/backend/providers/redfox/client';
 const operations={...xResearchOperations,...hotResearchOperations,...redfoxAccountOperations};type Op=keyof typeof operations;
 const secret='fake-key +/=&?',id='900719925474099312345',cursor=' 900719925474099312345|900719925474099399999 ';
 const cases:[Op,Record<string,unknown>,unknown][]=[
@@ -34,6 +36,33 @@ after(async()=>{for(const b of saved)await sql`UPDATE budgets SET per_minute=${b
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
 async function query(){const run=await createSynchronousQuery({operationId:current[0],parameters:current[1]},'x-hot-account-test',tag());await step(run.id);return {run:await row(run.id),results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};}
+test('balance points preserve fractional numbers and strings, retain integers and reject invalid values',()=>{
+ for(const value of [1.25,'1.25',0,'0',12,'12',-0.6,'-0.6']){
+  const [result]=parseRedfoxAccount('API_1792036841619',{totalAvailablePoints:2.5,freeAvailablePoints:'1.25',paidAvailablePoints:value});
+  assert.equal((result!.data.record as Record<string,unknown>).paidAvailablePoints,value);
+ }
+ for(const value of [null,undefined,true,NaN,Infinity,-Infinity,'','1.2.3','NaN','Infinity','1 point',{},[]]){
+  assert.throws(()=>parseRedfoxAccount('API_1792036841619',{totalAvailablePoints:2.5,freeAvailablePoints:'1.25',paidAvailablePoints:value}));
+ }
+});
+test('received fractional balance completes offline without another request or attempt',async()=>{
+ current=['API_1792036841619',{}, {totalAvailablePoints:2.5,freeAvailablePoints:'1.25',paidAvailablePoints:1.25}];
+ const pending=await createSynchronousQuery({operationId:current[0],parameters:current[1]},'x-hot-account-test',tag());
+ const r=await row(pending.id),before=hits;
+ const received=await redfoxRequest('API_1792036841619',{},String(r.input.window),'account',receiptOptions({runId:r.id,stepVersion:r.step_version,generation:r.generation}));
+ assert.equal(hits,before+1);
+ assert.equal((await sql`SELECT status FROM receipts WHERE id=${received.receiptId}`)[0]!.status,'received');
+ assert.equal((await sql`SELECT count(*)::int AS n FROM operation_results WHERE run_id=${r.id}`)[0]!.n,0);
+ process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
+ try{
+  await step(r.id);assert.equal((await row(r.id)).status,'completed');assert.equal(hits,before+1);
+  const [result]=await sql`SELECT data,receipt_id FROM operation_results WHERE run_id=${r.id} AND kind='redfox_balance'`;
+  assert.equal(result!.data.record.paidAvailablePoints,1.25);assert.equal(result!.receipt_id,received.receiptId);
+  const [receipt]=await sql`SELECT status,attempts FROM receipts WHERE id=${received.receiptId}`;
+  assert.equal(receipt!.status,'completed');assert.equal(receipt!.attempts,1);
+  assert.equal((await sql`SELECT count(*)::int AS n FROM receipt_attempts WHERE receipt_id=${received.receiptId}`)[0]!.n,1);
+ }finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY=secret;}
+});
 test('nine fixed wire contracts preserve independent authors, opaque cursors, points and research roles',async()=>{const before=hits;for(const c of cases){current=c;const q=await query();assert.equal(q.run.status,'completed',`${c[0]}: ${q.run.wait_reason}`);assert.ok(q.results.length);const [receipt]=await sql`SELECT service,cost,cost_basis FROM receipts WHERE id=${q.results[0]!.receipt_id}`;assert.equal(receipt!.service,c[0] in redfoxAccountOperations?'redfox.account':'redfox.query');if(c[0] in redfoxAccountOperations){assert.notEqual(receipt!.cost,null);assert.equal(Number(receipt!.cost),0);assert.equal(receipt!.cost_basis,'estimated');}if(c[0]==='ABJQXHUE'){assert.deepEqual(q.results[0]!.data.identity,{userId:'11'});assert.deepEqual(q.results[1]!.data.identity,{userId:'33'});assert.equal(q.results[1]!.kind,'x_comment');}if(c[0]==='5QY3G5TY'){assert.deepEqual(q.results[0]!.data.identity,{userId:'55'});assert.equal(q.results.at(-1)!.data.moreUsers,false);assert.equal(q.results.at(-1)!.data.nextCursor,cursor);}if(c[0]==='API_1790063277084')assert.deepEqual(q.results[0]!.data.identity,{});if(c[0]==='API_1792043329817'){assert.equal(q.results.at(-1)!.data.count,2);assert.equal(q.results[0]!.data.record.points,-0.6);assert.deepEqual(q.results[0]!.data.identity,{});}}assert.equal(hits,before+9);assert.deepEqual(errors,[]);});
 test('strict credential rejection occurs before run creation; array and per-operation date contracts remain exact',async()=>{const before=hits;for(const op of Object.keys(redfoxAccountOperations)){const key=tag();await assert.rejects(createSynchronousQuery({operationId:op,parameters:{apiKey:'client-secret'}},'reject-secret',key));assert.equal((await sql`SELECT id FROM operation_runs WHERE actor='reject-secret' AND command_key=${key}`).length,0);}assert.equal(hits,before);const valid={keywords:['not,split'],startDate:'2026-01-01',endDate:'2026-01-31'};assert.ok(hotResearchOperations.W94P1QH1.schema.safeParse(valid).success);assert.ok(hotResearchOperations.W94P1QH1.schema.safeParse({...valid,platforms:[]}).success);for(const extra of [{platforms:[6]},{keywords:'one,two'},{endDate:'2026-02-01'}])assert.equal(hotResearchOperations.W94P1QH1.schema.safeParse({...valid,...extra}).success,false);assert.ok(hotResearchOperations.S28Q6HUD.schema.safeParse(cases[6]![1]).success);assert.deepEqual(xResearchOperations.API_1790063277084.schema.parse({category:'全部行业'}),{pageNum:1,gender:'all',category:'全部行业'});assert.deepEqual(redfoxAccountOperations.API_1792043329817.schema.parse({}),{});});
 test('GET key and encoded echoes never enter persisted input, summary, results or errors',async()=>{current=cases[7]!;echo=true;try{const q=await query();assert.equal(q.run.status,'completed');const [receipt]=await sql`SELECT * FROM receipts WHERE id=${q.results[0]!.receipt_id}`;const attempts=await sql`SELECT * FROM receipt_attempts WHERE receipt_id=${receipt!.id}`;const serialized=JSON.stringify({run:q.run,receipt,attempts,results:q.results});for(const value of [secret,encodeURIComponent(secret),new URLSearchParams({apiKey:secret}).toString().slice(7)])assert.equal(serialized.includes(value),false);assert.equal(JSON.stringify(q.run.input).includes('apiKey'),false);assert.equal(JSON.stringify(receipt!.request).includes('apiKey'),false);assert.ok(receipt!.response.body.includes('[REDACTED]'));}finally{echo=false;}disconnect=true;try{const q=await query();assert.equal(q.run.status,'waiting');assert.equal(JSON.stringify(q.run).includes(secret),false);assert.equal(q.run.wait_reason.includes('apiKey'),false);}finally{disconnect=false;}});

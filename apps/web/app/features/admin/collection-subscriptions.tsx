@@ -1,3 +1,4 @@
+import { VideoDownloadSetting, VideoDownloadLatestView } from "./subscription-video-ui";
 import { useEffect, useRef, useState } from "react";
 import type { PlatformCollectionProviderPreflight } from "@aihot/contracts/redfox";
 import { Link, useFetcher, useNavigate } from "react-router";
@@ -37,7 +38,7 @@ export function CollectionSubscriptions({ subscriptions, operations, requestedId
         } },
         { key: "schedule", label: "启停 / 调度", render: row => <div className="space-y-1"><Badge tone={row.enabled ? "ok" : "muted"}>{row.enabled ? "已启用" : "已停用"}</Badge><p className="text-[12px] text-ink-3">每 {row.intervalMinutes} 分钟</p><p className="text-[12px] text-ink-3">下次：<Time at={row.nextRunAt} /></p></div> },
         { key: "run", label: "当前执行记录", render: row => row.activeRun ? <div className="space-y-1"><Link className="text-accent" to={`/admin/operations/${row.activeRun.id}#progress`}>查看进度 #{row.activeRun.id}</Link><div><OperationBadge status={row.activeRun.status} /></div>{row.activeRun.waitReason && <p className="max-w-64 text-[12px] text-ink-3">{row.activeRun.waitReason}</p>}</div> : "无在途执行" },
-        { key: "history", label: "历史与结果", render: row => <Link className="whitespace-nowrap text-accent" to={`/admin/operations?subscriptionId=${row.id}`}>执行历史与结果</Link> },
+        { key: "history", label: "历史与结果", render: row => <div className="space-y-2"><Link className="whitespace-nowrap text-accent" to={`/admin/operations?subscriptionId=${row.id}`}>执行历史与结果</Link><p className="text-[12px] text-ink-3">自动保存视频：{row.autoDownloadVideo ? "开启" : "关闭"}</p><VideoDownloadLatestView value={row.videoDownloads} /></div> },
         { key: "edit", label: "", render: row => <Button size="sm" disabled={!!actions.pending} onClick={() => edit(row.id)}>编辑</Button> },
       ]} />
     </Card>
@@ -91,7 +92,7 @@ function SubscriptionEditor({ initial, rows, operations, seed, actions, onRefres
       {hot && <p className="rounded-control bg-bg-sunk p-3 text-[13px] text-ink-3">每轮自动查询当天：Asia/Shanghai 当天 00:00 至次日 00:00，在本轮创建时固定查询窗口。每小时更新，最新可查询前 1 小时的数据；不会自动成为文章。</p>}
       <PlatformFields operation={collectionFormOperation(operation)} values={draft.values} subscription={operation.platform === "weibo" && operation.id === "TXQPVGJG"} disabled={!!pending} onChange={(name, value) => { change({ values: { ...draft.values, [name]: value } }); setPreviewId(null); }} />
       <p className="text-[12.5px] text-ink-3">{operation.purpose}。{collectionPagingNote(operation, draft.values, draft.provider)}</p>
-      <div className="space-y-2 rounded-control border border-line p-3 text-[12.5px] text-ink-3"><p>{hot ? "可选预览合成点击时的 Asia/Shanghai 当天查询窗口，只查询一次，使用 query 次数预算并可能计费；" : "可选预览只查询当前条件一次 / 一页，使用 query 次数预算并可能计费；"}不保存订阅、不占正式游标、不自动启用，也不按整轮页数执行，不调用已配置的详情补全。预览不是启用门禁，已有信源主采集不变。</p><Button size="sm" disabled={!!pending} busy={pending === "preview-subscription"} onClick={async () => {
+      <div className="space-y-2 rounded-control border border-line p-3 text-[12.5px] text-ink-3"><p>{hot ? "可选预览合成点击时的 Asia/Shanghai 当天查询窗口，只查询一次，使用 query 次数预算并可能计费；" : "可选预览只查询当前条件一次 / 一页，使用 query 次数预算并可能计费；"}不保存订阅、不占正式游标、不自动启用，也不按整轮页数执行，不调用已配置的详情补全或视频保存。预览不是启用门禁，已有信源主采集不变。</p><Button size="sm" disabled={!!pending} busy={pending === "preview-subscription"} onClick={async () => {
         let body: ReturnType<typeof collectionPreviewBody>;
         try { body = collectionPreviewBody(operation, draft.values,new Date(),draft.provider); setError(null); } catch (error) { setError((error as Error).message); return; }
         const result = await run<OperationAccepted>("POST", "/api/admin/redfox/queries", body, { label: "preview-subscription", revalidate: false });
@@ -112,7 +113,8 @@ function SubscriptionEditor({ initial, rows, operations, seed, actions, onRefres
           <p className="text-[12.5px] text-ink-3">{collectionDetailPriceNote(detailTarget)}仅对本轮实收且可证明的作品请求所选详情；不支持的类型保留待核实，不猜身份或自动换库。详情与异常重试使用 collect 次数预算，预算等待保留同一执行记录。</p>
         </>}
       </div> : <p className="text-[12.5px] text-ink-3">系统自动补全未接通，可从结果显式查询；本订阅不启用额外详情调用。</p>)}
-      <div className="rounded-control bg-bg-sunk p-3 text-[13px] text-ink-3">{latest?.activeRun && changesExecution === true ? <>执行配置变化将停止旧轮执行 #{latest.activeRun.id} 并解除本订阅占用；旧响应保留，不能恢复成新配置。</> : latest?.activeRun && changesExecution === false ? <>本次只调整名称或周期，当前执行 #{latest.activeRun.id} 会按原轮次继续。</> : "只改名称或周期保留当前执行；启停、操作、查询、补全或限额变化会停止旧轮执行并解除本订阅占用，旧响应保留，不能恢复成新配置。"}<p className="mt-2">{collectionPriceNote(operation)}启用后受 collect 次数预算控制，免费请求也计次数；分页、额外详情及异常重试可能增加请求和费用，实际实扣未核对。新建默认停用；权限不因新订阅提高，不自动换库或切换供应商。</p></div>
+      <VideoDownloadSetting checked={draft.autoDownloadVideo} disabled={!!pending} onChange={value => change({ autoDownloadVideo: value })} />
+      <div className="rounded-control bg-bg-sunk p-3 text-[13px] text-ink-3">{latest?.activeRun && changesExecution === true ? <>执行配置（含视频保存）变化将停止旧轮执行 #{latest.activeRun.id} 并解除本订阅占用；旧响应保留，不能恢复成新配置。</> : latest?.activeRun && changesExecution === false ? <>本次只调整名称或周期，当前执行 #{latest.activeRun.id} 会按原轮次继续。</> : "只改名称或周期保留当前执行；启停、操作、查询、补全、视频保存或限额变化会停止旧轮执行并解除本订阅占用，旧响应保留，不能恢复成新配置。"}<p className="mt-2">{collectionPriceNote(operation)}启用后受 collect 次数预算控制，免费请求也计次数；分页、额外详情及异常重试可能增加请求和费用，实际实扣未核对。新建默认停用；权限不因新订阅提高，不自动换库或切换供应商。</p></div>
       {stale && <div className="space-y-2 rounded-control bg-amber/10 p-3 text-[13px] text-amber"><p>服务端配置版本已变化，草稿保持。请核对最新配置，再同步版本并决定是否保存。</p><Json value={latest} label="当前服务端配置与运行状态" /><Button size="sm" disabled={!!pending} onClick={() => { setVersion(latest!.editVersion); setPreflight(null); setError(null); }}>同步最新版本（保留草稿）</Button></div>}
       {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}{saved && <p role="status" className="text-[13px] text-ok">{saved}</p>}
       <div className="flex flex-wrap justify-end gap-2"><Button disabled={!!pending} busy={refreshing} onClick={onRefresh}>刷新服务端状态</Button><Button type="submit" tone="primary" disabled={!!pending || stale || providers.length === 0} busy={pending === "save-subscription" || pending === "create-subscription"}>{id ? "保存订阅" : "创建订阅"}</Button></div>

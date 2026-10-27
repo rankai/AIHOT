@@ -53,17 +53,20 @@ export function xArticleText(article: SdArticle): { title: string; text: string 
   return text ? { title: (article.title ?? "").trim(), text } : null;
 }
 
+/** One received quote only: relation, target ID, author handle and actual video type agree. */
+export function verifiedQuotedVideo(t:SdTweet):SdTweet|null {
+  const q=t.quoted_status;
+  return t.is_quote_status===true&&q&&/^\d+$/.test(q.id_str)&&q.id_str!==t.id_str
+    &&/^[A-Za-z0-9_]{1,15}$/.test(q.user?.screen_name??"")
+    &&(!t.quoted_status_id_str||t.quoted_status_id_str===q.id_str)
+    &&(q.extended_entities?.media??q.entities?.media??[]).some(m=>m.type==="video")?q:null;
+}
+
 export function tweetToCandidate(t: SdTweet): Candidate {
   const candidate = xPostToCandidate(toXPost(t), new Date(t.tweet_created_at), { favorite: t.favorite_count ?? null, retweet: t.retweet_count ?? null, views: t.views_count ?? null });
   const own = t.extended_entities?.media ?? t.entities?.media ?? [];
   candidate.media = (candidate.media ?? []).map((m, i) => own[i]?.type === "video" && m.kind === "video" ? { ...m, confirmed: true } : m);
-  const q = t.quoted_status;
-  if (t.is_quote_status === true && q && /^\d+$/.test(q.id_str) && q.id_str !== t.id_str
-    && /^[A-Za-z0-9_]{1,15}$/.test(q.user?.screen_name ?? "")
-    && (!t.quoted_status_id_str || t.quoted_status_id_str === q.id_str)
-    && (q.extended_entities?.media ?? q.entities?.media ?? []).some((m) => m.type === "video")) {
-    candidate.media = mergeMedia(candidate.media, confirmedVideoMedia());
-  }
+  if(verifiedQuotedVideo(t))candidate.media=mergeMedia(candidate.media,confirmedVideoMedia());
   return candidate;
 }
 

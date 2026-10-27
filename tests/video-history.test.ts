@@ -9,6 +9,7 @@ import {createSynchronousQuery} from '@aihot/backend/providers/redfox/synchronou
 import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
 import {importInstagramResult} from '@aihot/backend/providers/redfox/import-instagram';
 import {scanVideoHistory,applyVideoHistoryEntry,restoreVideoHistoryEntry,reconcileVideoHistoryEntry} from '@aihot/backend/content/video-history';
+import {importManualWorkResult} from '@aihot/backend/providers/redfox/import-manual-work';
 import {newArticleId} from '@aihot/backend/lib/ids';
 let saved:Record<string,unknown>;
 let server:Awaited<ReturnType<typeof stub>>,record:Record<string,unknown>;
@@ -99,4 +100,20 @@ test('scan cursor advances past an empty candidate batch to later video evidence
  const repeat=await sql.begin('read only',tx=>scanVideoHistory(tx,1,first.nextCursor!));assert.deepEqual(repeat.entries,second.entries);
  const end=await sql.begin('read only',tx=>scanVideoHistory(tx,5000,prefix+'2'));
  assert.equal(end.nextCursor,null);
+});
+
+
+test('Shipinhao retained manual evidence accepts absent IDs and rejects a different received ID',async()=>{
+ const sourceId=tag();await sql`INSERT INTO sources(id,name,kind,participation_mode) VALUES (${sourceId},'Synthetic manual history','external','isolated')`;
+ for(const operationId of ['E7G00COY','OVUTOTCV','OE4KUEUO'])for(const withId of [false,true]){
+  const videoId=tag(),work={...(withId?{videoId}:{}),description:'Retained list video',videoUrl:'https://example.test/video.mp4'};
+  record=operationId==='OE4KUEUO'?work:{list:[work]};
+  const parameters=operationId==='E7G00COY'?{keyword:tag()}:operationId==='OVUTOTCV'?{nickname:tag()}:{videoId};
+  const run=await createSynchronousQuery({operationId,parameters},'video-history',tag());await executeOperationStep(run.id,run.step_version,randomUUID());
+  const [result]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND kind='shipinhao_work'`;
+  const imported=await importManualWorkResult(result!.id,{sourceId,reason:'Synthetic evidence',supplement:{url:`https://weixin.qq.com/sph/${tag()}`,evidence:'Verified original and author'}},'video-history',tag());
+  await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${imported!.articleId}`;
+  const entry=(await scan()).entries.find(e=>e.articleId===imported!.articleId);assert.ok(entry,`${operationId} received ID=${withId}`);
+  if(withId){await sql`UPDATE operation_results SET provenance=jsonb_set(provenance,'{manualWorkImport,receivedWorkId}',to_jsonb('different-id'::text)) WHERE id=${result!.id}`;await assert.rejects(sql.begin(tx=>applyVideoHistoryEntry(tx,entry)),/manual-original-evidence-missing/);}
+ }
 });

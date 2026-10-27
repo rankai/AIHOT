@@ -1,3 +1,4 @@
+import { executeSubscriptionVideoStep } from "./subscription-video.ts";
 import { executeAgentKeyStep } from "../agentkey/execution.ts";
 import { lockRun, resumeRun, StaleOperationError } from "./store.ts";
 import { sql } from "../../db.ts";
@@ -14,6 +15,7 @@ export async function executeOperationStep(runId: number, stepVersion: number, j
   }); } catch(error) {if(error instanceof StaleOperationError)return {skipped:true};throw error;}
   const [run] = await sql`SELECT provider FROM operation_runs WHERE id = ${runId}`;
   if (!run) return {skipped:true};
+  if (run.provider === "local") return executeSubscriptionVideoStep(runId,stepVersion,jobId);
   if (run.provider === "agentkey") return executeAgentKeyStep(runId,stepVersion,jobId);
   if (run.provider === "redfox") return executeRedfoxStep(runId,stepVersion,jobId);
   if (["socialdata","dajiala"].includes(run.provider)) return executeNativeStep(runId,stepVersion,jobId);

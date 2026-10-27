@@ -13,6 +13,7 @@ export async function createNativeSubscription(tx: Tx, sourceId: string): Promis
     operationKey: x ? "x.search" : "mp.history", contractVersion: 1, config: source.config ?? {}, intervalMinutes: source.interval_minutes, enabled: source.enabled });
   await tx`UPDATE collection_subscriptions SET config = ${JSON.stringify(source.config)}::text::jsonb,
     progress = ${tx.json(source.cursor ?? {})}, next_run_at = ${source.next_fetch_at} WHERE id = ${id}`;
+  await tx`UPDATE sources SET config=config-'autoDownloadVideo' WHERE id=${sourceId} AND config ? 'autoDownloadVideo'`;
   return id;
 }
 

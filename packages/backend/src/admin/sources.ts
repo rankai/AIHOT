@@ -1,3 +1,4 @@
+import {videoDownloadSummary,videoDownloadSummaries} from "../providers/operations/read.ts";
 import { logicalMpConfig,validateMpSubscriptionConfig } from "../sources/mp-replacement.ts";
 import { createRedfoxMpCollection,createAgentKeyMpCollection } from "../sources/mp-commands.ts";
 import { createCollection } from "../sources/collection-commands.ts";
@@ -41,7 +42,7 @@ export async function listSources(f: SourceListFilters) {
   const page = Math.max(1, f.page ?? 1);
   const q = f.q?.trim() ? `%${f.q.trim()}%` : null;
   const rows = await sql`
-    SELECT s.id, s.name, s.kind, s.tier, s.participation_mode, s.enabled, s.health, s.fail_count, coalesce(c.interval_minutes, s.interval_minutes) AS interval_minutes,
+    SELECT c.id AS subscription_id,s.id, s.name, s.kind, s.tier, s.participation_mode, s.enabled, s.health, s.fail_count, coalesce(c.interval_minutes, s.interval_minutes) AS interval_minutes,
            s.last_ok_at, s.last_fetch_at, s.last_error, s.first_party, CASE WHEN c.id IS NOT NULL THEN c.next_run_at ELSE s.next_fetch_at END AS next_fetch_at,
            (SELECT count(*)::int FROM articles a WHERE a.source_id = s.id AND a.discovered_at > now() - interval '7 days') AS items_7d,
            (SELECT count(*)::int FROM publications p WHERE p.source_id = s.id AND p.selected AND p.discovered_at > now() - interval '30 days') AS selected_30d
@@ -57,6 +58,8 @@ export async function listSources(f: SourceListFilters) {
     SELECT count(*)::int AS total, count(*) FILTER (WHERE enabled)::int AS enabled,
            count(*) FILTER (WHERE health = 'failing')::int AS failing, count(*) FILTER (WHERE health = 'degraded')::int AS degraded
     FROM sources`;
+  const summaries=await videoDownloadSummaries(rows.filter(r=>r.subscription_id).map(r=>Number(r.subscription_id)));
+  for(const row of rows)row.videoDownloads=summaries.get(Number(row.subscription_id))??null;
   return { page, rows, totals };
 }
 
@@ -66,6 +69,8 @@ export async function sourceDetail(id: string) {
     c.id AS subscription_id, c.active_run_id, c.provider AS collection_provider, c.operation_key AS collection_operation, c.edit_version AS collection_version,
     CASE WHEN s.kind IN ('x_search','mp_account') AND c.id IS NULL THEN 'requires_explicit_migration' ELSE NULL END AS collection_issue FROM sources s LEFT JOIN collection_subscriptions c ON c.control_source_id = s.id WHERE s.id = ${id}`;
   if (!source) return null;
+  if(source.subscription_id && source.config && typeof source.config==='object')source.config={...source.config,autoDownloadVideo:source.config.autoDownloadVideo===true};
+  source.videoDownloads=source.subscription_id?await videoDownloadSummary(source.subscription_id):null;
   const runs = await sql`
     SELECT * FROM (
       SELECT id,'fetch'::text AS kind,'fetch:'||id AS history_key,started_at AS occurred_at,
@@ -136,7 +141,10 @@ const EDITABLE = z
 export async function updateSource(id: string, input: { patch: unknown; version: string; reason?: string }, actor: string) {
   const patch = EDITABLE.parse(input.patch);
   return sql.begin(async (tx) => {
-    const [subscription] = await tx`SELECT * FROM collection_subscriptions WHERE control_source_id = ${id} FOR UPDATE`;
+    // Source invalidation follows the same subscription → source → run lock order as downloads.
+    await tx`SELECT id FROM collection_subscriptions WHERE control_source_id=${id} OR id IN
+      (SELECT subscription_id FROM operation_runs WHERE operation_key='subscription.video.download' AND status NOT IN ('completed','failed') AND input->'videoDownloadOwnership'->>'sourceId'=${id}) ORDER BY id FOR UPDATE`;
+    const [subscription] = await tx`SELECT * FROM collection_subscriptions WHERE control_source_id = ${id}`;
     const [before] = await tx`SELECT * FROM sources WHERE id = ${id} FOR UPDATE`;
     if (!before) return null;
     if (new Date(before.updated_at as Date).toISOString() !== input.version) throw new Conflict("信源已被其他操作修改，请刷新后再改");
@@ -160,6 +168,9 @@ export async function updateSource(id: string, input: { patch: unknown; version:
         active_run_id = CASE WHEN ${exitsMember} THEN NULL ELSE active_run_id END,
         next_run_at = CASE WHEN ${patch.enabled === true} THEN now() ELSE next_run_at END, updated_at = now() WHERE id = ${subscription.id}`;
     }
+    if(subscriptionChanged||executionChanged)await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Subscription or author source execution configuration changed',next_attempt_at=NULL,job_id=NULL
+      WHERE operation_key='subscription.video.download' AND status NOT IN ('completed','failed')
+        AND ((subscription_id=${subscription?.id??null} AND ${subscriptionChanged}) OR (input->'videoDownloadOwnership'->>'sourceId'=${id} AND ${executionChanged}))`;
     const sourceKeys = subscription ? keys.filter((k) => k !== "config" && k !== "interval_minutes") : keys;
     const values = { ...Object.fromEntries(sourceKeys.map((k) => [k, k === "config" ? tx.json(patch.config as never) : patch[k]])), updated_at: new Date() };
     const [after] = await tx`UPDATE sources SET ${tx(values as never, ...([...sourceKeys, "updated_at"] as string[]))}, execution_version = execution_version + ${executionChanged ? 1 : 0},

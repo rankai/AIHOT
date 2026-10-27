@@ -1,4 +1,6 @@
 import {logicalKeyFor} from "../receipts.ts";
+import { lockSubscription } from "../../sources/subscriptions.ts";
+import { registerImportedVideo } from "../../sources/subscription-video.ts";
 import {parseAgentKeyDouyin,verifyDouyinDetailAuthor,legacyDouyinV4Record} from "../agentkey/douyin-parser.ts";
 import {douyinSearchRoute,douyinTopicRoute,agentKeyRouteFor,agentKeyOperation,douyinAccountPostsRoute,douyinDetailRoute,douyinAccountSearchRoute,agentKeyRouteInput} from "../agentkey/douyin-contract.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
@@ -39,6 +41,8 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
+    // Acquire the subscription before author/material locks, including manual replay of collected results.
+    for(const member of [...(snapshot.input.members??[])].sort((a,b)=>a.subscriptionId-b.subscriptionId))await lockSubscription(tx,member.subscriptionId);
     const {parsed,origin,sourceDiscoveredAt,operationId,hasVideo}=snapshot.provider==="agentkey"?await agentKeyDouyinEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="douyin_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as DouyinIdentity,identity:DouyinIdentity={...received};
     if(snapshot.provider==="agentkey"&&(!received.uid&&!received.secUserId||!account&&!parsed.data.workId))throw new UnsupportedReplacement(account?"A received stable account identity is required":"A received stable author and work identity is required");
@@ -82,6 +86,7 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({douyinImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
+    if(articleId)await registerImportedVideo(tx,resultId,{platform:"douyin",operationId,record,confirmed:hasVideo,singleVideo:true,videoProof:snapshot.provider==="agentkey"?"agentkey-douyin-v4":"verified-current-work-type",workId:nativeId!,originalUrl:url!});
     await audit(actor,account?"source.bind_account":"material.import",`result:${resultId}`,input.reason,null,{sourceId,articleId,identity,supplement:input.supplement??null},undefined,tx);
     return {resultId,sourceId,articleId};
   };

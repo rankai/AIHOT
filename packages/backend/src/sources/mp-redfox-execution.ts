@@ -1,3 +1,4 @@
+import {registerImportedVideo} from "./subscription-video.ts";
 import {videoMediaFromHtml} from "../content/media.ts";
 import { sql,type Tx } from "../db.ts";
 import { parseWechat,queryWechat,wechatArticleUrl,type WechatResult } from "../providers/redfox/wechat.ts";
@@ -104,7 +105,8 @@ export async function executeRedfoxMpStep(e:Execution,snapshot:RunRow){
       if(known?.source_id===input.source.id)await tx`UPDATE articles SET raw=jsonb_set(raw,'{redfoxMp}',${tx.json(provenance)}) WHERE id=${material.articleId}`;
       if(material.created||material.revised)await queueProcessing(material.articleId,{db:tx});
     }
-    await saveResult(tx,e,{itemKey:workUuid,kind:"article",data:{title:raw.title??listed.title,url:detailUrl.url,bodyMissing:!body,authorEvidence:"account-list-context",library:input.library},receiptId:detail.receiptId,...(articleId?{articleId,sourceId:input.source.id}:{})});
+    const resultId=await saveResult(tx,e,{itemKey:workUuid,kind:"article",data:{title:raw.title??listed.title,url:detailUrl.url,bodyMissing:!body,authorEvidence:"account-list-context",library:input.library},receiptId:detail.receiptId,...(articleId?{articleId,sourceId:input.source.id}:{})});
+    if(articleId)await registerImportedVideo(tx,resultId,{platform:"wechat",operationId:ops.detail,record:raw,confirmed:false,singleVideo:false,videoProof:"verified-video-link-or-owned-body",...(typeof raw.content==="string"?{html:raw.content}:{})});
     const next={...p,index:p.index+1};if(next.index<next.indices.length)await move(tx,e,next);else await finish(tx,e,run,input,p.pageReceiptId,p.pageCount);
   });
 }

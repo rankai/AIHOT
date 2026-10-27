@@ -33,19 +33,25 @@ export function mergeMedia(existing: MediaItem[] | null | undefined, incoming: M
 }
 
 /** Only actual elements in the supplied article body; never links, code examples or players. */
-export function videoMediaFromHtml(html: string, base: string): MediaItem[] {
+export function videoResourcesFromHtml(html: string, base: string): string[][] {
   const { document } = parseHTML(`<html><body>${html}</body></html>`);
-  // Keep valid <source> evidence on its own video before the existing sanitizer drops sources.
-  // This is a local inspection copy: it never changes stored or publicly rendered HTML.
-  for (const video of document.querySelectorAll("video")) {
-    const source = [...video.querySelectorAll("source")].find((s) =>
-      /^video\//i.test(s.getAttribute("type") ?? "") && mediaUrl(s.getAttribute("src"), base));
-    const url = mediaUrl(video.getAttribute("src"), base) ?? mediaUrl(source?.getAttribute("src"), base);
-    if (url) video.setAttribute("src", url);
+  // Keep each element's alternatives before sanitizeBody removes <source>. A local-only
+  // marker survives its existing ownership filtering; it is never persisted or requested.
+  const groups=new Map<string,string[]>();
+  for (const [index,video] of [...document.querySelectorAll("video")].entries()) {
+    const urls=[mediaUrl(video.getAttribute("src"),base),...[...video.querySelectorAll("source")]
+      .filter(s=>/^video\//i.test(s.getAttribute("type")??"")).map(s=>mediaUrl(s.getAttribute("src"),base))]
+      .filter((url):url is string=>!!url);
+    const marker=`https://subscription-video.invalid/element/${index}`;
+    groups.set(marker,[...new Set(urls)]);video.setAttribute("src",marker);
   }
   for (const example of document.querySelectorAll("pre,code")) example.remove();
-  // Reuse body ownership rules (promo blocks and whole discarded subtrees), not a parallel list.
-  const cleaned = parseHTML(`<html><body>${sanitizeBody(document.body.innerHTML, base)}</body></html>`).document;
-  return [...cleaned.querySelectorAll("video")].some((video) => mediaUrl(video.getAttribute("src"), base))
-    ? confirmedVideoMedia() : [];
+  const cleaned=parseHTML(`<html><body>${sanitizeBody(document.body.innerHTML,base)}</body></html>`).document;
+  return [...cleaned.querySelectorAll("video")].map(video=>groups.get(video.getAttribute("src")??"")??[]);
+}
+export function videoUrlsFromHtml(html:string,base:string):string[] {
+  return [...new Set(videoResourcesFromHtml(html,base).flat())];
+}
+export function videoMediaFromHtml(html: string, base: string): MediaItem[] {
+  return videoUrlsFromHtml(html,base).length ? confirmedVideoMedia() : [];
 }

@@ -14,7 +14,12 @@ export function redfoxXiaohongshuHasVideo(operation:string,record:Record<string,
   return ["384C6W6B","XN3ULENA","KR1LPTBF"].includes(operation)&&record.workType==="video";
 }
 export function redfoxTiktokHasVideo(operation:string,record:Record<string,unknown>):boolean {
-  return ["6SE9WIHJ","R473NUE9","PXZXY8KQ"].includes(operation)&&record.mediaType==="video";
+  return ["6SE9WIHJ","R473NUE9","PXZXY8KQ","API_1790149158205","API_1790581450500"].includes(operation)&&record.mediaType==="video";
+}
+/** These routes document an item-local videoUrl separately from covers; workType is optional. */
+export function redfoxShipinhaoHasVideo(operation:string,record:Record<string,unknown>):boolean {
+  return ["E7G00COY","OVUTOTCV","OE4KUEUO"].includes(operation)&&!!mediaUrl(record.videoUrl)
+    &&record.workType!=="normal"&&record.workType!=="图文";
 }
 export function redfoxInstagramHasVideo(record:Record<string,unknown>):boolean {
   return record.mediaType===2&&record.isVideo!==false

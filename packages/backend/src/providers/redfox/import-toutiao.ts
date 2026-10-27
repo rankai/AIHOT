@@ -1,3 +1,4 @@
+import {lockVideoParentSubscriptions,registerImportedVideo} from "../../sources/subscription-video.ts";
 import {videoMediaFromHtml} from "../../content/media.ts";
 import {redfoxToutiaoHasVideo} from "./video-media.ts";
 import {confirmedVideoMedia} from "../../content/media.ts";
@@ -53,6 +54,7 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
     const [snapshot] = await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status
       FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if (!snapshot) return null;
+    await lockVideoParentSubscriptions(tx,resultId);
     const agentkey=snapshot.provider==="agentkey";
     if(agentkey&&input.supplement&&(input.supplement.uid||input.supplement.secUid||input.supplement.url))throw new UnsupportedReplacement("AgentKey requires received identity and native URL; manual supplements cannot replace evidence");
     const verified=agentkey?await agentKeyToutiaoEvidence(tx,snapshot):null;
@@ -131,6 +133,7 @@ export async function importToutiaoResult(resultId: number, raw: unknown, actor:
       if (material.created || material.revised) await queueProcessing(articleId, { db: tx });
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({ toutiaoImport: { key: commandKey, intent } })} WHERE id=${resultId}`;
+    if(articleId){const videoHtml=op==="PAB6Z75Y"?record.content:undefined;await registerImportedVideo(tx,resultId,{platform:"toutiao",operationId:String(parsed.data.operationId),record,confirmed:(!agentkey&&redfoxToutiaoHasVideo(op,record)),singleVideo:false,videoProof:"verified-current-work-or-owned-body",...(typeof videoHtml==="string"?{html:videoHtml}:{})});}
     await audit(actor, account ? "source.bind_account" : "material.import", `result:${resultId}`, input.reason, null, { sourceId, articleId, identity, supplement: input.supplement ?? null }, undefined, tx);
     return { resultId, sourceId, articleId };
   };
