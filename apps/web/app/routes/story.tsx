@@ -2,6 +2,8 @@ import { SITE, withSubject } from "@aihot/industry/site";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/story";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import type { StoryDetail, StoryReportView } from "@aihot/contracts/site";
 import { data as routeData } from "react-router";
 import { breadcrumbLd, pageMeta, titled } from "../lib/seo";
@@ -23,7 +25,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return { story: (await res.json()) as StoryDetail };
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("事件不存在") }, { name: "robots", content: "noindex" }];
   const s = loaderData.story;
   return pageMeta({
@@ -32,7 +34,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
     path: `/story/${s.publicId}`,
     image: `/og/stories/${s.publicId}.png`,
     type: "article",
-    jsonLd: breadcrumbLd([{ name: SITE.name, path: "/" }, { name: "热点榜", path: "/hot" }, { name: s.title, path: `/story/${s.publicId}` }]),
+    jsonLd: breadcrumbLd([{ name: SITE.name, path: "/" }, { name: navigationLabel(presentationFromMatches(matches), "hot", "热点榜"), path: "/hot" }, { name: s.title, path: `/story/${s.publicId}` }]),
   });
 }
 
@@ -153,6 +155,7 @@ function TimelineRow({ r }: { r: StoryReportView }) {
 type Filter = "all" | "official" | "selected";
 
 export default function StoryPage() {
+  const presentation = usePresentation();
   const { story } = useLoaderData<typeof loader>();
   const [filter, setFilter] = useState<Filter>("all");
   const [order, setOrder] = useState<"desc" | "asc">("desc");
@@ -195,7 +198,7 @@ export default function StoryPage() {
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-10">
       <nav aria-label="位置" className="flex items-center gap-2.5 pb-4 pt-5 text-[12px] text-ink-4 lg:pb-5 lg:pt-4">
         <Link to="/hot" className="inline-flex items-center gap-1.5 transition-colors hover:text-ink">
-          <IconArrowLeft size={15} /> 热点榜
+          <IconArrowLeft size={15} /> {navigationLabel(presentation, "hot", "热点榜")}
         </Link>
         <span className="h-3 w-px bg-line-strong" aria-hidden="true" />
         <span>事件详情</span>
@@ -377,7 +380,7 @@ export default function StoryPage() {
                   <>
                     <span className="mx-1">·</span>
                     <Link to="/hot" className="text-accent hover:underline">
-                      热点榜第 {story.whyHot.rank} 名
+                      {`${navigationLabel(presentation, "hot", "热点榜")}第 ${story.whyHot.rank} 名`}
                     </Link>
                   </>
                 )}

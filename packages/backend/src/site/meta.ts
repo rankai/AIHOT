@@ -1,6 +1,7 @@
 // Small site-wide facts for the web shell (e.g. the changelog red-dot anchor).
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { loadPublicPresentation } from "../admin/presentation.ts";
 import { REPO_ROOT } from "../config.ts";
 
 export interface ChangelogRelease {
@@ -23,6 +24,6 @@ export function loadChangelog() {
   return changelogCache;
 }
 
-export function siteMeta() {
-  return { changelogVersion: loadChangelog().latestVersion };
+export async function siteMeta() {
+  return { changelogVersion: loadChangelog().latestVersion, presentation: await loadPublicPresentation() };
 }

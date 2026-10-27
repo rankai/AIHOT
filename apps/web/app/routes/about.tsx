@@ -1,5 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLoaderData } from "react-router";
+import type { Route } from "./+types/about";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import type { SiteStats } from "@aihot/contracts/site";
 import { apiGet } from "../lib/api.server";
 import { shortSourceName } from "../lib/format";
@@ -30,8 +33,8 @@ export async function loader({ request }: { request: Request }) {
   return { contact, stats };
 }
 
-export function meta() {
-  return pageMeta({ title: "关于", description: `关于 ${SITE.name}：${SITE.description}`, path: "/about", image: "/og/pages/about.png", jsonLd: organizationLd() });
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta({ title: navigationLabel(presentationFromMatches(matches), "about", "关于"), description: `关于 ${SITE.name}：${SITE.description}`, path: "/about", image: "/og/pages/about.png", jsonLd: organizationLd() });
 }
 
 const NO_SOURCES: RiverSource[] = [];
@@ -137,6 +140,7 @@ function QrCard({ src, kind, title, note }: { src: string; kind: string; title: 
 
 /** The optional maker block (ABOUT.maker): a greeting on the left, the contact codes that are set on the right. */
 function Maker({ maker, contact }: { maker: NonNullable<typeof ABOUT.maker>; contact: ContactSettings }) {
+  const presentation = usePresentation();
   const codes = [
     contact.wechatQr && maker.wechat ? <QrCard key="wechat" src={contact.wechatQr} kind="微信公众号" title={maker.wechat.title} note={maker.wechat.note} /> : null,
     contact.feishuQr && maker.feishu ? <QrCard key="feishu" src={contact.feishuQr} kind="飞书群" title={maker.feishu.title} note={maker.feishu.note} /> : null,
@@ -158,11 +162,11 @@ function Maker({ maker, contact }: { maker: NonNullable<typeof ABOUT.maker>; con
           <p className="text-ink-3">
             它一直在改，改了什么都写在
             <Link to="/changelog" className="text-accent hover:underline">
-              更新日志
+              {navigationLabel(presentation, "changelog", "更新日志")}
             </Link>
             里；有想法、遇到问题，去
             <Link to="/feedback" className="text-accent hover:underline">
-              反馈页
+              {navigationLabel(presentation, "feedback", "反馈页")}
             </Link>
             告诉我。
           </p>
@@ -193,6 +197,7 @@ function Latest({ item, className = "" }: { item: SiteStats["latest"][number] | 
 }
 
 export default function AboutPage() {
+  const presentation = usePresentation();
   const { contact, stats } = useLoaderData<typeof loader>();
   const [focus, setFocus] = useState<number | null>(null);
   const [at, setAt] = useState(0);
@@ -229,10 +234,10 @@ export default function AboutPage() {
         </div>
         <div className="flex flex-wrap gap-3 lg:pb-2">
           <Link to="/" prefetch="intent" className={buttonClass("primary", "lg")}>
-            看今天的精选 <IconArrowRight size={15} />
+            {`看今天的${navigationLabel(presentation, "selected", "精选")}`} <IconArrowRight size={15} />
           </Link>
           <Link to="/daily" prefetch="intent" className={buttonClass("secondary", "lg")}>
-            读最新{withSubject("日报")}
+            {`读最新${navigationLabel(presentation, "daily", withSubject("日报"))}`}
           </Link>
         </div>
       </header>
@@ -274,7 +279,7 @@ export default function AboutPage() {
       <p className="mt-16 well rounded-card px-5 py-4 text-[13px] leading-[1.85] text-ink-3">
         {ABOUT.copyright}
         <Link to="/feedback" className="text-accent hover:underline">
-          反馈页
+          {navigationLabel(presentation, "feedback", "反馈页")}
         </Link>
         联系我们。
       </p>

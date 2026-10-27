@@ -1,6 +1,8 @@
 import { SITE, withSubject } from "@aihot/industry/site";
 import { Link, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/topic";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import type { FeedItemSummary } from "@aihot/contracts/site";
 import { loadOr404 } from "../lib/api.server";
 import { breadcrumbLd, pageMeta, titled } from "../lib/seo";
@@ -28,7 +30,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return { data };
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("主题不存在") }, { name: "robots", content: "noindex" }];
   const { topic, page } = loaderData.data;
   const path = page > 1 ? `/topics/${topic.slug}/page/${page}` : `/topics/${topic.slug}`;
@@ -38,11 +40,12 @@ export function meta({ loaderData }: Route.MetaArgs) {
     path,
     image: `/og/topics/${topic.slug}.png`,
     noindex: !topic.indexable,
-    jsonLd: breadcrumbLd([{ name: SITE.name, path: "/" }, { name: "主题", path: "/topics" }, { name: topic.name, path: `/topics/${topic.slug}` }]),
+    jsonLd: breadcrumbLd([{ name: SITE.name, path: "/" }, { name: navigationLabel(presentationFromMatches(matches), "topics", "主题"), path: "/topics" }, { name: topic.name, path: `/topics/${topic.slug}` }]),
   });
 }
 
 export default function TopicPage() {
+  const presentation = usePresentation();
   const { data } = useLoaderData<typeof loader>();
   const { topic, items, page, pageCount } = data;
   const href = (p: number) => (p <= 1 ? `/topics/${topic.slug}` : `/topics/${topic.slug}/page/${p}`);
@@ -54,7 +57,7 @@ export default function TopicPage() {
         <div className="flex items-start justify-between gap-4">
           <h1 className="text-[22px] font-bold leading-[1.35] text-ink">{topic.name}</h1>
           <span className="hidden pt-2 lg:block">
-            <MoreLink to="/topics">全部主题</MoreLink>
+            <MoreLink to="/topics">{navigationLabel(presentation, "topics", "全部主题")}</MoreLink>
           </span>
         </div>
         <p className="mt-1 max-w-[640px] text-[13px] leading-relaxed text-ink-3">{topic.definition}</p>

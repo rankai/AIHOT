@@ -1,7 +1,7 @@
 // Public read layer, item level. Every exit (site API, v1, RSS, MCP, sitemap) reads
 // items through these functions; visibility, release gate and body licences are applied here.
 import type { CategoryKey, ChannelKey } from "@aihot/contracts/taxonomy";
-import type { FeedItemSummary, ItemSummary, MediaView, SourceKind, XPostView } from "@aihot/contracts/site";
+import type { FeedItemSummary, ItemSummary, MediaView, VideoPreview, SourceKind, XPostView } from "@aihot/contracts/site";
 import { sql, type Db } from "../db.ts";
 import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
 import { displayTags } from "./rules.ts";
@@ -40,6 +40,7 @@ export interface ItemRow {
   /** Participation mode of the source now (editorial, hot_signal, isolated). */
   source_mode: string;
   source_icon: string | null;
+  media?: Array<Record<string, unknown>>;
   x_post: Record<string, any> | null;
   author: string | null;
   language: string | null;
@@ -56,7 +57,7 @@ export const ITEM_COLUMNS = sql`
   p.selected, p.eligible, p.channel, p.url, p.published_at, p.discovered_at, p.timeline_at, p.sort_at, p.first_party, p.visibility,
   p.body_mode, p.syndicate, p.indexable, p.visible_after, p.backfill, p.fact_id, p.story_id,
   s.id AS source_id, s.name AS source_name, s.kind AS source_kind, s.participation_mode AS source_mode, s.icon_url AS source_icon,
-  a.x_post, a.author, a.language,
+  a.x_post, a.author, a.language, a.media,
   st.public_id::text AS story_public_id, st.title AS story_title,
   CASE WHEN p.channel = 'x' THEN tr.body_text END AS zh_text, qt.text_zh AS quoted_zh`;
 
@@ -150,9 +151,30 @@ export function xView(row: Pick<ItemRow, "x_post" | "zh_text"> & Partial<Pick<It
   };
 }
 
+/** Project only image/poster fields after video confirmation and the existing image licence gate. */
+export function videoPreview(row: Pick<ItemRow, "media" | "channel" | "body_mode" | "visibility">): VideoPreview | null {
+  const media = Array.isArray(row.media) ? row.media : [];
+  if (row.visibility !== "public" || !media.some(item => item.kind === "video" && item.confirmed === true)) return null;
+  if (row.channel !== "x" && row.body_mode !== "full") return { poster: null };
+  const imageUrl = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    try {
+      const url = new URL(value);
+      if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || /\.(?:mp4|m3u8|webm|mov)(?:$|[?#])/i.test(value)) return null;
+      return value;
+    } catch { return null; }
+  };
+  const posterUrl = media.filter(item => item.kind === "video" && item.confirmed === true).map(item => imageUrl(item.poster)).find(Boolean)
+    ?? media.filter(item => item.kind === "image").map(item => imageUrl(item.url)).find(Boolean) ?? null;
+  const poster = proxiedImage(posterUrl, "card");
+  const posterSrcSet = proxiedImageSet(posterUrl, "card");
+  return { poster, ...(posterSrcSet ? { posterSrcSet } : {}) };
+}
+
 export function toItemSummary(row: ItemRow): ItemSummary {
   const x = row.channel === "x" ? xView(row, true) : null;
   return {
+    video: videoPreview(row),
     id: row.id,
     revision: row.revision,
     title: row.title,
@@ -185,6 +207,7 @@ export function toItemSummary(row: ItemRow): ItemSummary {
 export function toFeedItemSummary(row: ItemRow): FeedItemSummary {
   const item = toItemSummary(row);
   return {
+    video: item.video,
     id: item.id, title: item.title, summary: item.summary, reason: item.reason,
     source: { name: item.source.name }, publishedAt: item.publishedAt, timelineAt: item.timelineAt,
     category: item.category, tags: item.tags, score: item.score, selected: item.selected, channel: item.channel,

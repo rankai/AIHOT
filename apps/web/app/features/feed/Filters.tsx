@@ -1,9 +1,11 @@
 // Feed filters: the channel and category row, and search.
 import { useEffect, useRef, useState } from "react";
-import { Form, Link, useNavigation, useSearchParams } from "react-router";
-import { CATEGORY_KEYS, CATEGORY_LABELS, CHANNEL_LABELS, type CategoryKey, type ChannelKey } from "@aihot/contracts/taxonomy";
+import { Form, Link, useNavigation, useSearchParams, useRouteLoaderData } from "react-router";
+import { CATEGORY_LABELS, CHANNEL_LABELS, type CategoryKey, type ChannelKey } from "@aihot/contracts/taxonomy";
 import { IconClose, IconSearch } from "../../components/icons";
 import { PillTabs } from "../../components/ui/Tabs";
+import { DEFAULT_SITE_PRESENTATION as DEFAULT_PRESENTATION } from "../../lib/presentation";
+import type { loader as rootLoader } from "../../root";
 
 /** Same page with some query parameters changed (paging state dropped). */
 export function hrefWith(base: string, params: URLSearchParams, patch: Record<string, string | null>) {
@@ -23,15 +25,25 @@ export function hrefWith(base: string, params: URLSearchParams, patch: Record<st
  * time: picking 一手 clears the category and picking a category clears 一手. Older 资讯 / X links
  * still filter; the row then shows 全部.
  */
-export function CategoryTabs({ base, category, channel = "all", layoutId, size = "md", className = "" }: { base: string; category: CategoryKey | null; channel?: ChannelKey; layoutId: string; size?: "md" | "sm"; className?: string }) {
+export function CategoryTabs({ base, category, channel = "all", layoutId, size = "md", className = "", pageSize }: { base: string; pageSize?: number; category: CategoryKey | null; channel?: ChannelKey; layoutId: string; size?: "md" | "sm"; className?: string }) {
   const [params] = useSearchParams();
+  const scopedParams = new URLSearchParams(params);
+  if (pageSize) scopedParams.set("pageSize", String(pageSize));
+  const root = useRouteLoaderData<typeof rootLoader>("root");
+  const categories = (root?.presentation ?? DEFAULT_PRESENTATION).categories.filter((item) => item.visible);
+  const hiddenCategory = category && !categories.some((item) => item.id === category);
   const items = [
-    { key: "all", label: "全部", to: hrefWith(base, params, { category: null, channel: null }) },
-    { key: "firstParty", label: CHANNEL_LABELS.firstParty, to: hrefWith(base, params, { category: null, channel: "firstParty" }) },
-    ...CATEGORY_KEYS.map((k) => ({ key: k, label: CATEGORY_LABELS[k], to: hrefWith(base, params, { category: k, channel: null }) })),
+    { key: "all", label: "全部", to: hrefWith(base, scopedParams, { category: null, channel: null }) },
+    { key: "firstParty", label: CHANNEL_LABELS.firstParty, to: hrefWith(base, scopedParams, { category: null, channel: "firstParty" }) },
+    ...categories.map(({ id }) => ({ key: id, label: CATEGORY_LABELS[id], to: hrefWith(base, scopedParams, { category: id, channel: null }) })),
   ];
   const active = channel === "firstParty" ? "firstParty" : (category ?? "all");
-  return <PillTabs items={items} active={active} layoutId={layoutId} label="筛选" size={size} className={className} />;
+  return (
+    <div className={className}>
+      <PillTabs items={items} active={active} layoutId={layoutId} label="筛选" size={size} />
+      {hiddenCategory && <p className="mt-2 text-[12px] text-ink-3">当前筛选：{CATEGORY_LABELS[category]}（入口已隐藏）<Link to={hrefWith(base, scopedParams, { category: null, channel: null })} className="ml-2 text-accent hover:underline">清除筛选</Link></p>}
+    </div>
+  );
 }
 
 function useSlashFocus(ref: React.RefObject<HTMLInputElement | null>) {

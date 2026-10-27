@@ -78,3 +78,24 @@ test('manual Autohome and Zhihu original fallback rejects obvious media paths wi
  for(const extension of ['jpg','png','webp','mp4','mp3']){await assert.rejects(importQichezhijiaResult(auto.id,{reason:'Media is not original',supplement:{url:`https://club.autohome.com.cn/synthetic.${extension}`,evidence:'Must reject media'}},'test',tag()),/original/);await assert.rejects(importZhihuResult(zhihu.id,{reason:'Media is not original',supplement:{url:`https://www.zhihu.com/synthetic.${extension}`,evidence:'Must reject media'}},'test',tag()),/URL/);}
  assert.equal(hits,before);assert.equal((await sql`SELECT count(*)::int n FROM operation_results WHERE id IN (${auto.id},${zhihu.id}) AND article_id IS NOT NULL`)[0]!.n,0);
 });
+
+test('verified full car and Baijiahao bodies retain source-video facts before HTML sanitization',async()=>{
+ const {importDongchediResult}=await import('@aihot/backend/providers/redfox/import-dongchedi'),{importYicheResult}=await import('@aihot/backend/providers/redfox/import-yiche'),{importBaijiahaoResult}=await import('@aihot/backend/providers/redfox/import-baijiahao');
+ const {scanVideoHistory,applyVideoHistoryEntry}=await import('@aihot/backend/content/video-history');
+ const html='<p>Full body</p><video><source type="video/mp4" src="/v.mp4"></video>',id=String(Date.now()),author=tag();
+ const cases=[
+  {op:'LLCI8QTE',parameters:{workId:id,page:1},record:{workId:id,authorId:author,workUrl:`https://chejiahao.autohome.com.cn/info/${id}`,title:'Body',content:html},importer:importQichezhijiaResult},
+  {op:'VYSP68M2',parameters:{url:`https://news.yiche.com/zonghexinwen/20260810/${id}.html`},record:{workId:id,authorId:author,title:'Body',content:html},importer:importYicheResult},
+  {op:'API_1789097000710',parameters:{articleId:id},record:{opusId:id,uid:author,opusUrl:`https://baijiahao.baidu.com/s?id=${id}`,title:'Body',content:html},importer:importBaijiahaoResult},
+  {op:'API_1791793668086',parameters:{userId:author},record:{account:{userId:author},workList:[{workId:id,workUrl:`https://www.dcdapp.com/motor/m/feed/detail?group_id=${id}`,title:'Body',articleType:7,articleTypeStr:'ugc_article',description:html}]},importer:importDongchediResult},
+ ];
+ for(const c of cases){
+  let result=await query(c.op,c.parameters,c.record);
+  if(result.kind==='dongchedi_account')result=(await sql`SELECT * FROM operation_results WHERE run_id=${result.run_id} AND kind='dongchedi_work'`)[0]!;
+  const imported=await c.importer(result.id,{reason:'Verified raw body'},'body-video',tag());
+  const [article]=await sql`SELECT media,body_html FROM articles WHERE id=${imported!.articleId}`;assert.equal(article!.media.some((m:any)=>m.confirmed===true),true,c.op);assert.equal(article!.body_html.includes('<source'),false);
+  await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${imported!.articleId}`;
+  const manifest=await sql.begin('read only',tx=>scanVideoHistory(tx,5000)),entry=manifest.entries.find(e=>e.articleId===imported!.articleId);assert.ok(entry,c.op+' historical proof');
+  await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));
+ }
+});

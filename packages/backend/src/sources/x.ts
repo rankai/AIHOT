@@ -1,6 +1,7 @@
 // X accounts via SocialData search ("from:handle -filter:replies", newest first). Plain account queries
 // are read together, about two dozen accounts per search (planXShards); SocialData bills per request.
 import { tweetMedia, tweetText, type SdArticle, type SdTweet } from "../providers/socialdata.ts";
+import { confirmedVideoMedia, mergeMedia } from "../content/media.ts";
 import type { XPostData } from "../content/materials.ts";
 import { sha256 } from "../lib/ids.ts";
 import { type Candidate, type SourceRow } from "./types.ts";
@@ -53,7 +54,17 @@ export function xArticleText(article: SdArticle): { title: string; text: string 
 }
 
 export function tweetToCandidate(t: SdTweet): Candidate {
-  return xPostToCandidate(toXPost(t), new Date(t.tweet_created_at), { favorite: t.favorite_count ?? null, retweet: t.retweet_count ?? null, views: t.views_count ?? null });
+  const candidate = xPostToCandidate(toXPost(t), new Date(t.tweet_created_at), { favorite: t.favorite_count ?? null, retweet: t.retweet_count ?? null, views: t.views_count ?? null });
+  const own = t.extended_entities?.media ?? t.entities?.media ?? [];
+  candidate.media = (candidate.media ?? []).map((m, i) => own[i]?.type === "video" && m.kind === "video" ? { ...m, confirmed: true } : m);
+  const q = t.quoted_status;
+  if (t.is_quote_status === true && q && /^\d+$/.test(q.id_str) && q.id_str !== t.id_str
+    && /^[A-Za-z0-9_]{1,15}$/.test(q.user?.screen_name ?? "")
+    && (!t.quoted_status_id_str || t.quoted_status_id_str === q.id_str)
+    && (q.extended_entities?.media ?? q.entities?.media ?? []).some((m) => m.type === "video")) {
+    candidate.media = mergeMedia(candidate.media, confirmedVideoMedia());
+  }
+  return candidate;
 }
 
 /** Canonical X material projection; provider adapters supply already verified post facts. */

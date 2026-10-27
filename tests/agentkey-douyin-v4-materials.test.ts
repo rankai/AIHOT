@@ -46,7 +46,7 @@ test('query receipt import chooses verified Desc and keeps unknown content in re
  const item=work();await query(item,async(result,calls)=>{
   const imported=await importDouyinResult(result.id,{reason:'V4 evidence fixture'},'fixture',tag());assert.ok(imported?.articleId);
   const [a]=await sql`SELECT body_text,body_status,author,media FROM articles WHERE id=${imported!.articleId}`;
-  assert.equal(a!.body_text,item.Desc);assert.equal(a!.body_status,'ok');assert.equal(a!.author,item.Author.Nickname);assert.deepEqual(a!.media,[{kind:'image',url:item.Video.Cover.UrlList[0]}]);
+  assert.equal(a!.body_text,item.Desc);assert.equal(a!.body_status,'ok');assert.equal(a!.author,item.Author.Nickname);assert.deepEqual(a!.media,[{kind:'image',url:item.Video.Cover.UrlList[0]},{kind:'video',confirmed:true}]);
   assert.equal(Object.hasOwn(result.data.record,'content'),false);
   const [receipt]=await sql`SELECT response FROM receipts WHERE id=${result.receipt_id}`;
   assert.equal(receipt!.response.envelope.data.data.data.itemList[0].AwemeInfo.content,item.content);assert.equal(calls.length,1);

@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLoaderData, useSearchParams } from "react-router";
 import { Collapse } from "../components/ui/Presence";
 import type { Route } from "./+types/leaderboard-model";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
 import type { LbComparison, LbEvidenceItem, LbModelDetail } from "@aihot/contracts/leaderboard";
 import { LEADERBOARD_BOARD_LABELS, LEADERBOARD_PUBLIC_BOARDS } from "@aihot/contracts/taxonomy";
 import { loadOr404 } from "../lib/api.server";
@@ -16,7 +17,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return loadOr404<LbModelDetail>(`/api/site/leaderboard/models/${encodeURIComponent(params.slug)}`, { signal: request.signal });
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("页面不存在") }];
   const { model } = loaderData;
   const path = `/leaderboard/${model.slug}`;
@@ -36,7 +37,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
         isAccessibleForFree: true,
       },
       breadcrumbLd([
-        { name: "模型榜", path: "/leaderboard" },
+        { name: navigationLabel(presentationFromMatches(matches), "leaderboard", "模型榜"), path: "/leaderboard" },
         { name: model.name, path },
       ]),
     ],

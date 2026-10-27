@@ -1,3 +1,5 @@
+import {redfoxInstagramHasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
@@ -85,7 +87,7 @@ export async function importInstagramResult(resultId:number,raw:unknown,actor:st
       const body=record.captionText,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=(record.user as {fullName?:string;username?:string}|undefined)?.fullName??(record.user as {username?:string}|undefined)?.username;
-      const material=await upsertMaterial({sourceId,url:url!,identityKey:`instagram:code:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,takenAt:record.takenAt??null,takenAtDate:record.takenAtDate??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({sourceId,url:url!,identityKey:`instagram:code:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:(redfoxInstagramHasVideo(record)?[...media(record),...confirmedVideoMedia()]:media(record)),via:"import",raw:{provider:"redfox",resultId,takenAt:record.takenAt??null,takenAtDate:record.takenAtDate??null,originResultId:origin?.resultId??null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({instagramImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

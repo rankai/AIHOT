@@ -1,3 +1,5 @@
+import {redfoxXiaohongshuHasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {agentKeyXiaohongshuEvidence,xiaohongshuResultSnapshot} from "../agentkey/xiaohongshu-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
@@ -76,7 +78,7 @@ export async function importXiaohongshuResult(resultId:number,raw:unknown,actor:
       const body=record.workDesc??record.desc??(snapshot.provider==="agentkey"?record.description:undefined),publishedAt=snapshot.provider==="agentkey"?null:publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const author=record.authorName??record.accountNickname??record.authorNickname??record.userName;
-      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`xiaohongshu:noteId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.workPublishTime??record.publicTime??record.createTime??record.gmtCreate??null,role:parsed.data.role??null,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`xiaohongshu:noteId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:((snapshot.provider==="agentkey"?record.workType==="video":redfoxXiaohongshuHasVideo(String(parsed.data.operationId),record))?confirmedVideoMedia(media(record)):media(record)),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.workPublishTime??record.publicTime??record.createTime??record.gmtCreate??null,role:parsed.data.role??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({xiaohongshuImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

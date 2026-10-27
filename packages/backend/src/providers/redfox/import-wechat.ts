@@ -1,3 +1,4 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
 import {agentKeyWechatEvidence} from "../agentkey/wechat-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
@@ -9,7 +10,9 @@ import { sql,type Tx } from "../../db.ts";
 import { sha256,stableJson } from "../../lib/ids.ts";
 import { audit } from "../../admin/auth.ts";
 import { bindSourceAccount } from "../../sources/account-bindings.ts";
-import { decideTimeline,upsertMaterial,type MediaItem } from "../../content/materials.ts";
+import { decideTimeline,upsertMaterial } from "../../content/materials.ts";
+import {mediaUrl} from "../../content/media.ts";
+import {wechatMedia} from "./video-media.ts";
 import { sanitizeBody } from "../../content/sanitize.ts";
 import { stripTags } from "../../lib/text.ts";
 import { queueProcessing } from "../../jobs/content.ts";
@@ -19,13 +22,6 @@ import { parseWechat,wechatArticleUrl,type WechatIdentity } from "./wechat.ts";
 import { WechatOperationId,wechatOperations } from "./wechat-contract.ts";
 
 const Input=z.object({sourceId:z.string().min(1).optional(),reason:z.string().trim().min(1).max(500),supplement:z.object({wxId:z.string().regex(/^gh_[A-Za-z0-9]+$/).max(100).optional(),bizInfo:z.string().min(1).max(500).optional(),url:z.url().optional(),evidence:z.string().trim().min(1).max(1000)}).strict().optional()}).strict();
-function media(record:Record<string,unknown>):MediaItem[]{
-  const valid=(v:unknown):v is string=>{if(typeof v!=="string")return false;try{const u=new URL(v);return ["http:","https:"].includes(u.protocol)&&!u.username&&!u.password;}catch{return false;}};
-  const images=[...(Array.isArray(record.imageUrls)?record.imageUrls:[]),...(Array.isArray(record.picList)?record.picList.map(p=>p.picUrl):[]),record.coverImageUrl,record.coverUrl].filter(valid);
-  const result:MediaItem[]=[...new Set(images)].map(url=>({kind:"image",url}));
-  if(valid(record.videoLink))result.push({kind:"video",url:record.videoLink,poster:valid(record.coverImageUrl)?record.coverImageUrl:null});
-  return result;
-}
 function published(raw:unknown):Date|null{
   if(typeof raw!=="string"||!/(?:Z|[+-]\d{2}:?\d{2})$/.test(raw))return null;
   const date=new Date(raw);return Number.isFinite(date.getTime())?date:null;
@@ -87,7 +83,8 @@ export async function importWechatResult(resultId:number,raw:unknown,actor:strin
       const sourceCollection=snapshot.provider==='agentkey'&&snapshot.input.mode==='collection'&&snapshot.input.source?.id===sourceId;
       const backfill=sourceCollection&&!snapshot.input.source.cursor?.lastCheckedAt?'first-import':decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const confirmation=snapshot.provider==='agentkey'&&parsed.data.aliasConfirmed===true&&parsed.data.requestedUrl!==address!.url&&typeof parsed.data.requestedUrl==='string'&&!wechatArticleUrl(parsed.data.requestedUrl)?.bizInfo?{platform:'wechat' as const,requestedUrl:parsed.data.requestedUrl,responseUrl:parsed.data.requestedUrl,longUrl:address!.url,bizInfo:identity.bizInfo!,mid:String(record.mid),idx:String(record.idx),sourceId,evidence:{kind:'result' as const,reference:String(resultId)}}:undefined;
-      const material=await upsertMaterial({confirmedIdentity:confirmation,bodyUpdate:origin?"fill-missing":undefined,sourceId,url:address!.url,title:String(parsed.data.title).slice(0,200),author:typeof record.authorName==="string"?record.authorName:typeof record.author==="string"?record.author:null,bodyHtml:typeof body==="string"?sanitizeBody(body,address!.url):null,bodyText:typeof body==="string"?stripTags(sanitizeBody(body,address!.url)):null,bodyStatus:body?"ok":sourceCollection?"none":"pending",excerpt:typeof record.articleSummary==="string"?record.articleSummary:typeof record.summary==="string"?record.summary:null,publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:publishTime??null,supplement:input.supplement??null}},tx);
+      const hasVideo=snapshot.provider==="agentkey"?record._content_type==="video":parsed.data.operationId==="I3CIBRI2"&&!!mediaUrl(record.videoLink);
+      const material=await upsertMaterial({confirmedIdentity:confirmation,bodyUpdate:origin?"fill-missing":undefined,sourceId,url:address!.url,title:String(parsed.data.title).slice(0,200),author:typeof record.authorName==="string"?record.authorName:typeof record.author==="string"?record.author:null,bodyHtml:typeof body==="string"?sanitizeBody(body,address!.url):null,bodyText:typeof body==="string"?stripTags(sanitizeBody(body,address!.url)):null,bodyStatus:body?"ok":sourceCollection?"none":"pending",excerpt:typeof record.articleSummary==="string"?record.articleSummary:typeof record.summary==="string"?record.summary:null,publishedAt,discoveredAt,backfill,media:[...wechatMedia(record,hasVideo),...(typeof body==="string"?videoMediaFromHtml(body,address!.url):[])],via:"import",raw:{provider:snapshot.provider,resultId,publishTime:publishTime??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({wechatImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

@@ -2,6 +2,7 @@ import { schedulePlatformSubscriptions } from "./platform-subscriptions.ts";
 // Collection run for one source: fetch listing → filter → store material → enqueue processing.
 // A failed fetch never advances the success cursor; the source's health reflects consecutive failures.
 import { sql } from "../db.ts";
+import { mergeMedia } from "../content/media.ts";
 import { identityKeyFor, upsertMaterial } from "../content/materials.ts";
 import { enqueue, QUEUES } from "../jobs/queue.ts";
 import { queueProcessing } from "../jobs/content.ts";
@@ -165,7 +166,7 @@ export async function collectSource(sourceId: string, opts: { force?: boolean } 
           c.bodyHtml = got.body.html;
           c.bodyText = got.body.text;
           c.bodyStatus = "ok";
-          if (!c.media?.length) c.media = got.body.images;
+          c.media = mergeMedia(c.media, got.body.media ?? got.body.images);
         }
         // A date-only listing value gives way to the detail page's time on the same day.
         if (got.publishedAt && (!c.publishedAt || Math.abs(got.publishedAt.getTime() - c.publishedAt.getTime()) < DAY_MS)) c.publishedAt = got.publishedAt;

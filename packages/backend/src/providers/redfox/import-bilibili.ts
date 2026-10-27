@@ -1,3 +1,4 @@
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {agentKeyBilibiliEvidence} from "../agentkey/bilibili-evidence.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
@@ -85,7 +86,7 @@ export async function importBilibiliResult(resultId:number,raw:unknown,actor:str
       const body=record.description,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const author=record.author;
-      const material=await upsertMaterial({sourceId,url:url!,identityKey:`bilibili:bvId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,created:record.created??null,...(agentkey?{rawTimes:record.rawTimes??{},descriptionRole:record.descriptionRole??null}:{}),request:executionInput.parameters,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({sourceId,url:url!,identityKey:`bilibili:bvId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:(confirmedVideoMedia(media(record))),via:"import",raw:{provider:snapshot.provider,resultId,created:record.created??null,...(agentkey?{rawTimes:record.rawTimes??{},descriptionRole:record.descriptionRole??null}:{}),request:executionInput.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({bilibiliImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

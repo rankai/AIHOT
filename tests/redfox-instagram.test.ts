@@ -96,3 +96,13 @@ test('concurrent account imports share one isolated owner; material identity con
  const c='C_'+tag(),newUid=BigInt('0x'+randomUUID().replaceAll('-','')).toString();for(const kind of ['p','reel']){const address=`https://instagram.com/${kind}/${c}`;await sql`INSERT INTO articles(id,source_id,identity_key,url,title,discovered_at,timeline_at) VALUES (${newArticleId()},${imported[0]!.sourceId},${'url:'+address},${address},'Legacy conflict',now(),now())`;}
  operation='Z9M88QI8';parameters={codeOrUrl:c};data={code:c,user:{id:newUid}};const q=await query();await assert.rejects(importInstagramResult(Number(q.results[0]!.id),{reason:'Conflicting originals'},'ig-import',tag()),{code:'conflict'});assert.equal((await sql`SELECT 1 FROM source_account_bindings WHERE platform='instagram' AND id_value=${newUid}`).length,0);assert.equal((await sql`SELECT source_id FROM operation_results WHERE id=${q.results[0]!.id}`)[0]!.source_id,null);
 });
+
+test('actual imports preserve unknown video evidence for conflicting formats and unproven carousel children',async()=>{
+ const {importInstagramResult}=await import('@aihot/backend/providers/redfox/import-instagram');
+ for(const [fields,confirmed] of [[{mediaType:2,mediaFormat:'video'},true],[{mediaType:2,mediaFormat:'photo'},false],[{mediaType:2,isVideo:false},false],[{mediaType:8,carouselItems:[{mediaType:2,isVideo:true,videoUrl:'https://example.test/child.mp4'}]},false]] as const){
+  const c='V_'+tag();operation='Z9M88QI8';parameters={codeOrUrl:c};data={code:c,user:{id:'918273645'},captionText:'Video type evidence',...fields};
+  const q=await query(),imported=await importInstagramResult(Number(q.results[0]!.id),{reason:'Synthetic video contract'},'ig-video',tag());
+  const [article]=await sql`SELECT media FROM articles WHERE id=${imported!.articleId}`;
+  assert.equal(article!.media.some((m:{confirmed?:boolean})=>m.confirmed===true),confirmed);
+ }
+});

@@ -86,7 +86,7 @@ test("documented and ISO dates plus media survive import; unzoned or broken date
     const [article]=await sql`SELECT published_at,published_at_claim,media,raw FROM articles WHERE id=${imported!.articleId!}`;
     assert.equal(article!.published_at?.toISOString()??null,expected);assert.equal(article!.published_at_claim?.toISOString()??null,expected);
     assert.equal(article!.raw.publishTime,publishTime);
-    assert.deepEqual(article!.media,[{kind:"image",url:"https://example.com/synthetic.png"},{kind:"video",url:"https://example.com/synthetic.mp4",poster:"https://example.com/synthetic-cover.png"}]);
+    assert.deepEqual(article!.media,[{kind:"image",url:"https://example.com/synthetic.png"},{kind:"video",url:"https://example.com/synthetic.mp4",poster:"https://example.com/synthetic-cover.png",confirmed:true}]);
   }}finally{responseOverride=undefined;}
 });
 

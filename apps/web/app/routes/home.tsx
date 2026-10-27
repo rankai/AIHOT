@@ -9,6 +9,8 @@ import { Wordmark } from "../components/Logo";
 import { Timeline } from "../features/feed/Timeline";
 import { HotTopics } from "../features/feed/HotTopics";
 import { CategoryTabs, SearchField, SearchIconLink } from "../features/feed/Filters";
+import { navigationLabel } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { beijingDate, beijingWeekday } from "../lib/format";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -48,7 +50,8 @@ function TodayLabel() {
 
 export default function Home() {
   const { data, filters } = useLoaderData<typeof loader>();
-  const title = filters.tag ? `#${filters.tag}` : "精选";
+  const presentation = usePresentation();
+  const title = filters.tag ? `#${filters.tag}` : navigationLabel(presentation, "selected", "精选");
   return (
     <div className="pb-6">
       {/* Phones: brand bar, today's hot topics, then the feed under "最新精选". */}
@@ -66,7 +69,7 @@ export default function Home() {
 
       {data.hot && <HotTopics entries={data.hot} />}
 
-      <h2 className="mt-6 text-[20px] font-bold text-ink lg:hidden">{filters.tag ? title : "最新精选"}</h2>
+      <h2 className="mt-6 text-[20px] font-bold text-ink lg:hidden">{filters.tag ? title : navigationLabel(presentation, "selected", "最新精选")}</h2>
       <div className="-mx-4 mt-3 flex items-center gap-2 pl-4 pr-2 lg:hidden">
         <CategoryTabs base="/" category={filters.category} channel={filters.channel} layoutId="home-cat-mobile" size="sm" className="min-w-0 flex-1" />
         <SearchIconLink />

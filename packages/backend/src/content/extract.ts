@@ -10,12 +10,14 @@ import { BudgetExceededError } from "../providers/receipts.ts";
 import { getArticle } from "../providers/socialdata.ts";
 import { onlyXArticleLink, xArticleText } from "../sources/x.ts";
 import { sanitizeBody, trimTrailingChrome } from "./sanitize.ts";
+import { mergeMedia, videoMediaFromHtml, type MediaItem } from "./media.ts";
 import { contentHash } from "./materials.ts";
 
 export interface ExtractedBody {
   html: string;
   text: string;
   images: Array<{ kind: "image"; url: string; width: number | null; height: number | null }>;
+  media?: MediaItem[];
   via: "readability" | "jina";
 }
 
@@ -42,7 +44,7 @@ export function readable(html: string, url: string): ExtractedBody | null {
     images.push({ kind: "image", url: m[1]!.replace(/&amp;/g, "&"), width: w ? Number(w[1]) : null, height: h ? Number(h[1]) : null });
     if (images.length >= 12) break;
   }
-  return { html: clean, text, images, via: "readability" };
+  return { html: clean, text, images, media: mergeMedia(images, videoMediaFromHtml(article.content, url)), via: "readability" };
 }
 
 function markdownToHtml(md: string): string {
@@ -122,12 +124,12 @@ export async function extractArticleBody(articleId: string, allowJina = process.
   }
   // The body is new content: a new revision, so an analysis of the body-less input counts as stale.
   await sql.begin(async (tx) => {
-    const [row] = await tx<{ title: string; excerpt: string | null }[]>`SELECT title, excerpt FROM articles WHERE id = ${articleId} FOR UPDATE`;
-    if (!row) return;
+    const [row] = await tx<{ title: string; excerpt: string | null; revision: number; media: MediaItem[] }[]>`SELECT title, excerpt, revision, media FROM articles WHERE id = ${articleId} FOR UPDATE`;
+    if (!row || row.revision !== a.revision) return;
     const hash = contentHash({ title: row.title, bodyText: got.text, excerpt: row.excerpt });
     const [r] = await tx<{ revision: number }[]>`
       UPDATE articles SET body_html = ${got.html}, body_text = ${got.text}, body_status = 'ok',
-        media = CASE WHEN jsonb_array_length(media) = 0 THEN ${tx.json(got.images as never)}::jsonb ELSE media END,
+        media = ${tx.json(mergeMedia(row.media, got.media ?? got.images) as never)},
         revision = revision + 1, content_hash = ${hash}, processing_state = 'new', updated_at = now()
       WHERE id = ${articleId} RETURNING revision`;
     await tx`INSERT INTO article_revisions (article_id, revision, content_hash, title, body_text)

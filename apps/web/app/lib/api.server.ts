@@ -43,7 +43,7 @@ export async function loadOr404<T>(path: string, opts: { busyRedirect?: string; 
     if (opts.signal?.aborted) throw error;
     if (error instanceof ApiError) {
       if (error.status === 404) throw data({ message: "not_found" }, { status: 404 });
-      if (error.status === 503 && opts.busyRedirect) throw redirect(opts.busyRedirect);
+      if (error.status === 503 && error.code === "search_busy" && opts.busyRedirect) throw redirect(opts.busyRedirect);
       if (error.status === 400) throw data({ message: "bad_request" }, { status: 400 });
     }
     throw data({ message: "unavailable" }, { status: 503 });

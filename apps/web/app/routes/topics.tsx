@@ -1,4 +1,7 @@
 import { Link, useLoaderData } from "react-router";
+import type { Route } from "./+types/topics";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { apiGet } from "../lib/api.server";
 import { pageMeta } from "../lib/seo";
 
@@ -17,8 +20,8 @@ export async function loader({ request }: { request: Request }) {
   return apiGet<{ topics: TopicSummary[] }>("/api/site/topics", { signal: request.signal });
 }
 
-export function meta() {
-  return pageMeta({ title: "主题", description: "按公司与模型、技术方向、内容形态聚合的 AI 主题页：OpenAI、Anthropic、Agent、多模态、论文与教程等 38 个方向。", path: "/topics", image: "/og/pages/topics.png" });
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta({ title: navigationLabel(presentationFromMatches(matches), "topics", "主题"), description: "按公司与模型、技术方向、内容形态聚合的 AI 主题页：OpenAI、Anthropic、Agent、多模态、论文与教程等 38 个方向。", path: "/topics", image: "/og/pages/topics.png" });
 }
 
 export function headers() {
@@ -32,11 +35,12 @@ const GROUPS = [
 ] as const;
 
 export default function TopicsPage() {
+  const presentation = usePresentation();
   const { topics } = useLoaderData<typeof loader>();
   return (
     <div className="pb-10">
       <header className="pb-2 pt-5 lg:pt-1">
-        <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">按主题看 AI</h1>
+        <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{navigationLabel(presentation, "topics", "按主题看 AI")}</h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-3">
           按公司与模型、技术方向、内容形态浏览 <span className="num">{topics.length}</span> 个主题，持续汇集近期焦点与精选。
         </p>

@@ -1,4 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
+import type { Route } from "./+types/codex-reset";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { useEffect, useState } from "react";
 import { useLoaderData, useRevalidator } from "react-router";
 import type { CodexResetEvent, CodexResetSitePage, CodexResetDay } from "@aihot/contracts/monitor";
@@ -18,9 +21,9 @@ export async function loader({ request, params }: { request: Request; params: { 
   return { ...data, ...(day ? { selectedDate: day.date, events: day.events } : {}), serverNow: Date.now() };
 }
 
-export function meta() {
+export function meta({ matches }: Route.MetaArgs) {
   return pageMeta({
-    title: "Tibo重置监控",
+    title: navigationLabel(presentationFromMatches(matches), "codexReset", "Tibo重置监控"),
     description: "跟踪 Tibo 公布的 Codex 额度重置与重置卡发放：推算的北京时间生效窗口、适用范围、中文原帖与历史日历。",
     path: "/codex-reset",
     image: "/og/pages/codex-reset.png",
@@ -177,6 +180,7 @@ const MONITOR_WORDS = { healthy: "监控正常", delayed: "检查有延迟", att
 const MONITOR_DOT = { healthy: "bg-ok-ink", delayed: "bg-amber-ink", attention: "bg-amber-ink", unknown: "bg-ink-4" } as const;
 
 export default function CodexResetPage() {
+  const presentation = usePresentation();
   const d = useLoaderData<typeof loader>();
   useVersionPolling(d.version);
   const m = d.monitor;
@@ -184,7 +188,7 @@ export default function CodexResetPage() {
     <div className="pb-8">
       <header className="flex flex-col gap-1 pb-4 pt-5 lg:flex-row lg:items-end lg:justify-between lg:pt-1">
         <div>
-          <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">Tibo重置监控</h1>
+          <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{navigationLabel(presentation, "codexReset", "Tibo重置监控")}</h1>
           <p className="mt-1.5 text-[13px] text-ink-3">Codex 额度重置与重置卡发放：什么时候生效、给谁、Tibo 原话</p>
         </div>
         <p className="text-[12px] text-ink-4">全部为北京时间 · UTC+8</p>

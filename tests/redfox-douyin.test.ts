@@ -138,3 +138,21 @@ test('native URL requests reject known mismatches, preserve raw and never infer 
   // Unknown URL shapes provide no identity assertion; no resolution request is made.
   assert.doesNotThrow(()=>parseDouyin('0OT1E306',{workId:b,workUrl:`https://www.douyin.com/video/${b}`},{workUrl:'https://v.douyin.com/synthetic'}));
 });
+
+test("real wide-detail imports confirm only documented string video types",async()=>{
+ const {importDouyinResult}=await import("@aihot/backend/providers/redfox/import-douyin"),i=identifiers();
+ for(const [videoType,confirmed] of [["0",true],["63",true],["68",false],[0,false]] as const){
+  const id=`995${Date.now()}${String(videoType).replace(/[^0-9]/g,"")}`;
+  const r=await workQuery({videoId:id,opusUrl:`https://www.douyin.com/video/${id}`,authorUid:i.userId,content:"Video contract",videoType});
+  const imported=await importDouyinResult(r.id,{reason:"Synthetic video contract"},"test",tag());
+  const [a]=await sql`SELECT media FROM articles WHERE id=${imported!.articleId}`;
+  assert.equal(a!.media.some((m:{confirmed?:boolean})=>m.confirmed===true),confirmed);
+  if(confirmed){
+   const {scanVideoHistory,applyVideoHistoryEntry}=await import("@aihot/backend/content/video-history");
+   await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${imported!.articleId}`;
+   const manifest=await sql.begin('read only',tx=>scanVideoHistory(tx,5000)),entry=manifest.entries.find(e=>e.articleId===imported!.articleId);
+   assert.ok(entry,'the retained exact wide-detail receipt supports historical repair');
+   await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));
+  }
+ }
+});

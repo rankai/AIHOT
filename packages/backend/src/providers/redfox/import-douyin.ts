@@ -5,6 +5,9 @@ import {requireLiveResult} from "../../operations/result-retention.ts";
 import {applyAccountDetailOrigin} from "./account-detail-origin.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
 import {applyWorkDetailOrigin} from "./work-detail-origin.ts";
+import {workDetailOrigin} from "./work-detail-origin.ts";
+import {redfoxDouyinHasVideo,agentKeyDouyinV4HasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
 import { z } from "zod";
 import { sql,type Tx } from "../../db.ts";
@@ -36,7 +39,7 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.step_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const {parsed,origin,sourceDiscoveredAt,operationId}=snapshot.provider==="agentkey"?await agentKeyEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
+    const {parsed,origin,sourceDiscoveredAt,operationId,hasVideo}=snapshot.provider==="agentkey"?await agentKeyDouyinEvidence(tx,snapshot):await redfoxEvidence(tx,snapshot);
     const account=parsed.kind==="douyin_account",record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as DouyinIdentity,identity:DouyinIdentity={...received};
     if(snapshot.provider==="agentkey"&&(!received.uid&&!received.secUserId||!account&&!parsed.data.workId))throw new UnsupportedReplacement(account?"A received stable account identity is required":"A received stable author and work identity is required");
     if(account&&input.supplement)throw new UnsupportedReplacement("Account import requires received stable IDs");
@@ -75,7 +78,7 @@ export async function importDouyinResult(resultId:number,raw:unknown,actor:strin
       const body=record.content??record.aweme_desc??(snapshot.provider==="agentkey"?record.desc:undefined),publishedAt=snapshot.provider==="agentkey"?(typeof parsed.data.publishedAt==="string"?new Date(parsed.data.publishedAt):null):publicationTime(operationId,record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:`${snapshot.provider}-import-unknown-time`;
       const author=record.authorName??record.accountName??record.user_nickname??record.userName;
-      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`douyin:aweme_id:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.publishTime??record.create_time??null,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({bodyUpdate:origin?"fill-missing":undefined,sourceId,url:url!,identityKey:`douyin:aweme_id:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:hasVideo?confirmedVideoMedia(media(record)):media(record),via:"import",raw:{provider:snapshot.provider,resultId,publishTime:record.publishTime??record.create_time??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({douyinImport:{key:commandKey,intent}})} WHERE id=${resultId}`;
@@ -98,10 +101,17 @@ async function redfoxEvidence(tx:Tx,snapshot:any){
     const accountOrigin=executionInput.origin?.kind==="account";
     if(accountOrigin)applyAccountDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
     const origin=accountOrigin?undefined:applyWorkDetailOrigin(operation.data,executionInput.parameters,parsed!,executionInput.origin);
-    return {parsed,origin,sourceDiscoveredAt,operationId:operation.data};
+    let hasVideo=redfoxDouyinHasVideo(operation.data,parsed.data.record as Record<string,unknown>);
+    if(!hasVideo&&origin){
+      const checked=await workDetailOrigin(tx,origin.resultId,operation.data,executionInput.parameters);
+      if(stableJson(checked)!==stableJson(origin))throw new UnsupportedReplacement("Video source origin differs from frozen work evidence");
+      const [source]=await tx`SELECT data FROM operation_results WHERE id=${origin.resultId}`;
+      hasVideo=redfoxDouyinHasVideo(origin.sourceOperation,source!.data.record);
+    }
+    return {parsed,origin,sourceDiscoveredAt,operationId:operation.data,hasVideo};
 }
 
-async function agentKeyEvidence(tx:Tx,snapshot:any):Promise<{parsed:{kind:string;data:Record<string,unknown>};origin:{discoveredAt:string}|undefined;sourceDiscoveredAt:Date;operationId:string}>{
+export async function agentKeyDouyinEvidence(tx:Tx,snapshot:any):Promise<{parsed:{kind:string;data:Record<string,unknown>};origin:{discoveredAt:string}|undefined;sourceDiscoveredAt:Date;operationId:string;hasVideo:boolean}>{
   requireLiveResult(snapshot);
   if(!["douyin_work","douyin_account"].includes(snapshot.kind))throw new UnsupportedReplacement("Not an importable AgentKey Douyin result");
   const [summary]=await tx`SELECT * FROM operation_results WHERE id=${Number(snapshot.data.querySummaryId)||0} AND run_id=${snapshot.run_id} AND step_version=${snapshot.step_version} AND receipt_id=${snapshot.receipt_id} AND kind='query_summary'`;
@@ -131,9 +141,10 @@ async function agentKeyEvidence(tx:Tx,snapshot:any):Promise<{parsed:{kind:string
   if(route===douyinDetailRoute&&snapshot.operation_key===douyinAccountPostsRoute.operationKey){
     const [source]=await tx`SELECT z.*,r.provider,r.operation_key,r.contract_version,r.input,p.logical_key AS receipt_logical_key,p.request AS receipt_request,p.service AS receipt_service,p.purpose AS receipt_purpose,p.subject AS receipt_subject,p.response AS receipt_response,p.received_at,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${Number(summary.data.originResultId)||0} AND z.run_id=${snapshot.run_id} AND z.step_version<${snapshot.step_version}`;
     if(!source||source.data.operationId!=="QEQLCKD6")throw new UnsupportedReplacement("Missing original account page work evidence");
-    const original=await agentKeyEvidence(tx,source);
+    const original=await agentKeyDouyinEvidence(tx,source);
     verifyDouyinDetailAuthor(parsed.data,original.parsed.data,source.receipt_response,snapshot.input.parameters);
     origin={discoveredAt:original.sourceDiscoveredAt.toISOString()};
   }
-  return {parsed,origin,sourceDiscoveredAt:new Date(snapshot.received_at??snapshot.created_at),operationId:operation!.operationId};
+  const hasVideo=route===douyinSearchRoute&&agentKeyDouyinV4HasVideo(snapshot.receipt_response,snapshot.item_key,parsed.data.workId);
+  return {parsed,origin,sourceDiscoveredAt:new Date(snapshot.received_at??snapshot.created_at),operationId:operation!.operationId,hasVideo};
 }

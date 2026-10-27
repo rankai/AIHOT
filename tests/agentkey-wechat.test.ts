@@ -170,3 +170,21 @@ test('MP unknown recovery requires exact route, waits thirty minutes and release
   await sql`UPDATE receipts SET updated_at=now()-interval '31 minutes' WHERE id=${id}`;assert.equal((await releaseOperationReceipt(id)).released,false);assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${id}`)[0]!.attempts,2);
  }finally{if(previous===undefined)delete process.env.AGENTKEY_CALLS_ENABLED;else process.env.AGENTKEY_CALLS_ENABLED=previous;}
 });
+
+test('H5 article source video is confirmed before sanitization and historical receipt repair stays offline',async()=>{
+ const marker=tag(),url=`https://mp.weixin.qq.com/s/${marker}`,longUrl=`https://mp.weixin.qq.com/s?__biz=${marker}&mid=123&idx=1`;
+ const server=await mcp({url,content:{title:'Article with video',user_name:`gh_${marker}`,link:longUrl,mid:'123',idx:1,_content_type:'article',content_noencode:'<p>Article body</p><video><source type="video/mp4" src="/v.mp4"></video>',create_timestamp:1729400000}});
+ const previous={...process.env};Object.assign(process.env,{AGENTKEY_API_KEY:'fake-mp-key',AGENTKEY_MCP_URL:server.url,AGENTKEY_CALLS_ENABLED:'true',AIHOT_ENVIRONMENT:'test'});
+ try{
+  const run=await createAgentKeyQuery({provider:'agentkey',operationId:'I3CIBRI2',parameters:{url}},'mp-video',tag());await executeOperationStep(run.id,1,randomUUID());
+  const [result]=await sql`SELECT id FROM operation_results WHERE run_id=${run.id} AND kind='wechat_work'`;
+  const imported=await importWechatResult(result!.id,{reason:'Verified body video'},'mp-video',tag());
+  const [article]=await sql`SELECT media,body_html FROM articles WHERE id=${imported!.articleId}`;
+  assert.equal(article!.media.some((m:any)=>m.confirmed===true),true);assert.equal(article!.body_html.includes('<source'),false);
+  await sql`UPDATE articles SET media='[]'::jsonb WHERE id=${imported!.articleId}`;
+  const {scanVideoHistory,applyVideoHistoryEntry,restoreVideoHistoryEntry}=await import('@aihot/backend/content/video-history');
+  const before=server.hits();process.env.AGENTKEY_CALLS_ENABLED='false';
+  const manifest=await sql.begin('read only',tx=>scanVideoHistory(tx,5000));const entry=manifest.entries.find(e=>e.articleId===imported!.articleId);assert.ok(entry);assert.equal(entry.evidence.kind,'result');
+  const applied=await sql.begin(tx=>applyVideoHistoryEntry(tx,entry));await sql.begin(tx=>restoreVideoHistoryEntry(tx,applied));assert.equal(server.hits(),before);
+ }finally{await server.close();for(const key of Object.keys(process.env))if(!(key in previous))delete process.env[key];Object.assign(process.env,previous);}
+});

@@ -9,6 +9,7 @@ import { escapeXml } from "@aihot/backend/lib/text";
 const body = `<p>Before <strong>bold</strong>, between <em>italic</em>, after.</p><p>${"A complete research article with enough text for the feed body. ".repeat(8)}</p>`;
 const xhtml = (html: string) => `<div xmlns="http://www.w3.org/1999/xhtml">${html}</div>`;
 const pages: Record<string, string> = {
+  "/video": `<title>Video result</title><link rel="enclosure" type="video/mp4" href="https://example.org/v.mp4"/><content type="html"><![CDATA[${body}${'<img src="https://example.org/i.jpg">'.repeat(8)}]]></content>`,
   "/title": `<title type="xhtml">${xhtml("New <em>research</em> result")}</title><summary type="xhtml">${xhtml("First <b>important</b> result, then another.")}</summary>`,
   "/body": `<title>New result</title><content type="xhtml">${xhtml(body)}</content>`,
   "/html": `<title>New result</title><content type="html">${escapeXml(body)}</content>`,
@@ -55,4 +56,10 @@ test("Atom XHTML still passes through HTML sanitization without decoding escaped
   assert.equal(item!.bodyStatus, "ok");
   assert.doesNotMatch(item!.bodyHtml!, /<script|<img|javascript:|onclick=/);
   assert.ok(item!.bodyHtml!.includes("&lt;img"), "escaped markup remains text");
+});
+
+test("Atom enclosure video survives the image display limit", async () => {
+  const [item] = await read("/video");
+  assert.equal(item!.media!.filter((m) => m.kind === "image").length, 6);
+  assert.deepEqual(item!.media!.filter((m) => m.kind === "video"), [{ kind: "video", confirmed: true }]);
 });

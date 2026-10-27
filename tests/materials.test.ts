@@ -247,3 +247,91 @@ test('X revisions preserve unknown optional facts, replace whole quotes and hono
  assert.deepEqual(await read(),{x_post:cleared,media:[]});
  await upsertMaterial({...base,sourceId:OTHER,title:'Foreign facts',xPost:post,media});assert.deepEqual(await read(),{x_post:cleared,media:[]});
 });
+
+test("media additions preserve content state and images across duplicates and revisions", async () => {
+  const url = `https://example.com/media-${tag()}`;
+  const input = { sourceId: SOURCE, url, title: "Media", bodyText: "body", via: "fetch" as const };
+  const first = await upsertMaterial({ ...input, media: [{ kind: "image", url: "https://example.com/i.jpg" }] });
+  const before = await state(first.articleId);
+  const media = [{ kind: "video" as const, confirmed: true as const }];
+  await upsertMaterial({ ...input, media });
+  await upsertMaterial({ ...input, media });
+  assert.deepEqual(await state(first.articleId), before);
+  const [row] = await sql`SELECT media FROM articles WHERE id = ${first.articleId}`;
+  assert.deepEqual(row!.media, [{ kind: "image", url: "https://example.com/i.jpg" }, ...media]);
+  await upsertMaterial({ ...input, title: "New text", media: [] });
+  const [revised] = await sql`SELECT media FROM articles WHERE id = ${first.articleId}`;
+  assert.deepEqual(revised!.media, media);
+  await upsertMaterial({ ...input, title: "New image", media: [{ kind: "image", url: "https://example.com/new.jpg" }] });
+  const [replaced] = await sql`SELECT media FROM articles WHERE id = ${first.articleId}`;
+  assert.deepEqual(replaced!.media, [{ kind: "image", url: "https://example.com/new.jpg" }, ...media]);
+});
+
+test("media correction checks identity, snapshot and timestamp; stale seen and undated facts cannot restore it", async () => {
+  const { mergeMaterialMedia } = await import("@aihot/backend/content/materials");
+  const url = `https://example.com/media-correct-${tag()}`;
+  const media = [{ kind: "video" as const, confirmed: true as const }];
+  const input = { sourceId: SOURCE, url, title: "Original", bodyText: "one", via: "fetch" as const, sourceUpdatedAt: new Date("2026-10-20") };
+  const first = await upsertMaterial({ ...input, media });
+  await upsertMaterial({ ...input, title: "Current", bodyText: "two", sourceUpdatedAt: new Date("2026-10-21") });
+  const before = await state(first.articleId);
+  const merge = { articleId: first.articleId, sourceId: SOURCE, identityKey: identityKeyForUrl(url)!, media: [], expectedRevision: 2, expectedMedia: media, completeNoVideoAt: new Date("2026-10-22") };
+  assert.equal(await mergeMaterialMedia({ ...merge, sourceId: OTHER }), false);
+  assert.equal(await mergeMaterialMedia({ ...merge, expectedRevision: 1 }), false);
+  assert.equal(await mergeMaterialMedia({ ...merge, completeNoVideoAt: new Date("2026-10-20") }), false);
+  assert.equal(await mergeMaterialMedia(merge), true);
+  assert.deepEqual(await state(first.articleId), before);
+  await upsertMaterial({ ...input, media, sourceUpdatedAt: new Date("2026-10-23") });
+  await upsertMaterial({ ...input, title: "Current", bodyText: "two", media, sourceUpdatedAt: undefined });
+  const [row] = await sql`SELECT media FROM articles WHERE id = ${first.articleId}`;
+  assert.deepEqual(row!.media, [{ kind: "video" }]);
+  assert.equal(await mergeMaterialMedia({ ...merge, completeNoVideoAt: undefined, media, expectedMedia: [{ kind: "video" }] }), false);
+});
+
+test("accepted positive source time prevents an intermediate negative from clearing newer facts", async () => {
+  const { mergeMaterialMedia } = await import("@aihot/backend/content/materials");
+  const url = `https://example.com/media-time-${tag()}`;
+  const input = { sourceId: SOURCE, url, title: "Video", via: "fetch" as const };
+  const media = [{ kind: "video" as const, confirmed: true as const }];
+  const first = await upsertMaterial({ ...input, sourceUpdatedAt: new Date("2026-10-20") });
+  await upsertMaterial({ ...input, media, sourceUpdatedAt: new Date("2026-10-22") });
+  const merge = { articleId: first.articleId, sourceId: SOURCE, identityKey: identityKeyForUrl(url)!, media: [], expectedRevision: 1, expectedMedia: media };
+  assert.equal(await mergeMaterialMedia({ ...merge, completeNoVideoAt: new Date("2026-10-21") }), false);
+  assert.equal(await mergeMaterialMedia({ ...merge, completeNoVideoAt: new Date("2100-01-01") }), false);
+  assert.equal(await mergeMaterialMedia({ ...merge, completeNoVideoAt: new Date("2026-10-23") }), true);
+  await upsertMaterial({ ...input, media, sourceUpdatedAt: new Date("2100-01-01") });
+  const [row] = await sql`SELECT media,source_updated_at FROM articles WHERE id=${first.articleId}`;
+  assert.deepEqual(row!.media, [{ kind: "video" }]);
+  assert.equal(row!.source_updated_at.toISOString(), "2026-10-23T00:00:00.000Z");
+});
+
+test("local media restore succeeds only while its media, revision and source time snapshot remains current", async () => {
+  const { mergeMaterialMedia, restoreMaterialMedia } = await import("@aihot/backend/content/materials");
+  const url = `https://example.com/media-restore-${tag()}`;
+  const input = { sourceId: SOURCE, url, title: "Restore", via: "fetch" as const };
+  const beforeTime = new Date("2026-10-20");
+  const afterTime = new Date("2026-10-21");
+  const first = await upsertMaterial({ ...input, sourceUpdatedAt: beforeTime });
+  const snapshot = async () => (await sql<{ media: import("@aihot/backend/content/materials").MediaItem[]; source_updated_at: Date | null }[]>`
+    SELECT media,source_updated_at FROM articles WHERE id=${first.articleId}`)[0]!;
+  const baseline = await state(first.articleId);
+  const identity = { articleId: first.articleId, sourceId: SOURCE, identityKey: identityKeyForUrl(url)!, expectedRevision: 1 };
+  const addition = [{ kind: "video" as const, confirmed: true as const }];
+  const apply = async () => mergeMaterialMedia({ ...identity, expectedMedia: [], media: addition, evidenceSourceUpdatedAt: afterTime });
+  assert.equal(await apply(), true);
+  const written = await snapshot();
+  const restore = { ...identity, expectedMedia: written.media, media: [], expectedSourceUpdatedAt: afterTime, sourceUpdatedAt: beforeTime };
+  assert.equal(await restoreMaterialMedia({ ...restore, sourceId: OTHER }), false);
+  assert.equal(await restoreMaterialMedia({ ...restore, expectedMedia: [] }), false);
+  assert.equal(await restoreMaterialMedia({ ...restore, expectedSourceUpdatedAt: beforeTime }), false);
+  assert.equal(await restoreMaterialMedia(restore), true);
+  assert.deepEqual(await snapshot(), { media: [], source_updated_at: beforeTime });
+  assert.deepEqual(await state(first.articleId), baseline);
+  assert.equal(await apply(), true);
+  await upsertMaterial({ ...input, media: addition, sourceUpdatedAt: new Date("2026-10-22") });
+  assert.equal(await restoreMaterialMedia(restore), false, "later accepted source evidence wins");
+  await upsertMaterial({ ...input, title: "Later content" });
+  const later = await snapshot();
+  assert.equal(await restoreMaterialMedia({ ...restore, expectedMedia: later.media, expectedSourceUpdatedAt: later.source_updated_at }), false, "later content revision wins");
+  assert.equal((await state(first.articleId)).revision, 2);
+});

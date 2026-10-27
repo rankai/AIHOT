@@ -1,6 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
 import { Link, useLoaderData } from "react-router";
 import type { Route } from "./+types/leaderboard-source";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
 import type { LbSourceDetail } from "@aihot/contracts/leaderboard";
 import { loadOr404 } from "../lib/api.server";
 import { breadcrumbLd, pageMeta, siteUrl, titled } from "../lib/seo";
@@ -13,7 +14,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return loadOr404<LbSourceDetail>(`/api/site/leaderboard/sources/${encodeURIComponent(params.key)}`, { signal: request.signal });
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("页面不存在") }];
   const { source } = loaderData;
   const path = `/leaderboard/sources/${source.key}`;
@@ -33,7 +34,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
         ...(source.officialUrl ? { sameAs: source.officialUrl } : {}),
       },
       breadcrumbLd([
-        { name: "模型榜", path: "/leaderboard" },
+        { name: navigationLabel(presentationFromMatches(matches), "leaderboard", "模型榜"), path: "/leaderboard" },
         { name: "评测来源", path: "/leaderboard/sources" },
         { name: source.name, path },
       ]),

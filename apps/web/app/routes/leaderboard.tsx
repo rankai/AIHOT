@@ -1,6 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
 import { Link, data, useLoaderData } from "react-router";
 import type { Route } from "./+types/leaderboard";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
 import type { LbBoardResponse } from "@aihot/contracts/leaderboard";
 import { loadOr404 } from "../lib/api.server";
 import { breadcrumbLd, pageMeta, siteUrl, titled } from "../lib/seo";
@@ -18,13 +19,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   return loadOr404<LbBoardResponse>(`/api/site/leaderboard/boards/${key}`, { signal: request.signal });
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches }: Route.MetaArgs) {
   if (!loaderData) return [{ title: titled("页面不存在") }];
   const { board, entries } = loaderData;
+  const presentation = presentationFromMatches(matches);
+  const nameOverride = board.key === "overall" ? navigationLabel(presentation, "leaderboard", "") : "";
   const path = board.key === "overall" ? "/leaderboard" : `/leaderboard/category/${board.key}`;
   return pageMeta({
-    title: board.title,
-    rawTitle: true,
+    title: nameOverride || board.title,
+    rawTitle: !nameOverride,
     description: board.key === "overall" ? "汇总多家公开模型评测榜单，给出${SITE.name} 共识分、评测完整度、上线日期与 API 参考价格。" : board.description,
     path,
     image: "/og/pages/leaderboard.png",
@@ -39,8 +42,8 @@ export function meta({ loaderData }: Route.MetaArgs) {
       },
       breadcrumbLd(
         board.key === "overall"
-          ? [{ name: "模型榜", path: "/leaderboard" }]
-          : [{ name: "模型榜", path: "/leaderboard" }, { name: `${board.name}榜`, path }],
+          ? [{ name: navigationLabel(presentation, "leaderboard", "模型榜"), path: "/leaderboard" }]
+          : [{ name: navigationLabel(presentation, "leaderboard", "模型榜"), path: "/leaderboard" }, { name: `${board.name}榜`, path }],
       ),
     ],
   });

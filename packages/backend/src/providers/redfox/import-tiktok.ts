@@ -1,3 +1,5 @@
+import {redfoxTiktokHasVideo} from "./video-media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
 import {applyWorkDetailOrigin} from "./work-detail-origin.ts";
@@ -84,7 +86,7 @@ export async function importTiktokResult(resultId:number,raw:unknown,actor:strin
       const body=record.content,publishedAt=publicationTime(record),discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=(record.authorData as Record<string,unknown>|null|undefined)?.userName;
-      const material=await upsertMaterial({sourceId,url:url!,identityKey:`tiktok:workId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,supplement:input.supplement??null}},tx);
+      const material=await upsertMaterial({sourceId,url:url!,identityKey:`tiktok:workId:${nativeId}`,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:"fill-missing",bodyText:typeof body==="string"?body:null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:(redfoxTiktokHasVideo(operation.data,record)?confirmedVideoMedia(media(record)):media(record)),via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({tiktokImport:{key:commandKey,intent}})} WHERE id=${resultId}`;

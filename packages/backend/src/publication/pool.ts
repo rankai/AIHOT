@@ -9,6 +9,13 @@ import {
 
 export const POOL_PAGE_SIZE = 40;
 export const POOL_MAX_PAGES = 50;
+const POOL_CAP = POOL_PAGE_SIZE * POOL_MAX_PAGES;
+
+/** Same-article confirmed media only; legacy video/GIF ambiguity is intentionally excluded. */
+export function videoCondition(videosOnly: boolean | undefined) {
+  return videosOnly ? sql`AND EXISTS (SELECT 1 FROM articles video_article JOIN sources video_source ON video_source.id = video_article.source_id
+    WHERE video_source.participation_mode = 'editorial' AND video_article.id = p.article_id AND video_article.media @> '[{"kind":"video","confirmed":true}]'::jsonb)` : sql``;
+}
 
 export class SearchBusyError extends Error {
   readonly retryAfter: number;
@@ -106,21 +113,27 @@ export interface PoolQuery extends TimelineFilters {
   q?: string | null;
   tab?: "time" | "relevance";
   page?: number;
+  pageSize?: number;
+  videosOnly?: boolean;
   topicTags?: string[] | null;
   now?: Date;
 }
 
 export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
   const now = query.now ?? new Date();
-  const page = Math.min(Math.max(query.page ?? 1, 1), POOL_MAX_PAGES);
+  const pageSize = query.pageSize ?? POOL_PAGE_SIZE;
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 40) throw new Error("pageSize must be an integer from 1 to 40");
+  const maxPages = Math.ceil(POOL_CAP / pageSize);
+  const page = Math.min(Math.max(Math.floor(query.page ?? 1) || 1, 1), maxPages);
   const q = query.q?.trim() || null;
   const tab = q && query.tab === "relevance" ? "relevance" : "time";
   const terms = q ? searchTerms(q) : [];
-  const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)} ${topicCondition(query.topicTags)}`;
-  const offset = (page - 1) * POOL_PAGE_SIZE;
-  const cap = POOL_MAX_PAGES * POOL_PAGE_SIZE;
+  const filters = sql`${channelCondition(query.channel)} ${categoryCondition(query.category)} ${tagCondition(query.tag)} ${topicCondition(query.topicTags)} ${videoCondition(query.videosOnly)}`;
+  const offset = (page - 1) * pageSize;
+  const cap = POOL_CAP;
+  const take = Math.min(pageSize, cap - offset);
   // A fixed clock (tests, replays) never shares cached totals.
-  const filterKey = query.now ? null : JSON.stringify([query.channel, query.category, query.tag, query.topicTags ?? null]);
+  const filterKey = query.now ? null : JSON.stringify([query.channel, query.category, query.tag, query.topicTags ?? null, !!query.videosOnly]);
 
   // Searches go through pool_search (eligible items only): trigram indexes for longer terms, a small
   // table to scan for one- and two-character ones.
@@ -131,7 +144,7 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
       const rows = await db<ItemRow[]>`
         WITH page AS (
           SELECT p.article_id FROM publications p WHERE ${listedCondition(now)} AND p.eligible ${filters}
-          ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
+          ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${take} OFFSET ${offset})
         SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page)
         ORDER BY p.timeline_at DESC, p.article_id DESC`;
       return { rows, total: await poolCount(filterKey, () => db<{ n: number }[]>`
@@ -165,7 +178,7 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
           WHERE ${listedCondition(now)} AND p.eligible ${filters}
         ), page AS MATERIALIZED (
           SELECT article_id, rel FROM scored ORDER BY rel DESC, timeline_at DESC, article_id DESC
-          LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset}
+          LIMIT ${take} OFFSET ${offset}
         ), total AS (SELECT count(*) AS n FROM (SELECT 1 FROM scored LIMIT ${cap}) capped)
         SELECT hydrated.*, total.n AS total FROM total LEFT JOIN LATERAL (
           SELECT ${ITEM_COLUMNS}, page.rel ${ITEM_FROM} JOIN page ON page.article_id = p.article_id
@@ -178,7 +191,7 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
     const rows = await db<ItemRow[]>`
       WITH page AS (
         SELECT p.article_id FROM publications p WHERE ${listedCondition(now)} AND p.eligible ${filters} ${directMatchCondition(terms)}
-        ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${POOL_PAGE_SIZE} OFFSET ${offset})
+        ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT ${take} OFFSET ${offset})
       SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id IN (SELECT article_id FROM page)
       ORDER BY p.timeline_at DESC, p.article_id DESC`;
     const direct = terms.reduce((acc, t) => sql`${acc} AND ${like(sql`ps.direct`, t)}`, sql``);
@@ -196,10 +209,11 @@ export async function loadPool(query: PoolQuery): Promise<PoolResponse> {
       (SELECT max(p.updated_at) FROM publications p WHERE p.eligible) AS updated_at`);
 
   return {
-    filters: { channel: query.channel, category: query.category, tag: query.tag, topic: query.topic ?? null, q, tab },
+    filters: { channel: query.channel, category: query.category, tag: query.tag, topic: query.topic ?? null, q, tab, videosOnly: !!query.videosOnly },
     items: rows.map(toFeedItemSummary),
     page,
-    pageCount: Math.min(POOL_MAX_PAGES, Math.max(1, Math.ceil(total / POOL_PAGE_SIZE))),
+    pageSize,
+    pageCount: Math.min(maxPages, Math.max(1, Math.ceil(total / pageSize))),
     total,
     todayCount: Number(meta.today_count),
     freshness: (meta.updated_at ?? now).toISOString(),

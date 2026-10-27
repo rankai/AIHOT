@@ -1,4 +1,7 @@
 import { SITE, withSubject } from "@aihot/industry/site";
+import type { Route } from "./+types/feedback";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Presence } from "../components/ui/Presence";
@@ -13,8 +16,8 @@ export function headers() {
   return { "Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=600" };
 }
 
-export function meta() {
-  return pageMeta({ title: "反馈", description: `告诉 ${SITE.name} 哪里可以做得更好：内容、功能、接入或来源方的更正与下架请求。`, path: "/feedback", image: "/og/pages/feedback.png", noindex: true });
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta({ title: navigationLabel(presentationFromMatches(matches), "feedback", "反馈"), description: `告诉 ${SITE.name} 哪里可以做得更好：内容、功能、接入或来源方的更正与下架请求。`, path: "/feedback", image: "/og/pages/feedback.png", noindex: true });
 }
 
 interface Draft {
@@ -69,6 +72,7 @@ const MAX_IMAGE = 5 * 1024 * 1024;
 const MAX_TEXT = 2000;
 
 export default function FeedbackPage() {
+  const presentation = usePresentation();
   const [params] = useSearchParams();
   const [draft, setDraft] = useState<Draft>({ content: "", email: "", pageUrl: params.get("from") ?? "" });
   const [shot, setShot] = useState<{ file: File; url: string } | null>(null);
@@ -142,7 +146,7 @@ export default function FeedbackPage() {
             反馈编号 <span className="mono font-semibold text-ink">#{state.id}</span>，需要回复时我们会引用这个编号。
           </p>
           <Link to="/" className="mt-8 inline-flex h-10 items-center rounded-full bg-ink px-6 text-[14px] font-medium text-bg transition-opacity hover:opacity-90">
-            回到精选
+            {`回到${navigationLabel(presentation, "selected", "精选")}`}
           </Link>
         </div>
       </ReadingLayout>

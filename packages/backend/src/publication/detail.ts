@@ -59,6 +59,7 @@ export async function loadItemDetail(id: string, now = new Date()): Promise<Deta
       reason: null,
       tags: [],
       x: null,
+      video: null,
       readingMode: "summary-only",
       author: null,
       language: row.language,

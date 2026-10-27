@@ -1,3 +1,5 @@
+import {videoMediaFromHtml} from "../../content/media.ts";
+import {confirmedVideoMedia} from "../../content/media.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectedDetailContext} from "./collection-detail.ts";
 import {applyWeiboCarDetailOrigin} from "./weibo-car-detail-origin.ts";
@@ -100,7 +102,8 @@ export async function importDongchediResult(resultId:number,raw:unknown,actor:st
       const full=namespace==="article"&&(operation.data==="API_1791793668086"||operation.data==="QQ5E3EZ9"),body=record.description,publishedAt=publicationTime(record,["W86F8SSK","API_1791793668086"].includes(operation.data)?1000:undefined),discoveredAt=origin?new Date(origin.discoveredAt):sourceDiscoveredAt;
       const backfill=decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time";
       const author=record.authorName;
-      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:media(record),via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
+      const bodyMedia=full&&typeof body==="string"?videoMediaFromHtml(body,url!):[];
+      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:full&&!origin?undefined:"fill-missing",bodyHtml:full&&typeof body==="string"?sanitizeBody(body,url!):null,bodyText:typeof body==="string"?(full?stripTags(sanitizeBody(body,url!)):body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill,media:[...bodyMedia,...((operation.data==="QQ5E3EZ9"&&record.workType===2||operation.data!=="QQ5E3EZ9"&&namespace==="video"&&!input.supplement?.workType)?confirmedVideoMedia(media(record)):media(record))],via:"import",raw:{provider:"redfox",resultId,namespace:namespace??null,workId:parsed.data.workId??null,publishTime:record.publishTime??null,request:executionInput.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({dongchediImport:{key:commandKey,intent,namespace:typeof namespace==="string"?namespace:null}})} WHERE id=${resultId}`;

@@ -25,6 +25,7 @@ export interface SdTweet {
   in_reply_to_status_id_str?: string | null;
   in_reply_to_screen_name?: string | null;
   quoted_status?: SdTweet | null;
+  quoted_status_id_str?: string | null;
   retweeted_status?: SdTweet | null;
   is_quote_status?: boolean;
   entities?: { urls?: Array<{ url: string; expanded_url: string }>; media?: SdMedia[] };

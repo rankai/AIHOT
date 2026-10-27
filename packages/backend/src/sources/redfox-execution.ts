@@ -9,6 +9,8 @@ import { parseRedfoxJson,RedfoxResponseError,type RawResponse } from "../provide
 import { advanceRun,receiptOptions,retainCurrentReceipt,requireExecution,saveResult,type Execution,type RunRow,type OperationProgress } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
 import type { SdMedia } from "../providers/socialdata.ts";
+import {redfoxXHasVideo} from "../providers/redfox/video-media.ts";
+import {confirmedVideoMedia} from "../content/media.ts";
 
 interface Input {mode:string;source:{id:string;config:Record<string,any>;cursor:Record<string,any>};restId:string;window:string;startedAt:string;continuation?:{cursor:string;stopId:string|null;headId:string|null}}
 interface Progress extends OperationProgress {cursor?:string;stopId:string|null;headId:string|null;pages:number;seen:string[];items:number;details:number;pageReceiptId?:number;index?:number;indices?:number[];nextCursor?:string|null;done?:boolean}
@@ -22,7 +24,9 @@ function candidate(tweet:RedfoxTweet,page:RedfoxTimeline,restId:string,fallback?
   if(typeof text!=="string" || !Number.isFinite(Date.parse(tweet.createdAt)))throw new RedfoxResponseError("Tweet content or source time is invalid");
   const rawMedia=tweet.medias as any;
   const media:SdMedia[]=Array.isArray(rawMedia)?rawMedia.filter(m=>m.type==="photo" && m.coverUrl).map(m=>({type:"photo",media_url_https:m.coverUrl})):Array.isArray(rawMedia?.photos)?rawMedia.photos.map((m:any)=>({type:"photo",media_url_https:m.url})):[];
-  return tweetToCandidate({id_str:tweet.tweetId,tweet_created_at:tweet.createdAt,full_text:text,user:{screen_name:user.username,name:user.displayName??user.username,profile_image_url_https:user.avatar??undefined},extended_entities:{media}});
+  const value=tweetToCandidate({id_str:tweet.tweetId,tweet_created_at:tweet.createdAt,full_text:text,user:{screen_name:user.username,name:user.displayName??user.username,profile_image_url_https:user.avatar??undefined},extended_entities:{media}});
+  if(redfoxXHasVideo(tweet.medias))value.media=confirmedVideoMedia(value.media);
+  return value;
 }
 async function nextStep(tx:Tx,e:Execution,step:string,progress:Progress){await advanceRun(tx,e,{stepKey:step,progress});await queueOperationStep(tx,e.runId);}
 async function boundAccount(tx:Tx,input:Input) {

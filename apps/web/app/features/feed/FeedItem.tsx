@@ -9,9 +9,13 @@ import { SelectedBadge } from "../../components/ui/Badge";
 import { ScoreLabel } from "../../components/ui/Score";
 import { MediaThumbs, SourceLine, StarButton } from "./parts";
 import { GroupDevelopments, GroupSources, LatestDevelopment } from "./ReadingGroup";
+import { VideoPoster } from "./VideoPoster";
+import { IconMonitor } from "../../components/icons";
 import { QuotedLine } from "../item/QuotedPost";
 
 export interface FeedItemProps {
+  linkBase?: "/all" | "/videos";
+  listPageSize?: number;
   item: FeedItemSummary;
   group?: GroupInfo | null;
   filters?: TimelineFilters;
@@ -21,17 +25,23 @@ export interface FeedItemProps {
   showTags?: boolean;
 }
 
-export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false }: FeedItemProps) {
+export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false, linkBase = "/all", listPageSize }: FeedItemProps) {
   const isX = item.channel === "x" && !!item.x;
   const open = () => onOpen?.(item.id);
   const showSources = !!group && (group.additionalSourceCount > 0 || (group.developmentCount <= 1 && group.reportCount > 1));
   const showDevelopments = !!group?.story && group.developmentCount > 1;
   const tags = showTags ? item.tags.slice(0, 3) : [];
+  const filterHref = (key: "category" | "tag", value: string) => {
+    if (listPageSize === undefined) return `${linkBase}?${key}=${encodeURIComponent(value)}`;
+    const params = new URLSearchParams({ [key]: value, pageSize: String(listPageSize) });
+    return `${linkBase}?${params}`;
+  };
 
   return (
     <article className="relative min-w-0 lg:card lg:card-hover lg:px-[18px] lg:pb-[14px] lg:pt-[15px]" data-item-id={item.id}>
       <header className="flex min-h-[18px] items-center gap-2 text-[12.5px] leading-[18px] text-ink-4">
         <SourceLine item={item} className="text-ink-4" />
+        {item.video && <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-3"><IconMonitor size={12} />视频</span>}
         {item.selected && (
           <span className="hidden lg:inline-flex">
             <SelectedBadge />
@@ -67,18 +77,19 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
         </>
       )}
 
+      {item.video && !(isX && item.x!.media.length > 0) && <IntentLink to={`/items/${item.id}`} onClick={open} aria-label={`查看视频详情：${item.title}`} className="relative z-10 mt-2.5 block w-[200px] max-w-full"><VideoPoster key={item.video.poster ?? "placeholder"} video={item.video} /></IntentLink>}
       {isX && item.x!.media.length > 0 && <MediaThumbs media={item.x!.media} className="mt-2.5" />}
       {isX && item.x!.quoted?.text && <QuotedLine quoted={item.x!.quoted} />}
 
       {(tags.length > 0 || (showTags && item.category)) && (
         <div className="relative z-10 mt-2 hidden flex-wrap gap-x-2.5 gap-y-1 text-[12px] text-ink-4 lg:flex">
           {showTags && item.category && (
-            <Link to={`/all?category=${item.category}`} className="hover:text-accent">
+            <Link to={filterHref("category", item.category)} className="hover:text-accent">
               {CATEGORY_LABELS[item.category]}
             </Link>
           )}
           {tags.map((t) => (
-            <Link key={t} to={`/all?tag=${encodeURIComponent(t)}`} className="hover:text-accent">
+            <Link key={t} to={filterHref("tag", t)} className="hover:text-accent">
               #{t}
             </Link>
           ))}

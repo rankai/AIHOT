@@ -1,3 +1,4 @@
+import {videoMediaFromHtml} from "../content/media.ts";
 import { sql,type Tx } from "../db.ts";
 import { parseWechat,queryWechat,wechatArticleUrl,type WechatResult } from "../providers/redfox/wechat.ts";
 import { parseRedfoxJson,RedfoxResponseError } from "../providers/redfox/client.ts";
@@ -9,6 +10,7 @@ import { sanitizeBody } from "../content/sanitize.ts";
 import { stripTags } from "../lib/text.ts";
 import { identityKeyForUrl } from "../lib/url.ts";
 import { queueProcessing } from "../jobs/content.ts";
+import {wechatMedia} from "../providers/redfox/video-media.ts";
 interface Input {mode:string;source:{id:string;cursor:Record<string,unknown>};library:"wide"|"premium";mapping:{parameters:Record<string,string>;identity:{wxId:string|null;bizInfo:string|null}};window:string;startedAt:string}
 interface Progress extends OperationProgress{pageReceiptId:number;indices:number[];index:number;pageCount:number}
 function record(item:WechatResult){return item.data.record as Record<string,unknown>;}
@@ -87,8 +89,6 @@ export async function executeRedfoxMpStep(e:Execution,snapshot:RunRow){
     const run=await requireExecution(tx,e);await checkBindings(tx,input);await checkReturnedOwner(tx,item,input);await checkReturnedOwner(tx,value,input);
     const raw=record(value),listed=record(item),html=typeof raw.content==="string"&&raw.content.trim()?sanitizeBody(raw.content,detailUrl.url):null;
     const body=html?stripTags(html):null;
-    let cover:string|null=null;
-    if(typeof raw.coverUrl==="string"){try{const u=new URL(raw.coverUrl);if(["http:","https:"].includes(u.protocol)&&!u.username&&!u.password)cover=raw.coverUrl;}catch{/* Invalid media is not fetched. */}}
     const time=raw.publishTime??listed.publishTime;
     const parsed=typeof time==="string"&&/(?:Z|[+-]\d{2}:?\d{2})$/.test(time)?new Date(time):null;
     const publishedAt=parsed&&Number.isFinite(parsed.getTime())?parsed:null,discoveredAt=new Date(input.startedAt);
@@ -99,7 +99,7 @@ export async function executeRedfoxMpStep(e:Execution,snapshot:RunRow){
     if(input.mode==="collection"){
       const material=await upsertMaterial({sourceId:input.source.id,url:detailUrl.url,title:String(raw.title??listed.title??"公众号作品"),author:typeof raw.author==="string"?raw.author:null,
         excerpt:typeof raw.summary==="string"?raw.summary:typeof listed.summary==="string"?listed.summary:null,bodyText:body||null,bodyHtml:body?html:null,bodyStatus:body?"ok":"none",
-        ...(cover?{media:[{kind:"image" as const,url:cover}]}:{}),publishedAt,discoveredAt,backfill:!input.source.cursor.lastCheckedAt?"first-import":decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time",via:"fetch",raw:{redfoxMp:provenance,publishTime:time??null}},tx);
+        media:[...wechatMedia(raw),...(typeof raw.content==="string"?videoMediaFromHtml(raw.content,detailUrl.url):[])],publishedAt,discoveredAt,backfill:!input.source.cursor.lastCheckedAt?"first-import":decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time",via:"fetch",raw:{redfoxMp:provenance,publishTime:time??null}},tx);
       articleId=material.articleId;
       if(known?.source_id===input.source.id)await tx`UPDATE articles SET raw=jsonb_set(raw,'{redfoxMp}',${tx.json(provenance)}) WHERE id=${material.articleId}`;
       if(material.created||material.revised)await queueProcessing(material.articleId,{db:tx});

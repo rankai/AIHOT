@@ -1,4 +1,7 @@
 import { SITE } from "@aihot/industry/site";
+import type { Route } from "./+types/starred";
+import { navigationLabel, presentationFromMatches } from "../lib/presentation";
+import { usePresentation } from "../lib/use-presentation";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Presence } from "../components/ui/Presence";
@@ -12,8 +15,8 @@ export function headers() {
   return { "Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=600" };
 }
 
-export function meta() {
-  return pageMeta({ title: "我的收藏", description: `保存在这台设备上的 ${SITE.name} 收藏。`, path: "/starred", noindex: true });
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta({ title: navigationLabel(presentationFromMatches(matches), "starred", "我的收藏"), description: `保存在这台设备上的 ${SITE.name} 收藏。`, path: "/starred", noindex: true });
 }
 
 function reportText(r: ImportReport): string {
@@ -26,6 +29,7 @@ function reportText(r: ImportReport): string {
 
 
 export default function StarredPage() {
+  const presentation = usePresentation();
   const starred = useStarred();
   const [mounted, setMounted] = useState(false);
   const [availability, setAvailability] = useState<Record<string, string>>({});
@@ -68,7 +72,7 @@ export default function StarredPage() {
     <div className="pb-12">
       <header className="flex flex-col gap-2 pb-4 pt-5 sm:flex-row sm:items-start sm:justify-between lg:pt-1">
         <div>
-          <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">收藏</h1>
+          <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{navigationLabel(presentation, "starred", "收藏")}</h1>
           <p className="mt-1.5 text-[13px] text-ink-3">本机收藏的 {SITE.name} 内容，适合稍后阅读和回看。</p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:pt-1.5">
@@ -100,7 +104,7 @@ export default function StarredPage() {
           <IconBookmark size={20} className="text-ink-4" />
           <p className="mt-3 text-[13px] text-ink-3">还没有收藏内容。点开任意一条内容，在详情页点击收藏即可添加。</p>
           <Link to="/" className="mt-4 text-[12.5px] font-medium text-accent hover:text-accent-ink">
-            去看精选 →
+            {`去看${navigationLabel(presentation, "selected", "精选")} →`}
           </Link>
         </div>
       ) : (
