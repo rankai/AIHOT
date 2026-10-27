@@ -1,0 +1,44 @@
+{
+  "subs": [
+    {
+      "id": 9,
+      "enabled": false,
+      "active_run_id": null,
+      "source_id": "ownership-ui-editorial"
+    },
+    {
+      "id": 10,
+      "enabled": false,
+      "active_run_id": null,
+      "source_id": "ownership-ui-isolated"
+    }
+  ],
+  "receipts": [
+    {
+      "id": 26,
+      "status": "completed",
+      "attempts": 1,
+      "service": "redfox.collect",
+      "model": "OWIBYU1V"
+    },
+    {
+      "id": 27,
+      "status": "completed",
+      "attempts": 1,
+      "service": "redfox.collect",
+      "model": "OWIBYU1V"
+    }
+  ],
+  "sources": [
+    {
+      "id": "ownership-ui-editorial",
+      "participation_mode": "editorial",
+      "site_fulltext": true
+    },
+    {
+      "id": "ownership-ui-isolated",
+      "participation_mode": "isolated",
+      "site_fulltext": false
+    }
+  ]
+}

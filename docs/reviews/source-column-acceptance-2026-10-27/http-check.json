@@ -1,0 +1,231 @@
+[
+  {
+    "path": "/api/site/pool",
+    "status": 200,
+    "expected": [
+      "efqx17hqe5swbn46audtjwmum",
+      "kvfvg8t6al1vilvc55zp5n7ow",
+      "x6l410e852mp71cj2xn2erbvf"
+    ],
+    "body": {
+      "filters": {
+        "channel": "all",
+        "category": null,
+        "tag": null,
+        "topic": null,
+        "q": null,
+        "tab": "time",
+        "videosOnly": false
+      },
+      "items": [
+        {
+          "video": {
+            "poster": null
+          },
+          "id": "x6l410e852mp71cj2xn2erbvf",
+          "title": "栏目闭环：公开视频",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "闭环验收"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        },
+        {
+          "video": {
+            "poster": null
+          },
+          "id": "kvfvg8t6al1vilvc55zp5n7ow",
+          "title": "栏目闭环：不匹配标签视频",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "其他标签"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        },
+        {
+          "video": null,
+          "id": "efqx17hqe5swbn46audtjwmum",
+          "title": "栏目闭环：普通图文",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "闭环验收"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        }
+      ],
+      "page": 1,
+      "pageSize": 40,
+      "pageCount": 1,
+      "total": 3,
+      "todayCount": 3,
+      "freshness": "2026-10-27T06:17:18.099Z",
+      "generatedAt": "2026-10-27T06:19:32.481Z"
+    }
+  },
+  {
+    "path": "/api/site/pool?videosOnly=true",
+    "status": 200,
+    "expected": [
+      "kvfvg8t6al1vilvc55zp5n7ow",
+      "x6l410e852mp71cj2xn2erbvf"
+    ],
+    "body": {
+      "filters": {
+        "channel": "all",
+        "category": null,
+        "tag": null,
+        "topic": null,
+        "q": null,
+        "tab": "time",
+        "videosOnly": true
+      },
+      "items": [
+        {
+          "video": {
+            "poster": null
+          },
+          "id": "x6l410e852mp71cj2xn2erbvf",
+          "title": "栏目闭环：公开视频",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "闭环验收"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        },
+        {
+          "video": {
+            "poster": null
+          },
+          "id": "kvfvg8t6al1vilvc55zp5n7ow",
+          "title": "栏目闭环：不匹配标签视频",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "其他标签"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        }
+      ],
+      "page": 1,
+      "pageSize": 20,
+      "pageCount": 1,
+      "total": 2,
+      "todayCount": 2,
+      "freshness": "2026-10-27T06:17:18.099Z",
+      "generatedAt": "2026-10-27T06:19:32.496Z"
+    }
+  },
+  {
+    "path": "/api/site/pool?columnId=custom-ad13b70b-80b0-45b9-8382-62fa6ce8db0f",
+    "status": 200,
+    "expected": [
+      "x6l410e852mp71cj2xn2erbvf"
+    ],
+    "body": {
+      "filters": {
+        "channel": "all",
+        "category": "ai-models",
+        "tag": "闭环验收",
+        "topic": null,
+        "q": null,
+        "tab": "time",
+        "videosOnly": true
+      },
+      "items": [
+        {
+          "video": {
+            "poster": null
+          },
+          "id": "x6l410e852mp71cj2xn2erbvf",
+          "title": "栏目闭环：公开视频",
+          "summary": "本地合成摘要，用于验证信源归属、栏目条件与公开权限。非真实新闻。",
+          "reason": null,
+          "source": {
+            "name": "人工智能视频与多作者资讯 · 本地合成验收"
+          },
+          "publishedAt": null,
+          "timelineAt": "2026-10-27T06:15:55.629Z",
+          "category": "ai-models",
+          "tags": [
+            "闭环验收"
+          ],
+          "score": 85,
+          "selected": false,
+          "channel": "news",
+          "x": null
+        }
+      ],
+      "page": 1,
+      "pageSize": 5,
+      "pageCount": 1,
+      "total": 1,
+      "todayCount": 1,
+      "freshness": "2026-10-27T06:17:18.099Z",
+      "generatedAt": "2026-10-27T06:19:32.503Z",
+      "column": {
+        "id": "custom-ad13b70b-80b0-45b9-8382-62fa6ce8db0f",
+        "label": "闭环验收视频",
+        "scope": "videos",
+        "category": "ai-models",
+        "tag": "闭环验收"
+      }
+    }
+  },
+  {
+    "path": "/api/site/items/x6l410e852mp71cj2xn2erbvf",
+    "status": 200
+  },
+  {
+    "path": "/api/site/items/x8upewelijw69gz95nooirbzs",
+    "status": 404
+  }
+]
