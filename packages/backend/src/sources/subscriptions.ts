@@ -2,7 +2,7 @@ import type {SourceRow} from "./types.ts";
 import type { Db, Tx } from "../db.ts";
 
 const researchSubscriptionOperations = new Set([
-  "UAQ90A1F", "9Y4EX7RW", "W94P1QH1", "S28Q6HUD",
+  "API_1792651427970", "UAQ90A1F", "9Y4EX7RW", "W94P1QH1", "S28Q6HUD",
   "douyin.trending", "douyin.comments", "douyin.comment_replies", "douyin.following",
   "toutiao.comments", "xiaohongshu.recommendations", "xiaohongshu.comments", "weibo.comments", "weibo.following", "weibo.related_search",
   "bilibili.dynamics", "bilibili.comments", "bilibili.comment_replies", "bilibili.relation_stats", "bilibili.trending", "bilibili.hot_search",

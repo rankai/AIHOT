@@ -1,3 +1,5 @@
+import {zhihuOperations,ZhihuOperationId} from "./zhihu-contract.ts";
+import {parseZhihu} from "./zhihu.ts";
 import {z} from "zod";
 import type {Db} from "../../db.ts";
 import {stableJson} from "../../lib/ids.ts";
@@ -16,8 +18,8 @@ import {parseTiktok} from "./tiktok.ts";
 import {bilibiliOperations,BilibiliOperationId} from "./bilibili-contract.ts";
 import {parseBilibili} from "./bilibili.ts";
 
-export const WorkDetailTargets=["0OT1E306","FK67XDVQ","KR1LPTBF","XEO0QQNF","1LDQ7E1C","I3CIBRI2","6SE9WIHJ","TIN1NMTZ"] as const;
-const Origin=z.object({resultId:z.number().int().positive().safe(),platform:z.enum(["douyin","xiaohongshu","wechat","tiktok","bilibili"]),sourceOperation:z.string(),workId:z.string().min(1).nullable(),url:z.string().min(1).nullable(),identity:z.record(z.string(),z.string().min(1)),role:z.enum(["keyword_match","provider_recommendation"]).optional(),discoveredAt:z.iso.datetime()}).strict();
+export const WorkDetailTargets=["0OT1E306","FK67XDVQ","KR1LPTBF","XEO0QQNF","1LDQ7E1C","I3CIBRI2","6SE9WIHJ","TIN1NMTZ","API_1792651427872"] as const;
+const Origin=z.object({resultId:z.number().int().positive().safe(),platform:z.enum(["douyin","xiaohongshu","wechat","tiktok","bilibili","zhihu"]),sourceOperation:z.string(),workId:z.string().min(1).nullable(),url:z.string().min(1).nullable(),identity:z.record(z.string(),z.string().min(1)),role:z.enum(["keyword_match","provider_recommendation"]).optional(),discoveredAt:z.iso.datetime()}).strict();
 type DetailOrigin=z.infer<typeof Origin>;
 type Work={kind:string;data:Record<string,unknown>};
 function reject(message:string):never{throw new UnsupportedReplacement(message);}
@@ -43,12 +45,14 @@ function checkRequest(o:DetailOrigin,target:string,p:Record<string,unknown>){
   else reject("WeChat UUIDs cannot cross libraries");
  }else if(o.platform==="tiktok"){
   if(target!=="6SE9WIHJ"||!["R473NUE9","PXZXY8KQ","API_1790149158205","API_1790581450500"].includes(source))reject("Unsupported TikTok detail relation");equal(p.awemeId,o.workId);
+ }else if(o.platform==="zhihu"){
+  if(target!=="API_1792651427872"||source!=="API_1789095347662")reject("Unsupported Zhihu article detail relation");equal(p.articleId,o.workId);
  }else{
   if(target!=="TIN1NMTZ"||!["LEN9QXR3","VPA67I98"].includes(source))reject("Unsupported Bilibili detail relation");
   if(p.bvId!==undefined)equal(p.bvId,o.workId);
   else {equal(p.workUrl,o.url);bilibiliOperations.TIN1NMTZ.schema.parse(p);}
  }
- const kinds=o.platform==="douyin"?["uid","secUserId"]:o.platform==="xiaohongshu"?["userId"]:o.platform==="wechat"?["wxId","bizInfo"]:o.platform==="tiktok"?["userId","secUserId"]:["mid"];
+ const kinds=o.platform==="douyin"?["uid","secUserId"]:o.platform==="xiaohongshu"?["userId"]:o.platform==="wechat"?["wxId","bizInfo"]:o.platform==="tiktok"?["userId","secUserId"]:o.platform==="zhihu"?["uid"]:["mid"];
  if(Object.keys(o.identity).some(k=>!kinds.includes(k)))reject("Unexpected frozen author identity type");
 }
 
@@ -88,6 +92,10 @@ export async function workDetailOrigin(db:Db,resultId:number,target:string,p:Rec
  }else if(platform==="bilibili"){
   const id=BilibiliOperationId.parse(op),request=bilibiliOperations[id].schema.parse(r.input.parameters);
   parsed=parseBilibili(id,{workList:[record],...(op==="VPA67I98"?{mid:r.data.accountMid}:{})},request)[0];
+ }else if(platform==="zhihu"){
+  const id=ZhihuOperationId.parse(op),request=zhihuOperations[id].schema.parse(r.input.parameters);
+  if(id!=="API_1789095347662"||!("vertical" in request)||request.vertical!=="article")reject("Only article-scoped Zhihu search can request article detail");
+  parsed=parseZhihu(id,[record],request)[0];
  }else reject("Unsupported source platform");
  if(!parsed||parsed.kind!==r.kind)reject("Source record does not reproduce the stored work kind");
  for(const field of ["workId","url","identity","role"])if(stableJson(parsed.data[field]??null)!==stableJson(r.data[field]??null))reject(`Stored source ${field} differs from its received record`);

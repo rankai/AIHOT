@@ -1,6 +1,7 @@
 import { platformParameters, type PlatformOperation } from "./platform-types.ts";
 import type { DetailQueryChoice, DetailQueryOptions } from "./detail-query-types.ts";
 export function isDetailQueryWork(kind: string, data: Record<string, unknown>) {
+  if (data.platform === "zhihu") return kind === "zhihu_work" && data.operationId === "API_1789095347662" && (data.requestContext as Record<string, unknown> | undefined)?.vertical === "article";
   return typeof data.platform === "string" && ["douyin", "xiaohongshu", "wechat", "tiktok", "bilibili", "weibo", "qichezhijia", "dongchedi", "yiche"].includes(data.platform) && kind === `${data.platform}_work`;
 }
 export function isDetailQueryResult(kind: string, data: Record<string, unknown>) {

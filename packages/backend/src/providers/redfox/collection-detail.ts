@@ -9,6 +9,7 @@ export const CollectionDetailTarget=z.enum([...WorkDetailTargets,...WeiboCarDeta
 /** Configuration choices, restricted again against each received work before any call. */
 export function collectionDetailTargets(source:string,p?:Record<string,unknown>):string[]{
  switch(source){
+ case "API_1789095347662":return !p||p.vertical==="article"?["API_1792651427872"]:[];
  case "TXQPVGJG":return ["API_1789098514899"];
  case "QEQLCKD6":case "774OBKK0":case "HUCIASU":return ["0OT1E306"];
  case "QSL2ZSXM":case "OWIBYU1V":return ["FK67XDVQ"];

@@ -5,12 +5,12 @@ import http from 'node:http';
 import { sql, closeDb } from '@aihot/backend/db';
 import { config } from '@aihot/backend/config';
 import { getBoss, stopBoss, QUEUES } from '@aihot/backend/jobs/queue';
-import { createAiSearch, createAiSearchQuery, parseAiSearchPoll, pollAiSearch } from '@aihot/backend/providers/redfox/ai-search';
+import { createAiSearch, createAiSearchQuery, parseAiSearchPoll, pollAiSearch, submitAiSearch } from '@aihot/backend/providers/redfox/ai-search';
 import { aiSearchEngines, aiSearchPaths, aiSearchPolls } from '@aihot/backend/providers/redfox/ai-search-contract';
 import { executeOperationStep } from '@aihot/backend/providers/operations/execute';
 import { recoverOperations, releaseOperationReceipt } from '@aihot/backend/providers/operations/recovery';
 import { abandonRun, resumeRun, claimRun, receiptOptions } from '@aihot/backend/providers/operations/store';
-let mode='success'; const calls:Array<{path:string;body:Record<string,string>}> = [], runs:number[]=[];
+let mode='success';let productCards:unknown=undefined;const productReferences=[{id:'90071992547409931',index:1,title:'Synthetic reference',url:'https://example.test/reference',searchId:'opaque-guid'}]; const calls:Array<{path:string;body:Record<string,string>}> = [], runs:number[]=[];
 const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{
   assert.equal(req.method,'POST');assert.equal(req.headers.redfox_api_key,'synthetic-ai-search-key');
   const input=JSON.parse(body);calls.push({path:req.url!,body:input});
@@ -24,6 +24,7 @@ const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c)
    const status=mode==='processing'?(family==='doubao'||family==='deepseek'?'running':'processing'):mode==='failed'?'failed':'completed';
    data={status,taskId:mode==='wrong'?'wrong':input.taskId,failReason:null,result:mode==='processing'||mode==='failed'?null:{content:'Synthetic answer <REF>unchanged</REF>',...(family==='kimi'?{webPages:[{url:'https://example.test/source',publishTime:null}]}:family==='doubao'||family==='deepseek'?{search_result:[{url:'https://example.test/source',published_at:'90071992547409930',cite_index:null},{url:'javascript:alert(1)',published_at:0}]}:{})},...(family==='kimi'?{completed:status!=='processing'}:{})};
   }
+  if((family==='qianwenProducts'||family==='doubaoProducts')&&data.result){Object.assign(data.result,{...(productCards===undefined?{}:{cardData:productCards}),...(family==='doubaoProducts'?{searchGuid:productReferences,searchResult:{},queries:['synthetic']}:{})});}
   res.end(JSON.stringify({code:family==='deepseek'?200:2000,data}));
 });});
 let budgets:any[]=[];
@@ -37,7 +38,7 @@ async function job(id:number,due=false){const r=await row(id);if(due){await sql`
 async function missingJob(id:number){const r=await row(id);await sql`UPDATE pgboss.job SET state='completed' WHERE id=${r.job_id}`;await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${id}`;}
 async function recoverFixture(id:number){const [count]=await sql`SELECT count(*)::int AS n FROM operation_runs WHERE status IN ('active','waiting')`;for(let i=0;i<Math.ceil(count!.n/200)+3;i++){await recoverOperations();if((await row(id)).job_id)return;}assert.fail('fixture not recovered after bounded complete scan');}
 
-test('all thirteen fixed endpoints preserve inquiry and poll identity through due jobs',async()=>{
+test('all fixed endpoints preserve inquiry and poll identity through due jobs',async()=>{
  mode='success';for(const [engine,pair] of Object.entries(aiSearchEngines)){const text=' Synthetic inquiry with trailing whitespace ';
  const r=await createAiSearch({engine,inquiryText:text},'ai-search-test',tag());runs.push(r.id);const n=calls.length;await job(r.id);assert.deepEqual(calls[n],{path:aiSearchPaths[pair.submit],body:{inquiryText:text}});assert.equal((await row(r.id)).status,'waiting');await job(r.id,true);assert.equal(calls[n+1]!.path,aiSearchPaths[aiSearchPolls[pair.family]]);assert.deepEqual(Object.keys(calls[n+1]!.body),['taskId']);assert.equal((await row(r.id)).status,'completed');
  const [out]=await sql`SELECT * FROM operation_results WHERE run_id=${r.id} AND kind='ai_search_answer'`;assert.equal(out!.data.result.content,'Synthetic answer <REF>unchanged</REF>');assert.equal(out!.data.result.webPages,undefined);assert.equal(out!.data.result.search_result,undefined);
@@ -85,7 +86,7 @@ test('HTTP authentication/CSRF and frozen smaller limits use existing errors and
  assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/ai-searches',payload:{...payload,inquiryText:'changed'},headers})).statusCode,409);
  assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/ai-searches',payload:{...payload,engine:'unknown'},headers:{...headers,'idempotency-key':tag()}})).statusCode,400);
  const existing=await app.inject({method:'POST',url:'/api/admin/redfox/ai-searches/query',payload:{family:'baidu',taskId:tag()},headers:{...headers,'idempotency-key':tag()}});assert.equal(existing.statusCode,202);runs.push(existing.json().runId);
- const options=await app.inject({url:'/api/admin/redfox/ai-searches/options'});assert.equal(options.statusCode,200);assert.equal(options.json().engines.length,7);assert.equal(calls.length,n);
+ const options=await app.inject({url:'/api/admin/redfox/ai-searches/options'});assert.equal(options.statusCode,200);assert.equal(options.json().engines.length,9);assert.equal(calls.length,n);
  await sql`UPDATE operation_runs SET limits=limits||'{"polls":1,"pollDeadlineSeconds":120}'::jsonb WHERE id=${existing.json().runId}`;
  const detail=await operationDetail(existing.json().runId);assert.equal(detail!.inputs.aiSearchPlan!.pollLimit,1);assert.equal(detail!.inputs.aiSearchPlan!.pollDeadlineSeconds,120);
  mode='processing';await job(existing.json().runId);const after=calls.length;await job(existing.json().runId,true);assert.equal((await row(existing.json().runId)).status,'needs_review');assert.equal(calls.length,after);
@@ -100,4 +101,47 @@ test('both outbound gates apply to submissions and polls, while collection gate 
  }
  assert.equal(calls.length,before);
  mode='success';process.env.COLLECT_ENABLED='false';const q=await createAiSearchQuery({family:'yuanbao',taskId:' opaque | task '},'ai-search-test',tag());runs.push(q.id);await job(q.id);assert.equal(calls.at(-1)!.body.taskId,' opaque | task ');assert.equal((await row(q.id)).status,'completed');
+});
+
+const productEngines=['qianwenProducts','doubaoProducts'] as const;
+const productCard={title:'Synthetic product',price:'2???',originPrice:'￥3299',url:'https://example.test/item',image:'https://example.test/image',shopName:'Synthetic shop',sales:'已售3万+',sourceSeq:'tao_assistant_original',productId:'3750619017870705088'};
+test('product searches keep distinct family endpoints, cards and original searchGuid without inventing legacy citations',async()=>{
+ mode='success';productCards=[productCard];
+ try{for(const engine of productEngines){const key=tag(),input={engine,inquiryText:'  Synthetic products  '},r=await createAiSearch(input,'ai-search-test',key);runs.push(r.id);assert.equal((await createAiSearch(input,'ai-search-test',key)).id,r.id);await job(r.id);mode='processing';await job(r.id,true);assert.equal((await row(r.id)).status,'waiting');assert.equal((await row(r.id)).progress.pollSequence,1);mode='success';await job(r.id,true);assert.equal((await row(r.id)).status,'completed');
+ const [out]=await sql`SELECT data,receipt_id FROM operation_results WHERE run_id=${r.id} AND kind='ai_search_answer'`;assert.equal(out!.data.family,engine);assert.deepEqual(out!.data.result.cardData,[productCard]);assert.equal(out!.data.citationCount,0);assert.deepEqual(out!.data.result.searchGuid,engine==='doubaoProducts'?productReferences:undefined);
+ const [receipt]=await sql`SELECT model,service,cost,cost_basis FROM receipts WHERE id=${out!.receipt_id}`;assert.equal(receipt!.model,aiSearchPolls[engine]);assert.equal(receipt!.service,'redfox.poll');assert.equal(Number(receipt!.cost),0);assert.equal(receipt!.cost_basis,'estimated');
+ const explicit=await createAiSearchQuery({family:engine,taskId:'historical-product-task'},'ai-search-test',tag());runs.push(explicit.id);const before=calls.length;await job(explicit.id);assert.equal(calls.length,before+1);assert.equal(calls.at(-1)!.path,aiSearchPaths[aiSearchPolls[engine]]);assert.deepEqual(calls.at(-1)!.body,{taskId:'historical-product-task'});
+ }}finally{productCards=undefined;}
+});
+test('product status/card contracts reject malformed cards and old Doubao states but accept no cards',()=>{
+ for(const family of productEngines){const raw={taskId:'task',status:'completed',result:{content:'answer'}};
+ for(const cardData of [undefined,null,[]])assert.equal(parseAiSearchPoll(family,{...raw,result:{...raw.result,...(cardData===undefined?{}:{cardData})}},'task').state,'succeeded');
+ for(const cardData of [{},'[]',[null],[{}],[{title:'x',price:12}],[{title:'x',url:{href:'https://example.test'}}],[{title:'x',productId:123}]])assert.throws(()=>parseAiSearchPoll(family,{...raw,result:{...raw.result,cardData}},'task'));
+ for(const status of ['queued','running','succeeded'])assert.throws(()=>parseAiSearchPoll(family,{...raw,status},'task'));
+ assert.equal(parseAiSearchPoll(family,{taskId:'task',status:'processing',result:null},'task').state,'pending');assert.equal(parseAiSearchPoll(family,{taskId:'task',status:'failed',failReason:'Synthetic failure'},'task').state,'failed');
+ assert.throws(()=>parseAiSearchPoll(family,{...raw,taskId:'wrong'},'task'));assert.throws(()=>parseAiSearchPoll(family,{...raw,failReason:'contradiction'},'task'));
+ }
+ assert.equal(parseAiSearchPoll('doubao',{taskId:'task',status:'running'},'task').state,'pending');assert.equal(parseAiSearchPoll('doubao',{taskId:'task',status:'succeeded',result:{content:'legacy'}},'task').state,'succeeded');
+});
+test('each product received submission recovers task ID offline without a second submission',async()=>{
+ mode='success';for(const engine of productEngines){const input={engine,inquiryText:'Synthetic submission recovery'},r=await createAiSearch(input,'ai-search-test',tag());runs.push(r.id);const initial=await row(r.id),execution=await sql.begin(tx=>claimRun(tx,{runId:r.id,stepVersion:initial.step_version,generation:initial.generation},initial.job_id));
+ const received=await submitAiSearch(input,`run:${r.id}:submit`,receiptOptions(execution));await missingJob(r.id);const before=calls.length;process.env.REDFOX_CALLS_ENABLED='false';process.env.MODEL_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
+ try{await recoverFixture(r.id);await job(r.id);const current=await row(r.id);assert.equal(current.status,'waiting');assert.equal(current.step_key,'redfox.ai_search.poll');assert.equal(current.progress.taskId,received.data.taskId);assert.equal(calls.length,before);assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${received.receiptId}`)[0]!.attempts,1);}
+ finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.MODEL_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='synthetic-ai-search-key';}
+ await job(r.id,true);assert.equal(calls.at(-1)!.path,aiSearchPaths[aiSearchPolls[engine]]);assert.equal((await row(r.id)).status,'completed');
+ }
+});
+test('product unknown submission stays manual; malformed received cards replay without buying again',async()=>{
+ for(const engine of productEngines){mode='disconnect';const r=await createAiSearch({engine,inquiryText:'Synthetic unknown product search'},'ai-search-test',tag());runs.push(r.id);await job(r.id);const current=await row(r.id);assert.equal(current.status,'needs_review');const before=calls.length;assert.equal((await releaseOperationReceipt(current.current_receipt_id,true)).released,false);assert.equal(calls.length,before);}
+ mode='success';productCards=[{title:'bad',price:{value:12}}];
+ try{const q=await createAiSearchQuery({family:'doubaoProducts',taskId:tag()},'ai-search-test',tag());runs.push(q.id);await job(q.id);const held=await row(q.id);assert.equal(held.status,'needs_review');assert.equal((await sql`SELECT status FROM receipts WHERE id=${held.current_receipt_id}`)[0]!.status,'received');const before=calls.length;await sql.begin(tx=>resumeRun(tx,{runId:q.id,stepVersion:held.step_version,generation:held.generation}));await missingJob(q.id);process.env.REDFOX_CALLS_ENABLED='false';try{await recoverFixture(q.id);await job(q.id);assert.equal((await row(q.id)).status,'needs_review');assert.equal(calls.length,before);}finally{process.env.REDFOX_CALLS_ENABLED='true';}}
+ finally{productCards=undefined;}
+});
+
+test('product price seed adds only four estimates and never overwrites configured prices',async()=>{
+ const {readFile}=await import('node:fs/promises'),migration=await readFile(new URL('../database/migrations/0080_ai_search_product_prices.sql',import.meta.url),'utf8'),rollback=new Error('rollback synthetic price override');
+ await assert.rejects(sql.begin(async tx=>{
+  await tx`UPDATE service_prices SET per_request=7.89 WHERE service='redfox.ai_search' AND model='API_1793002507495'`;
+  await tx.unsafe(migration);const prices=await tx`SELECT service,model,per_request FROM service_prices WHERE model IN ${tx(['API_1793002507495','API_1793002507566','API_1793002507670','API_1793002507727'])}`;assert.equal(prices.length,4);assert.equal(Number(prices.find(p=>p.model==='API_1793002507495')!.per_request),7.89);assert.equal(Number(prices.find(p=>p.model==='API_1793002507670')!.per_request),0.12);assert.ok(prices.filter(p=>p.service==='redfox.poll').every(p=>Number(p.per_request)===0));throw rollback;
+ }),error=>error===rollback);
 });

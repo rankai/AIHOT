@@ -1,6 +1,10 @@
 import {z} from "zod";
 export const ImageModel=z.enum(["gptImage2","gptImage25","geminiBanana21","seedreamPro","seedreamLite"]);
 export type ImageModel=z.infer<typeof ImageModel>;
+export const imageGenerationAvailable=(model:ImageModel)=>model!=="seedreamLite";
+export function assertImageGenerationAvailable(model:ImageModel){
+ z.custom<ImageModel>(value=>imageGenerationAvailable(value as ImageModel),"Seedream 5.0 Lite 已停止新生成，请重新选择图片模型；已有任务仍可查询。").parse(model);
+}
 export const imageModelOf=(parameters:Record<string,unknown>):ImageModel=>parameters.model===undefined?"gptImage2":ImageModel.parse(parameters.model);
 export const imagePairs={
  gptImage2:{submit:"ATY07YGY",poll:"849ONCDF"},

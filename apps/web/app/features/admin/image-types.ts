@@ -1,5 +1,6 @@
 export type ImageModel = "gptImage2" | "gptImage25" | "geminiBanana21" | "seedreamPro" | "seedreamLite";
 export interface ImageModelOption {
+  generationAvailable?: boolean;
   model: ImageModel; label: string; maxReferences: number; maxImages?: number; maxOutputImages?: number;
   resolutions?: string[]; sizes?: string[]; background?: string[]; referenceLimitBasis?: string;
   customSize?: boolean; customPixelMinimum?: number; customPixelMaximum?: number; customPixelLimitBasis?: string; ratioRange?: number[];

@@ -7,6 +7,12 @@ import { kuaishouQueryParameters } from "./kuaishou-result-data.ts";
 import { instagramQueryParameters } from "./instagram-result-data.ts";
 import { youtubeQueryParameters } from "./youtube-result-data.ts";
 import { platformParameters, type PlatformOperation } from "./platform-types.ts";
+export function zhihuReadOnlyQueryNote(operation: Pick<PlatformOperation, "id" | "platform">): string | null {
+  return operation.platform === "zhihu" && ["API_1792651512423", "API_1792651658984"].includes(operation.id)
+    ? "仅提供单次只读研究查询，不提供导入、绑定或独立定时入口。"
+    : null;
+}
+
 /** Existing per-operation wire conversions, shared by one-off query and explicit collection drafts. */
 export function platformQueryParameters(operation: PlatformOperation, values: Record<string, string>): ServiceResearchParameters {
   return isSocialResearchOperation(operation) ? socialQueryParameters(operation, values) : isServiceResearchPlatform(operation.platform) ? serviceResearchParameters(operation, values) : isResearchPlatform(operation.platform) ? researchQueryParameters(operation, values) : operation.platform === "toutiao" ? toutiaoQueryParameters(operation, values) : operation.platform === "shipinhao" ? shipinhaoQueryParameters(operation, values) : operation.platform === "kuaishou" ? kuaishouQueryParameters(operation, values) : operation.platform === "instagram" ? instagramQueryParameters(operation, values) : operation.platform === "youtube" ? youtubeQueryParameters(operation, values) : platformParameters(operation, values);

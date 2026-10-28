@@ -9,12 +9,14 @@ const agentKeySinglePageIds = ["LEN9QXR3", "VPA67I98", "bilibili.typed_search", 
 const xSinglePageIds = ["5K5EG87P", "x.account_posts", "ABJQXHUE", "x.followers", "5QY3G5TY", "x.list_posts", "x.community_posts", "x.trending", "x.list_members", "x.community_members"];
 const weiboSinglePageIds = ["TXQPVGJG", "weibo.account_posts", "weibo.comments", "weibo.following", "UAQ90A1F", "weibo.related_search"];
 export function isAgentKeySinglePageSnapshot(operation: PlatformOperation, provider: string) { return provider === "agentkey" && operation.platform === "x-research" && xSinglePageIds.includes(operation.id) || provider === "agentkey" && operation.platform === "weibo" && weiboSinglePageIds.includes(operation.id) || provider === "agentkey" && agentKeySinglePageIds.includes(operation.id) && (operation.id.startsWith(`${operation.platform}.`) || operation.platform === "bilibili" && ["LEN9QXR3", "VPA67I98"].includes(operation.id) || operation.platform === "xiaohongshu" && ["384C6W6B", "XN3ULENA"].includes(operation.id)); }
+export function isZhihuCommentSnapshot(operation: PlatformOperation) { return operation.platform === "zhihu" && operation.id === "API_1792651427970"; }
 export function isHotSnapshot(operation: PlatformOperation) { return operation.platform === "hot-research" && hotSnapshotIds.includes(operation.id); }
 export function providerOperation(operation: PlatformOperation,provider:string):PlatformOperation {
   const variant=(operation.queryProviders ?? operation.collectionProviders)?.find(option=>option.id===provider);
   return variant?.fields?{...operation,label:variant.operationLabel??operation.label,fields:variant.fields,purpose:variant.purpose??operation.purpose,collectionPrice:variant.collectionPrice,collectionCapabilities:variant.collectionCapabilities ? {...operation.collectionCapabilities,...variant.collectionCapabilities} : operation.collectionCapabilities}:operation;
 }
 export function collectionFormOperation(operation: PlatformOperation) {
+  if (isZhihuCommentSnapshot(operation)) return {...operation,fields:operation.fields.filter(field=>field.name!=="nextUrl")};
   return isHotSnapshot(operation) ? { ...operation, fields: operation.fields.filter(field => field.name !== "startDate" && field.name !== "endDate") } : operation;
 }
 export interface CollectionSeed { provider?:string; operationId: string; values: Record<string, string>; sequence: number }
@@ -22,7 +24,7 @@ export function collectionSubscriptionsHref(id: number | null = null, sourceId?:
   return `/admin/sources?${new URLSearchParams({ view: "collections", ...(id ? { subscription: String(id) } : {}), ...(sourceId ? { sourceId } : {}) })}`;
 }
 export function collectionSeedNavigation(operationId: string, values: Record<string, string>,provider?:string) {
-  const filters = hotSnapshotIds.includes(operationId) ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== "startDate" && key !== "endDate")) : { ...values };
+  const filters = operationId === "API_1792651427970" ? {articleId: values.articleId ?? ""} : hotSnapshotIds.includes(operationId) ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== "startDate" && key !== "endDate")) : { ...values };
   return { to: collectionSubscriptionsHref(), state: { collectionSeed: { ...(provider?{provider}:{}),operationId, values: filters, sequence: Date.now() } satisfies CollectionSeed } };
 }
 export function collectionSeedFromState(state: unknown): CollectionSeed | null {
@@ -60,6 +62,7 @@ export type CollectionDetailOperation = NonNullable<NonNullable<PlatformOperatio
 export function collectionDetailOperations(operation: PlatformOperation, values?: Record<string, string>) {
   const choices = operation.collectionCapabilities?.detailEnrichment ? operation.collectionCapabilities.detailOperations ?? [] : [];
   if (!values) return choices;
+  if (operation.id === "API_1789095347662") return values.vertical === "article" ? choices : [];
   const type = values.sourceType?.trim();
   if (operation.id === "CI7VW144") return choices.filter(choice => choice.operationId === (type === "video" ? "TE6AGWAF" : type === "article" ? "LLCI8QTE" : ""));
   if (operation.id === "YIGCY5US") return choices.filter(choice => choice.operationId === (type === "shipin" ? "3BXWEB6Y" : type === "xinwen" ? "VYSP68M2" : ""));
@@ -76,7 +79,8 @@ export function collectionDraft(operation: PlatformOperation, initial: Collectio
   const sameOperation = initial?.operationId === operation.id;
   const providers = collectionProviders(operation), provider = sameOperation ? initial.provider : (seed?.operationId === operation.id ? seed.provider : undefined) ?? providers[0]?.id ?? "";
   operation = providerOperation(operation, provider);
-  const hot = isHotSnapshot(operation), single = isAgentKeySinglePageSnapshot(operation, provider), noDetails = single && !collectionDetailsAvailable(operation), defaults = defaultPlatformValues(collectionFormOperation(operation));
+  if(isZhihuCommentSnapshot(operation)&&seed)seed={...seed,values:{articleId:seed.values.articleId??""}};
+  const hot = isHotSnapshot(operation), single = isZhihuCommentSnapshot(operation) || isAgentKeySinglePageSnapshot(operation, provider), noDetails = single && !collectionDetailsAvailable(operation), defaults = defaultPlatformValues(collectionFormOperation(operation));
   return { sourceId: initial?.sourceId ?? undefined, autoDownloadVideo: initial?.autoDownloadVideo ?? false, name: initial?.name ?? "", provider, values: sameOperation ? Object.fromEntries(Object.entries(initial.parameters).map(([key, value]) => [key, Array.isArray(value) ? value.join("\n") : String(value)])) : seed?.operationId === operation.id ? { ...defaults, ...seed.values } : defaults, enabled: initial?.enabled ?? false, intervalMinutes: initial?.intervalMinutes ?? (hot ? 60 : 15), enrichDetails: !noDetails && sameOperation ? initial.enrichDetails : false, detailOperationId: !noDetails && sameOperation ? initial.detailOperationId ?? collectionLegacyDetail(operation, initial)?.operationId ?? "" : "", detailPage: sameOperation && initial.detailPage != null ? String(initial.detailPage) : "", pages: single ? 1 : sameOperation ? initial.limits.pages : hot ? 1 : 3, items: sameOperation ? initial.limits.items : 100, details: noDetails ? 0 : sameOperation ? initial.limits.details : single ? 0 : operation.platform === "weibo" || collectionDetailsAvailable(operation) ? 20 : 0 };
 }
 export function collectionConfig(operation: PlatformOperation, draft: CollectionDraft, lockedPlatform?: string, existing?: CollectionSubscription | null): CollectionSubscriptionConfig {
@@ -94,7 +98,8 @@ export function collectionConfig(operation: PlatformOperation, draft: Collection
   if (operation.platform === "weibo" && parameters.searchType === "3") throw new Error("账号搜索类别不能用于定时材料采集。");
   if (!draft.name.trim()) throw new Error("请填写订阅名称。");
   for (const [label, value, min, max] of [["周期", draft.intervalMinutes, 1, 10080], ["页数", draft.pages, 1, 10], ["条目数", draft.items, 1, 500], ["详情数", draft.details, 0, 100]] as const) if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`${label}超出允许范围。`);
-  const single = isAgentKeySinglePageSnapshot(operation, draft.provider);
+  const single = isZhihuCommentSnapshot(operation) || isAgentKeySinglePageSnapshot(operation, draft.provider);
+  if (isZhihuCommentSnapshot(operation) && (draft.pages!==1 || draft.details!==0 || draft.enrichDetails || draft.detailOperationId || draft.detailPage || draft.autoDownloadVideo)) throw new Error("知乎评论快照仅支持首页一次、零详情，不能启用视频保存。");
   if (single && operation.platform === "x-research" && (draft.pages !== 1 || draft.details !== 0 || draft.enrichDetails || draft.detailOperationId || draft.detailPage)) throw new Error("AgentKey X 订阅仅支持首页一次、零详情；请显式纠正配置，不会自动丢弃。");
   const enrichDetails = collectionDetailsAvailable(operation) && draft.enrichDetails;
   const target = enrichDetails ? collectionDetailOperations(operation, draft.values).find(choice => choice.operationId === draft.detailOperationId) : undefined;
@@ -109,6 +114,7 @@ export function collectionConfig(operation: PlatformOperation, draft: Collection
 }
 export function collectionPagingNote(operation: PlatformOperation, values: Record<string, string>, provider = "redfox") {
   if (operation.platform === "x-research" && isAgentKeySinglePageSnapshot(operation, provider)) return "每轮仅首页一次，零详情，不自动续页；条目上限包括置顶、转发与研究记录，不等于文章数。仅普通作品按实收证据入库，缺作品身份或原文保留待核实；这不代表原生 X 连续主采集，也不提供其供应商切换。";
+  if (isZhihuCommentSnapshot(operation)) return "定时保存每轮从首页开始，不沿用查询续页；固定一篇文章，不自动翻页或获取回复树，不自动成为文章，条目上限仅限制本地保留量。";
   if (isHotSnapshot(operation)) return "每轮查询一次研究快照，不翻页、不补全详情，也不自动成为文章；条目上限可能截断本次返回记录，TOP10 以聚合组计条目。";
   if (isWeiboSnapshot(operation)) return "微博热搜每轮只保存一次研究快照，不作为文章，不使用分页或详情补全限额。";
   if (operation.id === "3X8FGEEM") return values.keyword?.trim() ? "带关键词时本轮只查询一页，页码与每页条数不用于续页。作品候选与相关话题、推荐研究分别保存。" : "无关键词时可按已确认的 pageNum 规则继续查询；最多页数仍是上限，不保证有后页。作品候选与研究分别保存。";
@@ -147,7 +153,7 @@ export function collectionPreviewBody(operation: PlatformOperation, values: Reco
     const start = beijingDate(now), end = addDays(start, 1), suffix = operation.id === "9Y4EX7RW" ? " 00:00:00" : "";
     return { provider, operationId: operation.id, parameters: { ...platformQueryParameters(collectionFormOperation(operation), values), startDate: start + suffix, endDate: end + suffix } };
   }
-  return { provider, operationId: operation.id, parameters: platformQueryParameters(operation, values) };
+  return { provider, operationId: operation.id, parameters: platformQueryParameters(collectionFormOperation(operation), values) };
 }
 export function isCollectionOperationKey(key: string, provider?: string, mode?: string) {
   return key === "redfox.weibo.collection" || key === "redfox.platform.collection"

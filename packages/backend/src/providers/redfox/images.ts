@@ -1,6 +1,6 @@
 import {assertGenerationReference,confirmMediaUpload,uploadMediaReference} from "./media-upload.ts";
 import {OutputFormat,OptimizePromptMode,SequentialMode,MAX_GROUP_IMAGES,GeminiResolution} from "./image-models.ts";
-import { ImageInput, ImageModel, imageModelOf, imagePairs, Resolution, Size, NewTaskId, SafeImageUrl, Gpt25Size, GeminiSize, type ImageParameters } from "./image-models.ts";
+import { ImageInput, ImageModel, assertImageGenerationAvailable, imageGenerationAvailable, imageModelOf, imagePairs, Resolution, Size, NewTaskId, SafeImageUrl, Gpt25Size, GeminiSize, type ImageParameters } from "./image-models.ts";
 export {ImageInput};
 export type {ImageParameters};
 import { z } from "zod";
@@ -31,6 +31,7 @@ async function imageCommand(parameters:Record<string,unknown>,actor:string,key:u
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
+    if(!query)assertImageGenerationAvailable(imageModelOf(parameters));
     const fileKeys=(parameters.fileKeys??[]) as string[];
     await lockAssetInputs(tx,fileKeys);
     const references: Array<{fileKey:string;resultId:number;resourceUrl:string;format:string;sha256:string;base:string}>=[];
@@ -84,5 +85,5 @@ export function imageOptions(){return {modelLabel:"Redfox GPT-Image-2",resolutio
  {model:"gptImage25",label:"Redfox GPT-Image-2.5",resolutions:Resolution.options,sizes:Gpt25Size.options,background:["transparent"],maxReferences:4,referenceLimitBasis:"local",maxOutputImages:10,documentedBaseCny:1.5},
  {model:"geminiBanana21",label:"Redfox Gemini Banana 2.1",resolutions:GeminiResolution.options,sizes:GeminiSize.options,maxReferences:4,referenceLimitBasis:"local",maxOutputImages:10,documentedBaseCny:1},
  {model:"seedreamPro",label:"Redfox Seedream Pro",sizes:["1K","2K"],customSize:true,customPixelMaximum:OUTPUT_IMAGE_PIXELS,customPixelLimitBasis:"local",ratioRange:[1/16,16],maxReferences:4,maxOutputImages:10,documentedBaseCny:1,responseFormat:"url",outputFormats:OutputFormat.options,optimizePromptModes:OptimizePromptMode.options,watermark:true},
- {model:"seedreamLite",label:"Redfox Seedream Lite",sizes:["2K","3K","4K"],customSize:true,customPixelMinimum:3686400,customPixelMaximum:16777216,ratioRange:[1/16,16],maxReferences:4,maxImages:10,documentedBaseCny:0.71,responseFormat:"url",outputFormats:OutputFormat.options,optimizePromptModes:OptimizePromptMode.options,watermark:true,sequentialModes:SequentialMode.options,maxImagesRange:[1,MAX_GROUP_IMAGES]}],
+ {model:"seedreamLite",generationAvailable:imageGenerationAvailable("seedreamLite"),label:"Redfox Seedream Lite",sizes:["2K","3K","4K"],customSize:true,customPixelMinimum:3686400,customPixelMaximum:16777216,ratioRange:[1/16,16],maxReferences:4,maxImages:10,documentedBaseCny:0.71,responseFormat:"url",outputFormats:OutputFormat.options,optimizePromptModes:OptimizePromptMode.options,watermark:true,sequentialModes:SequentialMode.options,maxImagesRange:[1,MAX_GROUP_IMAGES]}],
  newModelLimits:{...IMAGE_LIMITS,steps:80,saveAttempts:30},priceBasis:"documented-estimate",billingUnitVerified:false,referenceReuseHint:"Explicitly selected uploads prove prior success, not continued URL availability; failure does not trigger re-upload."};}

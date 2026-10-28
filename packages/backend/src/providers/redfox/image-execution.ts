@@ -1,8 +1,8 @@
-import {imageModelOf} from "./image-models.ts";
+import {assertImageGenerationAvailable,imageModelOf} from "./image-models.ts";
 import { guardedDownload } from "../../lib/http-fetch.ts";
 import { assetPath, describeGeneratedFile, hasCompleteLocalFile, imageOutputKey, OUTPUT_IMAGE_BYTES, OUTPUT_IMAGE_PIXELS, prepareUpload, publishUpload } from "../../operations/assets.ts";
 import { RedfoxDisabledError, redfoxBaseUrl } from "./client.ts";
-import type { PaidRequestOptions } from "../receipts.ts";
+import { BudgetExceededError, type PaidRequestOptions } from "../receipts.ts";
 import { sql, type Tx } from "../../db.ts";
 import { advanceRun, receiptOptions, requireExecution, saveResult, setRunState, type Execution, type RunRow, type OperationProgress } from "../operations/store.ts";
 import { queueOperationStep } from "../operations/queue.ts";
@@ -13,8 +13,9 @@ function imageReceiptOptions(execution:Execution):PaidRequestOptions {
   return {...base,onReceipt:async(tx,id,info)=>{
     await base.onReceipt?.(tx,id,info);
     if(info.kind!=="call")return;
-    if(process.env.REDFOX_CALLS_ENABLED!=="true"||process.env.MODEL_CALLS_ENABLED!=="true")throw new RedfoxDisabledError("Image generation outbound calls are disabled");
     const run=await requireExecution(tx,execution);
+    if(run.step_key==="redfox.image.upload"||run.step_key==="redfox.image.submit")assertImageGenerationAvailable(imageModelOf(run.input.parameters as Record<string,unknown>));
+    if(process.env.REDFOX_CALLS_ENABLED!=="true"||process.env.MODEL_CALLS_ENABLED!=="true")throw new RedfoxDisabledError("Image generation outbound calls are disabled");
     const limits=imageLimits(run);
     if(Date.now()-Date.parse(String(run.input.startedAt))>limits.pollDeadlineSeconds*1000)throw new Error("Image operation external request deadline exhausted");
     const count=Number(run.progress.externalAttempts??0);
@@ -30,6 +31,14 @@ async function advance(tx:Tx,execution:Execution,stepKey:string,progress:Operati
   await queueOperationStep(tx,execution.runId);
 }
 export async function executeImageStep(execution:Execution,run:RunRow){
+  try { await executeImageStepInner(execution,run); } catch(error) {
+    // Budget and outbound gates can reject a new call before its receipt callback.
+    // Received, busy and unknown receipts retain their existing recovery path.
+    if((run.step_key==="redfox.image.upload"||run.step_key==="redfox.image.submit")&&(error instanceof BudgetExceededError||error instanceof RedfoxDisabledError))assertImageGenerationAvailable(imageModelOf(run.input.parameters as Record<string,unknown>));
+    throw error;
+  }
+}
+async function executeImageStepInner(execution:Execution,run:RunRow){
   const limits=imageLimits(run),model=imageModelOf(run.input.parameters as Record<string,unknown>);
   const progress=run.progress,identity=`run:${run.id}`;
   if(run.step_version>limits.steps)throw new Error("Image operation step limit exhausted");

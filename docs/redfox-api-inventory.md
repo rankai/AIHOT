@@ -235,6 +235,8 @@
 
 ### 豆包图片生成（4）
 
+当前调整（2026-10-27）：Seedream 5.0 Lite 已停止新生成。下表 Lite 提交参数仅保留为历史协议；旧回执恢复、已有任务查询与已保存文件继续保留，不作为新建调用指引。详见[增量调整方案](redfox-incremental-tools-plan.md)。
+
 | 接口 ID / 官方说明 | 请求 | 文档输入字段 | 系统用途 / 执行方式 |
 | --- | --- | --- | --- |
 | [K8CWLR4I](https://redfox.hk/apis/tool-doubao-image/K8CWLR4I) · Seedream 5.0 Pro 提交任务 | `POST /story/api/parseWork/imageGen/arkProSubmit` | `prompt*`, `image`, `size*`, `outputFormat`, `responseFormat`, `watermark`, `optimizePromptOptions`, `mode` | 图片生成；提交→HMOMP642 |
