@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {before,after,test} from 'node:test';
 import {sql,closeDb} from '@aihot/backend/db';
 import {config} from '@aihot/backend/config';
+import {logicalKeyFor} from '@aihot/backend/providers/receipts';
 import {stopBoss} from '@aihot/backend/jobs/queue';
 import {createSynchronousQuery} from '@aihot/backend/providers/redfox/synchronous';
 import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
@@ -15,7 +16,8 @@ import {importZhihuResult} from '@aihot/backend/providers/redfox/import-zhihu';
 import {workDetailOptions} from '@aihot/backend/providers/redfox/work-detail-options';
 const search='API_1789095347662',detail='API_1792651427872',comments='API_1792651427970',account='API_1792651512423',hot='API_1792651658984';
 const articleId=BigInt('0x'+randomUUID().replaceAll('-','')).toString();
-const article={opusId:articleId,type:'article',opusUrl:`https://zhuanlan.zhihu.com/p/${articleId}`,title:'Synthetic Zhihu article',content:'<p>Verified body <b>bold</b></p><script>bad()</script>',publishTime:1700000000};
+const authorToken='e-han-jia-gou-shi',authorUid='1409476289460367360';
+const article={authorUid,authorsecid:authorToken,opusId:articleId,type:'article',opusUrl:`https://zhuanlan.zhihu.com/p/${articleId}`,title:'Synthetic Zhihu article',content:'<p>Verified body <b>bold</b></p><script>bad()</script>',publishTime:1700000000};
 const comment={id:'90071992547409931',content:'Synthetic comment',nickname:'Commenter',avatorUrl:'https://example.test/avatar',urlToken:'commenter-token',likeNum:'12',publishTime:'1700000000'};
 let data:unknown=article;
 const wire:Array<{url:string;parameters:Record<string,unknown>}>=[];
@@ -32,6 +34,27 @@ async function query(operationId:ZhihuOperation,parameters:Record<string,unknown
 async function source(){const id=tag();await sql`INSERT INTO sources(id,name,kind,config,enabled,participation_mode,site_fulltext,syndicate_fulltext) VALUES (${id},'Synthetic owner','external','{}',true,'editorial',false,false)`;return id;}
 async function commentSub(extra:Record<string,unknown>={}){const s=await createPlatformSubscription({name:tag(),operationId:comments,parameters:{articleId},enabled:true,limits:{pages:1,items:1,details:0},...extra},'zhihu-test',tag());subs.push(s.id);return s;}
 
+for(const purpose of ['query','collect'] as const)test(`search maps legacy keyword only on wire for ${purpose}; receipt identity and replay stay stable`,async()=>{
+ const input=Object.freeze({offset:'20',sort:'created_time',timeInterval:'a_week',vertical:'article',keword:tag()}),window=tag();
+ const expected={...input},hits=provider.hits();data=[{opusId:articleId,title:'Synthetic search'}];
+ const response=await queryZhihu(search,input,window,{},purpose);
+ assert.equal(provider.hits(),hits+1);
+ assert.equal(new URL(wire.at(-1)!.url,provider.url).pathname,zhihuOperations[search].path);
+ assert.deepEqual(wire.at(-1)!.parameters,{offset:'20',sort:'created_time',timeInterval:'a_week',vertical:'article',keyword:input.keword});
+ assert.deepEqual(input,expected);
+ assert.deepEqual(response.results[0]!.data.requestContext,expected);
+ const identity={base:provider.url,operation:search,input:expected,window};
+ const [receipt]=await sql`SELECT logical_key,request,attempts FROM receipts WHERE id=${response.receiptId}`;
+ assert.equal(receipt!.logical_key,logicalKeyFor({service:`redfox.${purpose}`,model:search,purpose:`redfox.${search}`,identity}));
+ assert.deepEqual(receipt!.request,identity);
+ off();try{
+  const replay=await queryZhihu(search,input,window,{},purpose);
+  assert.equal(replay.receiptId,response.receiptId);assert.equal(replay.reused,true);
+  assert.deepEqual(replay.results,response.results);assert.equal(provider.hits(),hits+1);
+ }finally{on();}
+ assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${response.receiptId}`)[0]!.attempts,1);
+});
+
 test('four documented query shapes retain values and reject broken detail/comment shapes',async()=>{
  for(const [op,p,payload,kind] of [[detail,{articleId},article,'zhihu_work'],[comments,{articleId,nextUrl:'opaque-next'},{items:[comment],nextUrl:'received-next'},'social_comment'],[account,{userId:'home-token'},{urlToken:'home-token',homeUrl:'https://www.zhihu.com/people/home-token',nickname:'Synthetic',fansNum:'123'},'zhihu_account'],[hot,{},[{title:'Synthetic hotspot',hotValue:'404 万',rank:0,label:'new'}],'zhihu_hot_search']] as const){data=payload;const results=await query(op,p);assert.equal(results[0]!.kind,kind);assert.equal(new URL(wire.at(-1)!.url,provider.url).pathname,zhihuOperations[op].path);assert.deepEqual(wire.at(-1)!.parameters,p);const [r]=await sql`SELECT service,cost FROM receipts WHERE id=${results[0]!.receipt_id}`;assert.equal(r!.service,'redfox.query');assert.equal(Number(r!.cost),0.06);}
  assert.equal(parseZhihu(comments,{items:[],nextUrl:null},{articleId})[0]!.data.count,0);assert.equal(parseZhihu(hot,[],{})[0]!.data.count,0);
@@ -40,25 +63,54 @@ test('four documented query shapes retain values and reject broken detail/commen
  for(const bad of [{...article,opusId:'999'},{...article,type:'answer'},{...article,opusUrl:'https://evil.test/p/'+articleId},{...article,opusUrl:'https://zhuanlan.zhihu.com/p/999'},{...article,opusUrl:'https://zhuanlan.zhihu.com/p/'+articleId+'#x'}])assert.throws(()=>parseZhihu(detail,bad,{articleId}));
 });
 test('article search alone offers same-work detail; verified body/time import preserves selected owner and deduplicates',async()=>{
- data=[{opusId:articleId,title:'Search article'}];const [result]=await query(search,{offset:'0',keword:tag(),vertical:'article'});
+ data=[{opusId:articleId,uid:authorToken,title:'Search article'}];const [result]=await query(search,{offset:'0',keword:tag(),vertical:'article'});
  const options=await workDetailOptions(result!.id);assert.equal(options!.choices[0]!.operationId,detail);assert.deepEqual(options!.choices[0]!.parameters,{articleId});
  await assert.rejects(createSynchronousQuery({operationId:detail,parameters:{articleId:'999'},sourceResultId:result!.id},'zhihu-test',tag()));
  for(const vertical of [undefined,'answer','zvide']){data=[{opusId:articleId,title:'Other'}];const [r]=await query(search,{offset:'0',keword:tag(),...(vertical?{vertical}:{})});assert.deepEqual((await workDetailOptions(r!.id))!.choices,[]);}
- data=article;const [full]=await query(detail,{articleId},result!.id),sourceId=await source();
+ data=article;const run=await createSynchronousQuery({operationId:detail,parameters:{articleId},sourceResultId:result!.id},'zhihu-test',tag());
+ assert.partialDeepStrictEqual(run.input.origin,{identity:{uid:authorToken}});assert.deepEqual(result!.data.identity,{uid:authorToken});
+ const response=await queryZhihu(detail,{articleId},String(run.input.window),receiptOptions({runId:run.id,stepVersion:run.step_version,generation:run.generation}));
+ const hits=provider.hits();off();try{await step(run.id);}finally{on();}
+ assert.equal(provider.hits(),hits);assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);
+ assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${response.receiptId}`)[0]!.attempts,1);
+ const [full]=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='zhihu_work'`,sourceId=await source();
+ assert.deepEqual(full!.data.identity,{uid:authorUid});
  const imported=await importZhihuResult(full!.id,{sourceId,reason:'Synthetic verified import'},'zhihu-test',tag());assert.ok(imported?.articleId);
  const [a]=await sql`SELECT a.*,s.participation_mode,s.site_fulltext FROM articles a JOIN sources s ON s.id=a.source_id WHERE a.id=${imported.articleId}`;
  assert.equal(a!.source_id,sourceId);assert.equal(a!.body_status,'ok');assert.match(a!.body_text,/Verified body/);assert.doesNotMatch(a!.body_html,/<script/);assert.equal(a!.published_at.toISOString(),'2023-11-14T22:13:20.000Z');assert.equal(a!.participation_mode,'editorial');assert.equal(a!.site_fulltext,false);
  assert.equal((await importZhihuResult(full!.id,{sourceId,reason:'Repeated import'},'zhihu-test',tag()))!.articleId,imported.articleId);
  await assert.rejects(importZhihuResult(full!.id,{sourceId,reason:'wrong',supplement:{url:'https://zhuanlan.zhihu.com/p/999',evidence:'wrong'}},'zhihu-test',tag()),/cannot be replaced/);
 });
+test('Zhihu detail compares homepage tokens only and preserves missing numeric author identity',async()=>{
+ for(const [i,fields,expected] of [
+  [2,{authorsecid:authorToken},{}],
+  [3,{authorUid},{uid:authorUid}],
+  [4,{},{}],
+ ] as const){
+  const id=articleId+String(i),sourceId=await source();
+  data=[{opusId:id,uid:authorToken,title:'Search article'}];const [origin]=await query(search,{offset:'0',keword:tag(),vertical:'article'});
+  const {authorUid:unusedUid,authorsecid:unusedToken,...body}=article;
+  data={...body,...fields,opusId:id,opusUrl:`https://zhuanlan.zhihu.com/p/${id}`};const [full]=await query(detail,{articleId:id},origin!.id);
+  assert.deepEqual(full!.data.identity,expected);
+  const imported=await importZhihuResult(full!.id,{sourceId,reason:'Explicit source with optional author identity'},'zhihu-test',tag());assert.ok(imported?.articleId);
+  const [owner]=await sql`SELECT a.source_id,s.participation_mode,s.site_fulltext FROM articles a JOIN sources s ON s.id=a.source_id WHERE a.id=${imported.articleId}`;
+  assert.equal(owner!.source_id,sourceId);assert.equal(owner!.participation_mode,'editorial');assert.equal(owner!.site_fulltext,false);
+ }
+ data=[{opusId:articleId,uid:authorToken,title:'Search article'}];const [origin]=await query(search,{offset:'0',keword:tag(),vertical:'article'});
+ for(const bad of [{...article,authorsecid:'other-home-token'},{...article,opusId:'999'},{...article,type:'answer'},{...article,opusUrl:'https://zhuanlan.zhihu.com/p/999'}]){
+  data=bad;const run=await createSynchronousQuery({operationId:detail,parameters:{articleId},sourceResultId:origin!.id},'zhihu-test',tag());await step(run.id);
+  assert.equal((await row(run.id)).status,'needs_review');assert.equal((await sql`SELECT count(*)::int n FROM operation_results WHERE run_id=${run.id}`)[0]!.n,0);
+ }
+});
 test('article subscription enriches through original source, received detail replays without repurchase',async()=>{
  const sourceId=await source(),id=articleId+'1';
  const sub=await createPlatformSubscription({name:tag(),sourceId,operationId:search,parameters:{offset:'0',keword:tag(),vertical:'article'},enabled:true,enrichDetails:true,detailOperationId:detail,limits:{pages:1,items:1,details:1}},'zhihu-test',tag());subs.push(sub.id);
- const run=await startPlatformSubscription(sub.id,'zhihu-test',tag());data=[{opusId:id,title:'Article search'}];await step(run.id);await step(run.id);const current=await row(run.id);assert.equal(current.step_key,'redfox.platform.detail');
+ const run=await startPlatformSubscription(sub.id,'zhihu-test',tag());data=[{opusId:id,uid:authorToken,title:'Article search'}];await step(run.id);await step(run.id);const current=await row(run.id);assert.equal(current.step_key,'redfox.platform.detail');
  data={...article,opusId:id,opusUrl:`https://zhuanlan.zhihu.com/p/${id}`};
  const response=await queryZhihu(detail,current.progress.detailParameters,String(current.input.window),receiptOptions({runId:run.id,stepVersion:current.step_version,generation:current.generation}),'collect');const hits=provider.hits();off();try{await step(run.id);}finally{on();}
  assert.equal(provider.hits(),hits);assert.equal((await row(run.id)).status,'completed',(await row(run.id)).wait_reason);
- const results=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='zhihu_work' ORDER BY id`;assert.equal(results.length,2);assert.ok(results[0]!.article_id);assert.equal(results[0]!.article_id,results[1]!.article_id);assert.equal(results[1]!.source_id,sourceId);assert.equal(results[1]!.provenance.detailSourceResultId,results[0]!.id);
+ const results=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='zhihu_work' ORDER BY id`;assert.equal(results.length,2);assert.ok(results[0]!.article_id);assert.equal(results[0]!.article_id,results[1]!.article_id);assert.equal(results[1]!.source_id,sourceId);assert.equal(results[1]!.provenance.detailSourceResultId,results[0]!.id);assert.deepEqual(results[0]!.data.identity,{uid:authorToken});assert.deepEqual(results[1]!.data.identity,{uid:authorUid});
+ const [owner]=await sql`SELECT a.source_id,s.participation_mode,s.site_fulltext FROM articles a JOIN sources s ON s.id=a.source_id WHERE a.id=${results[1]!.article_id}`;assert.equal(owner!.source_id,sourceId);assert.equal(owner!.participation_mode,'editorial');assert.equal(owner!.site_fulltext,false);
  assert.equal((await sql`SELECT active_run_id FROM collection_subscriptions WHERE id=${sub.id}`)[0]!.active_run_id,null);const [receipt]=await sql`SELECT attempts,service,cost FROM receipts WHERE id=${response.receiptId}`;assert.equal(receipt!.attempts,1);assert.equal(receipt!.service,'redfox.collect');assert.equal(Number(receipt!.cost),0.06);
 });
 test('comment snapshot schedules without source, truncates local records and releases occupancy',async()=>{

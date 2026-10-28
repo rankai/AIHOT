@@ -124,7 +124,10 @@ export function applyWorkDetailOrigin(target:string,p:Record<string,unknown>,res
  }
  if(origin.platform==="bilibili"&&!returnedId)throw new RedfoxResponseError("Bilibili detail has no confirmed returned BV");
  const identity=z.record(z.string(),z.string()).parse(result.data.identity);
- for(const [kind,value] of Object.entries(origin.identity)){
+ // Zhihu search uid is a homepage token; detail uid is numeric authorUid, so compare only the received authorsecid token.
+ if(origin.platform==="zhihu"){
+  if(origin.identity.uid&&typeof record.authorsecid==="string"&&record.authorsecid&&record.authorsecid!==origin.identity.uid)throw new RedfoxResponseError("Detail author conflicts with frozen same-work evidence");
+ }else for(const [kind,value] of Object.entries(origin.identity)){
   if(identity[kind]&&identity[kind]!==value)throw new RedfoxResponseError("Detail author conflicts with frozen same-work evidence");identity[kind]??=value;
  }
  const missing=Array.isArray(result.data.missing)&&Object.keys(identity).length?result.data.missing.filter(x=>typeof x!=="string"||!x.startsWith("缺少已确认作者")&&!x.startsWith("缺少收到的作者")):result.data.missing;

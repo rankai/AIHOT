@@ -24,7 +24,7 @@ test('domain author conflict is pending inside importer savepoint, next item com
  const results=await sql`SELECT * FROM operation_results WHERE run_id=${run.id} AND kind='dongchedi_work' ORDER BY id`;
  assert.equal(results[0]!.article_id,null);assert.match(results[0]!.data.pendingReason,/author conflicts/);assert.ok(results[1]!.article_id);assert.equal((await sql`SELECT count(*)::int n FROM source_account_bindings WHERE id_value=${results[0]!.data.record.authorId}`)[0]!.n,0);assert.equal((await sql`SELECT progress FROM collection_subscriptions WHERE id=${(await row(run.id)).subscription_id}`)[0]!.progress.items,3);
 });
-test('eight fixed collection adapters use collect receipts and exact original request parameters',async()=>{
+test('eight fixed collection adapters use collect receipts and documented wire parameters',async()=>{
  const cases:[string,Record<string,unknown>,unknown][]=[
  ['CI7VW144',{keyword:tag(),offset:'900719925474099300',page:'1',sourceType:'video'},[{workId:tag(),title:'Synthetic',workType:'3'}]],
  ['4BOZ9DLE',{authorId:tag(),page:1},{workList:[{workId:tag(),title:'Synthetic'}]}],
@@ -35,7 +35,7 @@ test('eight fixed collection adapters use collect receipts and exact original re
  ['API_1789097000858',{keyWord:tag(),pn:'0'},[{opusId:tag(),title:'Synthetic'}]],
  ['API_1789095347662',{keword:tag(),offset:'0',vertical:'answer'},[{opusId:tag(),title:'Synthetic'}]],
  ];
- for(const [op,parameters,data] of cases){respond=()=>data??{account:{userId:parameters.userId},workList:[]};const initial=requests.length,run=await start(op,parameters,1);const done=await finish(run.id);assert.equal(done.status,'completed',`${op}: ${done.wait_reason}`);assert.equal(requests.length,initial+1,op);assert.deepEqual(requests.at(-1)!.parameters,parameters);const [receipt]=await sql`SELECT p.* FROM operation_results z JOIN receipts p ON p.id=z.receipt_id WHERE z.run_id=${run.id} LIMIT 1`;assert.equal(receipt!.service,'redfox.collect');assert.equal(receipt!.model,op);assert.ok(receipt!.cost!==null);}
+ for(const [op,parameters,data] of cases){respond=()=>data??{account:{userId:parameters.userId},workList:[]};const initial=requests.length,run=await start(op,parameters,1);const done=await finish(run.id);assert.equal(done.status,'completed',`${op}: ${done.wait_reason}`);assert.equal(requests.length,initial+1,op);assert.deepEqual(requests.at(-1)!.parameters,op==='API_1789095347662'?{keyword:parameters.keword,offset:'0',vertical:'answer'}:parameters);const [receipt]=await sql`SELECT p.* FROM operation_results z JOIN receipts p ON p.id=z.receipt_id WHERE z.run_id=${run.id} LIMIT 1`;assert.equal(receipt!.service,'redfox.collect');assert.equal(receipt!.model,op);assert.ok(receipt!.cost!==null);}
 });
 test('documented decimal pagination and raw Yiche timestamp advance without number rounding',async()=>{
  const huge='900719925474099300';
