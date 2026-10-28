@@ -34,9 +34,13 @@ async function command(parameters: z.infer<typeof AiSearchInput> | z.infer<typeo
 }
 const Citation=z.record(z.string(),z.unknown());
 const Result=z.object({content:z.string().nullable().optional(),webPages:z.array(Citation).nullable().optional(),search_result:z.array(Citation).nullable().optional()}).passthrough();
+const CardText=z.string().nullable().optional();
+const ProductCard=z.object({title:z.string().min(1),price:CardText,originPrice:CardText,url:CardText,image:CardText,shopName:CardText,sales:CardText,sourceSeq:CardText,itemId:CardText,productId:CardText,shortTitle:CardText,pos:z.number().int().nonnegative().nullable().optional()}).passthrough();
+const ProductResult=Result.extend({cardData:z.array(ProductCard).max(1000).nullable().optional(),searchGuid:z.array(Citation).nullable().optional()});
 const Poll=z.object({taskId:AiSearchTaskId.optional(),status:z.string().min(1),completed:z.boolean().optional(),failReason:z.string().nullable().optional(),result:Result.nullable().optional()}).passthrough();
 export function parseAiSearchPoll(family:z.infer<typeof AiSearchFamily>,raw:unknown,taskId:string){
- const data=Poll.parse(raw);
+ const products=family==="qianwenProducts"||family==="doubaoProducts";
+ const data=(products?Poll.extend({result:ProductResult.nullable().optional()}):Poll).parse(raw);
  if(data.taskId!==undefined&&data.taskId!==taskId)throw new RedfoxResponseError("AI search task ID mismatch");
  if(family!=="kimi"&&data.taskId===undefined)throw new RedfoxResponseError("AI search response lacks task ID");
  const success=["completed",...(family==="doubao"||family==="deepseek"?["succeeded"]:[])].includes(data.status);

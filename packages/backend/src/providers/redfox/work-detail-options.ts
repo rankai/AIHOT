@@ -1,3 +1,4 @@
+import {zhihuOperations} from "./zhihu-contract.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import {collectedDetailContext} from './collection-detail.ts';
 import type { PlatformOperationDescriptor } from '@aihot/contracts/redfox';
@@ -17,6 +18,7 @@ import { dongchediOperations } from './dongchedi-contract.ts';
 import { yicheOperations } from './yiche-contract.ts';
 
 const details = {
+  API_1792651427872: zhihuOperations.API_1792651427872,
   '0OT1E306': douyinOperations['0OT1E306'], FK67XDVQ: douyinOperations.FK67XDVQ,
   KR1LPTBF: xiaohongshuOperations.KR1LPTBF, XEO0QQNF: wechatOperations.XEO0QQNF,
   '1LDQ7E1C': wechatOperations['1LDQ7E1C'], I3CIBRI2: wechatOperations.I3CIBRI2,
@@ -51,6 +53,7 @@ export async function workDetailOptions(resultId: number,db:Db=sql): Promise<{ r
   const candidates: { operationId: Target; parameters: Record<string, unknown> }[] = [];
   const add = (operationId: Target, parameters: Record<string, unknown>) => candidates.push({ operationId, parameters });
   switch (platform) {
+    case "zhihu": if(source==="API_1789095347662"&&r.input.parameters?.vertical==="article"&&id)add("API_1792651427872",{articleId:id});break;
     case 'douyin': {
       if (['QEQLCKD6','774OBKK0','HUCIASU'].includes(source) && id) add('0OT1E306', { workId: id });
       if (['QSL2ZSXM','OWIBYU1V'].includes(source) && id) add('FK67XDVQ', { videoId: id });

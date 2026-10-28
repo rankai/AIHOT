@@ -1,0 +1,239 @@
+{
+  "identity": {
+    "db": "aihot_redfox_incremental_ui_test",
+    "port": 55528
+  },
+  "runs": [
+    {
+      "id": 1,
+      "operation_key": "redfox.image.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 2,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 3,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 4,
+      "operation_key": "redfox.platform.collection",
+      "status": "completed",
+      "subscription_id": 1
+    },
+    {
+      "id": 5,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 6,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 7,
+      "operation_key": "redfox.ai_search.submit",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 8,
+      "operation_key": "redfox.ai_search.submit",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 9,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 10,
+      "operation_key": "redfox.sync.query",
+      "status": "completed",
+      "subscription_id": null
+    },
+    {
+      "id": 11,
+      "operation_key": "redfox.platform.collection",
+      "status": "completed",
+      "subscription_id": 2
+    }
+  ],
+  "receipts": [
+    {
+      "service": "redfox.ai_search",
+      "purpose": "redfox.API_1793002507495",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.ai_search",
+      "purpose": "redfox.API_1793002507670",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.collect",
+      "purpose": "redfox.API_1789095347662",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.collect",
+      "purpose": "redfox.API_1792651427872",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.collect",
+      "purpose": "redfox.API_1792651427970",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.poll",
+      "purpose": "redfox.API_1793002507566",
+      "status": "completed",
+      "count": 2,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.poll",
+      "purpose": "redfox.API_1793002507727",
+      "status": "completed",
+      "count": 2,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.poll",
+      "purpose": "redfox.WH5U8KZE",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.query",
+      "purpose": "redfox.API_1789095347662",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.query",
+      "purpose": "redfox.API_1792651427872",
+      "status": "completed",
+      "count": 2,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.query",
+      "purpose": "redfox.API_1792651427970",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.query",
+      "purpose": "redfox.API_1792651512423",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    },
+    {
+      "service": "redfox.query",
+      "purpose": "redfox.API_1792651658984",
+      "status": "completed",
+      "count": 1,
+      "max_attempts": 1
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": 1,
+      "operationId": "API_1792651427970",
+      "sourceId": null,
+      "activeRun": null
+    },
+    {
+      "id": 2,
+      "operationId": "API_1789095347662",
+      "sourceId": "synthetic-zhihu-ui",
+      "activeRun": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "synthetic-zhihu-ui",
+      "participation_mode": "editorial",
+      "site_fulltext": true,
+      "syndicate_fulltext": false
+    }
+  ],
+  "articles": [
+    {
+      "id": "gj1viwffi4krh75yb5a8ooxff",
+      "source_id": "synthetic-zhihu-ui",
+      "body_status": "ok",
+      "body_html": "<p>这是一段本地合成正文，用于核对详情、所属信源和显式导入流程。</p>"
+    }
+  ],
+  "linked": [
+    {
+      "run_id": 2,
+      "kind": "zhihu_work",
+      "article_id": "gj1viwffi4krh75yb5a8ooxff",
+      "source_id": "synthetic-zhihu-ui"
+    },
+    {
+      "run_id": 11,
+      "kind": "zhihu_work",
+      "article_id": "gj1viwffi4krh75yb5a8ooxff",
+      "source_id": "synthetic-zhihu-ui"
+    },
+    {
+      "run_id": 11,
+      "kind": "zhihu_work",
+      "article_id": "gj1viwffi4krh75yb5a8ooxff",
+      "source_id": "synthetic-zhihu-ui"
+    }
+  ],
+  "migrations": [
+    {
+      "name": "0079_zhihu_detail_research_prices.sql"
+    },
+    {
+      "name": "0080_ai_search_product_prices.sql"
+    }
+  ],
+  "cleanup": [
+    {
+      "id": 1,
+      "enabled": false,
+      "active_run_id": null,
+      "next_run_at": null
+    },
+    {
+      "id": 2,
+      "enabled": false,
+      "active_run_id": null,
+      "next_run_at": null
+    }
+  ]
+}

@@ -89,7 +89,13 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
     const redact = (text: string | null) => text === null ? null : [key,encodeURIComponent(key),encodedKey].reduce((value,secret)=>value.split(secret).join("[REDACTED]"),text);
     const accountQuery=operation in redfoxAccountOperations;
     const method=accountQuery?"GET":operation in hotResearchOperations?hotResearchOperations[operation as keyof typeof hotResearchOperations].method:operation in xiaohongshuOperations?xiaohongshuOperations[operation as keyof typeof xiaohongshuOperations].method:operation in wechatOperations?wechatOperations[operation as keyof typeof wechatOperations].method:"POST";
-    let body: string | FormData | undefined = method==="GET"?undefined:JSON.stringify(operation in tiktokOperations ? tiktokWireInput(operation as TiktokOperation,input) : input);
+    let wireInput = operation in tiktokOperations ? tiktokWireInput(operation as TiktokOperation,input) : input;
+    if(operation === "API_1789095347662") {
+      // Keep persisted inputs and receipt identity stable; Redfox now expects keyword on the wire.
+      const {keword,...parameters}=input;
+      wireInput={...parameters,keyword:keword};
+    }
+    let body: string | FormData | undefined = method==="GET"?undefined:JSON.stringify(wireInput);
     let suffix = "";
     const headers: Record<string,string> = accountQuery?{}:{ "REDFOX_API_KEY": key };
     if(operation === "FXDGJO1V" || operation === "6L178PZD") {

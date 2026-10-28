@@ -1,7 +1,7 @@
 import { safeExternalUrl } from "./platform-types.ts";
 import { researchFactText } from "./research-platform-data.ts";
 import type { AiSearchMode, AiSearchOptions } from "./ai-search-types.ts";
-export const aiSearchFamilies: Record<string, string> = { kimi: "Kimi（K3 / K2.5 共用）", yuanbao: "元宝", qianwen: "千问", baidu: "百度", doubao: "豆包", deepseek: "DeepSeek" };
+export const aiSearchFamilies: Record<string, string> = { kimi: "Kimi（K3 / K2.5 共用）", yuanbao: "元宝", qianwen: "千问", baidu: "百度", doubao: "豆包", deepseek: "DeepSeek", qianwenProducts: "千问（含商品卡）", doubaoProducts: "豆包（含商品卡）" };
 export function isAiSearchOperation(key: string) { return key === "redfox.ai_search.submit" || key === "redfox.ai_search.query"; }
 export function isAiSearchResult(kind: string, data: Record<string, unknown>) { return ["ai_search_task", "ai_search_answer", "ai_search_citation"].includes(kind) && typeof data.family === "string" && Object.hasOwn(aiSearchFamilies, data.family); }
 export function aiSearchCommand(mode: AiSearchMode, selection: string, value: string, options: AiSearchOptions) {
@@ -44,4 +44,17 @@ export function aiSearchTaskFacts(operation: { progress: Record<string, unknown>
 export function aiSearchFailureRows(data: Record<string, unknown>): Array<[string, string]> {
   if (data.status !== "failed" && !(typeof data.failReason === "string" && data.failReason.trim())) return [];
   return [["上游失败原因", Object.hasOwn(data, "failReason") ? researchFactText(data.failReason) : "未提供"]];
+}
+
+/** Product references remain independent facts; no guessed correspondence to answer markers. */
+export function aiSearchProducts(data: Record<string, unknown>) {
+  if (!["qianwenProducts", "doubaoProducts"].includes(String(data.family))) return null;
+  const result = data.result && typeof data.result === "object" && !Array.isArray(data.result) ? data.result as Record<string, unknown> : {};
+  const records = Array.isArray(result.cardData) ? result.cardData : [];
+  const cards = records.filter((record): record is Record<string, unknown> => !!record && typeof record === "object" && !Array.isArray(record)).map(record => ({
+    title: typeof record.title === "string" ? record.title : "商品标题未提供", url: safeExternalUrl(record.url), imageUrl: safeExternalUrl(record.image),
+    rows: ["price", "originPrice", "shopName", "sales", "sourceSeq", "itemId", "productId", "shortTitle", "pos"].flatMap(key => Object.hasOwn(record, key) ? [[({price:"价格（原值）",originPrice:"原价（原值）",shopName:"店铺",sales:"销量（原值）",sourceSeq:"来源标识 sourceSeq",itemId:"商品 itemId",productId:"商品 productId",shortTitle:"短标题",pos:"上游位置 pos"} as Record<string,string>)[key]!,researchFactText(record[key])]] as Array<[string,string]> : []),
+  }));
+  const references = data.family === "doubaoProducts" && Array.isArray(result.searchGuid) ? result.searchGuid.filter((record): record is Record<string, unknown> => !!record && typeof record === "object" && !Array.isArray(record)).map(record => ({url:safeExternalUrl(record.url),rows:aiSearchCitationRows({record})})) : [];
+  return {cards,references};
 }

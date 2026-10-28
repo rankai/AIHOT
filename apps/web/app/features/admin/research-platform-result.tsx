@@ -8,20 +8,20 @@ import { ResearchLocalImport } from "./research-local-import";
 
 export function ResearchPlatformResult({ result: r }: { result: OperationResult }) {
   const name = typeof r.data.platform === "string" ? platformLabels[r.data.platform] ?? "平台" : "平台";
-  const summary = r.kind === "query_summary", account = r.kind.endsWith("_account"), record = researchObject(r.data.record);
+  const summary = r.kind === "query_summary", account = r.kind.endsWith("_account"), hot = r.kind === "zhihu_hot_search", record = researchObject(r.data.record);
   const identity = researchScalarRows(r.data.identity), scope = researchScalarRows(r.data.workNamespace ?? r.data.identityNamespace);
   const context = researchScalarRows(r.data.accountContext), nestedAuthor = researchScalarRows(record.authorInfo);
   const original = safeExternalUrl(r.data.url), links = researchLinks(r.data);
   const missing = Array.isArray(r.data.missing) ? r.data.missing.filter((item): item is string => typeof item === "string") : [];
   return <article className="min-w-0 space-y-3 border-b border-line pb-4 last:border-0 last:pb-0">
-    <div className="flex flex-wrap items-center gap-2 text-[14px] font-medium"><span className="min-w-0 max-w-full break-words">{summary ? `${name}查询摘要` : researchFactText(r.data.title)}</span><Badge>{summary ? "分页事实" : account ? `${name}账号` : `${name}作品`}</Badge></div>
+    <div className="flex flex-wrap items-center gap-2 text-[14px] font-medium"><span className="min-w-0 max-w-full break-words">{summary ? `${name}查询摘要` : researchFactText(r.data.title)}</span><Badge>{summary ? "分页事实" : account ? `${name}账号` : hot ? `${name}热点` : `${name}作品`}</Badge></div>
     {summary ? <>
       <ResearchFacts items={researchSummaryRows(r.data)} />
       {r.data.count === 0 && <p className="text-[13px] text-ink-3">本次返回 0 项，没有创建文章。</p>}
       <p className="text-[12px] text-ink-4">只显示本次实际返回数和已收分页字段，保留 null、false、数字与字符串的区别。不推算总量、hasMore 或游标，不自动翻页。</p>
     </> : <>
       <div className="space-y-2"><p className="text-[12px] text-ink-3">收到的本操作身份字段（最终归属由后台重新核实）</p>{identity.length ? <ResearchFacts items={identity} /> : <p className="text-[12px] text-ink-4">未收到本操作身份字段。</p>}</div>
-      {!account && <ResearchFacts items={[["本操作已收作品 ID", researchFactText(r.data.workId)], ...(Object.hasOwn(r.data, "requestedWorkId") ? [["冻结请求作品 ID（仅输入）", researchFactText(r.data.requestedWorkId)]] as Array<[string, string]> : [])]} />}
+      {!account && !hot && <ResearchFacts items={[["本操作已收作品 ID", researchFactText(r.data.workId)], ...(Object.hasOwn(r.data, "requestedWorkId") ? [["冻结请求作品 ID（仅输入）", researchFactText(r.data.requestedWorkId)]] as Array<[string, string]> : [])]} />}
       {scope.length > 0 && <div className="space-y-2"><p className="text-[12px] text-ink-3">标识与作品类型适用范围</p><ResearchFacts items={scope} /></div>}
       <p className="text-[12px] text-ink-4">{researchCaution(r.data.platform)}</p>
       {context.length > 0 && <div className="space-y-2 rounded-control bg-bg-sunk p-3"><p className="text-[12px] text-ink-3">同页已收账号上下文（导入时由后台核实归属）</p><ResearchFacts items={context} /></div>}
@@ -37,7 +37,7 @@ export function ResearchPlatformResult({ result: r }: { result: OperationResult 
       <ResearchLocalImport result={r} />
       <DetailQueryActions result={r} />
     </>}
-    <p className="text-[12px] text-ink-3">作品可显式本地导入，账号仅在本操作收到稳定身份时可绑定。采集订阅以已接通的操作能力为准；研究摘要不会自动成为文章。{["qichezhijia", "dongchedi", "yiche", "baijiahao"].includes(String(r.data.platform)) ? "可显式查看已确认的作品或作者账号详情接口，返回后仍须核实与导入。" : "此平台尚未开放同作品详情补全。"}</p>
+    <p className="text-[12px] text-ink-3">{r.data.platform === "zhihu" ? "仅文章详情提供经核对的原文与秒级时间；文章范围搜索可显式查询同作品详情。账号与热点不导入文章或绑定信源，专用热点不另建定时入口。" : <>作品可显式本地导入，账号仅在本操作收到稳定身份时可绑定。采集订阅以已接通的操作能力为准；研究摘要不会自动成为文章。{["qichezhijia", "dongchedi", "yiche", "baijiahao"].includes(String(r.data.platform)) ? "可显式查看已确认的作品或作者账号详情接口，返回后仍须核实与导入。" : "此平台尚未开放同作品详情补全。"}</>}</p>
     <Json value={{ resultId: r.id, receiptId: r.receiptId, kind: r.kind, data: r.data }} label="原始字段、冻结请求与溯源诊断" />
   </article>;
 }

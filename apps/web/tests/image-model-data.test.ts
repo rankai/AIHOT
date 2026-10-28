@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { imageGenerationBody, imageModelDraft, imageParameterRows, imageProviderStatuses, imageQueryBody, imageReferenceReuseId, imageSavedTaskFacts, imageSizeIssue, imageTaskModel, imageUploadReferenceLink, selectedImageUploads } from "../app/features/admin/image-model-data.ts";
+import { imageGenerationBody, imageGenerationModels, imageModelDraft, imageParameterRows, imageProviderStatuses, imageQueryBody, imageReferenceReuseId, imageSavedTaskFacts, imageSizeIssue, imageTaskModel, imageUploadReferenceLink, selectedImageUploads } from "../app/features/admin/image-model-data.ts";
 import type { ImageModel, ImageModelOption, ImageOptions, PrivateAsset } from "../app/features/admin/image-types.ts";
 const options: ImageOptions = {
   modelLabel: "Redfox GPT-Image-2", resolutions: ["1k", "2k", "4k"], sizes: ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21"], maxImages: 4, maxReferences: 2,
@@ -11,7 +11,7 @@ const options: ImageOptions = {
     { model: "gptImage25", label: "Redfox GPT-Image-2.5", resolutions: ["1k", "2k", "4k"], sizes: ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "21:9"], background: ["transparent"], maxReferences: 4, maxOutputImages: 10, documentedBaseCny: 1.5 },
     { model: "geminiBanana21", label: "Redfox Gemini Banana 2.1", resolutions: ["1K", "2K", "4K"], sizes: ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"], maxReferences: 4, maxOutputImages: 10, documentedBaseCny: 1 },
     { model: "seedreamPro", label: "Redfox Seedream Pro", sizes: ["1K", "2K"], customSize: true, customPixelMaximum: 64_000_000, ratioRange: [1 / 16, 16], maxReferences: 4, maxOutputImages: 10, documentedBaseCny: 1, outputFormats: ["png", "jpeg"], optimizePromptModes: ["standard", "fast"], watermark: true, responseFormat: "url" },
-    { model: "seedreamLite", label: "Redfox Seedream Lite", sizes: ["2K", "3K", "4K"], customSize: true, customPixelMinimum: 3_686_400, customPixelMaximum: 16_777_216, ratioRange: [1 / 16, 16], maxReferences: 4, maxImages: 10, documentedBaseCny: 0.71, outputFormats: ["png", "jpeg"], optimizePromptModes: ["standard", "fast"], watermark: true, responseFormat: "url", sequentialModes: ["auto", "disabled"], maxImagesRange: [1, 10] },
+    { model: "seedreamLite", generationAvailable: false, label: "Redfox Seedream Lite", sizes: ["2K", "3K", "4K"], customSize: true, customPixelMinimum: 3_686_400, customPixelMaximum: 16_777_216, ratioRange: [1 / 16, 16], maxReferences: 4, maxImages: 10, documentedBaseCny: 0.71, outputFormats: ["png", "jpeg"], optimizePromptModes: ["standard", "fast"], watermark: true, responseFormat: "url", sequentialModes: ["auto", "disabled"], maxImagesRange: [1, 10] },
   ],
   newModelLimits: { steps: 80, polls: 60, pollDeadlineSeconds: 7200, saveAttempts: 30 }, priceBasis: "documented-estimate", billingUnitVerified: false, referenceReuseHint: "Explicit reuse",
 };
@@ -22,7 +22,7 @@ const asset: PrivateAsset = { key: "uploads/redfox/ref", content_type: "image/pn
 test("old GPT2 body stays compatible with all thirteen ratios and n; new models never leak old fields", () => {
   const old = { ...draft("gptImage2"), resolution: "4k", size: "9:21", n: 4, selected: [asset] };
   assert.deepEqual(imageGenerationBody("gptImage2", old, options), { prompt: "画面 👩‍💻", resolution: "4k", size: "9:21", n: 4, fileKeys: [asset.key] });
-  for (const model of ["gptImage25", "geminiBanana21", "seedreamPro", "seedreamLite"] as const) {
+  for (const model of ["gptImage25", "geminiBanana21", "seedreamPro"] as const) {
     const body = imageGenerationBody(model, { ...draft(model), n: 4 }, options);
     assert.equal(Object.hasOwn(body, "n"), false); assert.equal(body.prompt, draft(model).prompt); assert.equal(body.model, model);
   }
@@ -52,13 +52,11 @@ test("custom sizes enforce explicit positive integer ratio/pixel caps without in
   for (const size of ["1919x1920", "4097x4096", "8192x480", "1K"]) assert(imageSizeIssue(size, option("seedreamLite")));
   assert.equal(imageGenerationBody("seedreamPro", { ...draft("seedreamPro"), size: "custom", customSize: "1x1" }, options).size, "1x1");
 });
-test("Lite group options exist only for auto and maxImages is validated as a limit", () => {
-  const defaults = imageGenerationBody("seedreamLite", { ...draft("seedreamLite"), sequentialMode: "auto" }, options);
-  assert.equal(defaults.outputFormat, "jpeg"); assert.equal(defaults.watermark, true); assert.deepEqual(defaults.sequentialImageGenerationOptions, { maxImages: 4 });
-  const disabled = imageGenerationBody("seedreamLite", { ...draft("seedreamLite"), maxImages: 10 }, options);
-  assert.equal(disabled.sequentialImageGeneration, "disabled"); assert(!Object.hasOwn(disabled, "sequentialImageGenerationOptions"));
-  assert.deepEqual(imageGenerationBody("seedreamLite", { ...draft("seedreamLite"), sequentialMode: "auto", maxImages: 10 }, options).sequentialImageGenerationOptions, { maxImages: 10 });
-  for (const maxImages of [0, 11, 1.5, NaN]) assert.throws(() => imageGenerationBody("seedreamLite", { ...draft("seedreamLite"), sequentialMode: "auto", maxImages }, options));
+test("retired Lite drafts require reselection while old task queries retain the model", () => {
+  assert.equal(imageGenerationModels(options).some(row => row.model === "seedreamLite"), false);
+  assert.throws(() => imageGenerationBody("seedreamLite", draft("seedreamLite"), options), /已停止新生成/);
+  assert.deepEqual(imageQueryBody("seedreamLite", "old-task", options), { model: "seedreamLite", taskId: "old-task" });
+  assert.equal(imageTaskModel({model:"seedreamLite"}, options)?.model, "seedreamLite");
 });
 test("four-reference models preserve actual selection, explicit reuse excludes removed files, GPT2 cannot inherit it", () => {
   const selected = Array.from({ length: 4 }, (_, i) => ({ ...asset, key: `${asset.key}/${i}` }));

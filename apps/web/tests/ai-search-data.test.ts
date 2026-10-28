@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aiSearchAnswer, aiSearchCitationRows, aiSearchCitationUrl, aiSearchCommand, aiSearchFailureRows, aiSearchStatus, aiSearchTaskFacts, isAiSearchOperation, isAiSearchResult } from "../app/features/admin/ai-search-data.ts";
+import { aiSearchAnswer, aiSearchProducts, aiSearchCitationRows, aiSearchCitationUrl, aiSearchCommand, aiSearchFailureRows, aiSearchStatus, aiSearchTaskFacts, isAiSearchOperation, isAiSearchResult } from "../app/features/admin/ai-search-data.ts";
 import type { AiSearchOptions } from "../app/features/admin/ai-search-types.ts";
 const options: AiSearchOptions = {
   engines: [{ engine: "kimiK3", label: "Kimi K3", submit: "USDIOVU24", family: "kimi", price: 0.18 }, { engine: "kimiK25", label: "Kimi K2.5", submit: "USDIOVU23", family: "kimi", price: 0.06 }, { engine: "deepseek", label: "DeepSeek", submit: "KGX4SDXQ", family: "deepseek", price: 0.06 }],
@@ -25,10 +25,10 @@ test("input checks reject blank, oversized or unknown selections without rewriti
   assert.throws(() => aiSearchCommand("submit", "invented", "x", options));
   assert.throws(() => aiSearchCommand("query", "kimiK25", "x", options));
 });
-test("AI result ownership is limited to three result kinds and six known families", () => {
+test("AI result ownership is limited to three result kinds and known historical and product families", () => {
   assert(isAiSearchOperation("redfox.ai_search.submit")); assert(isAiSearchOperation("redfox.ai_search.query"));
   assert(!isAiSearchOperation("redfox.sync.query"));
-  for (const family of ["kimi", "yuanbao", "qianwen", "baidu", "doubao", "deepseek"]) {
+  for (const family of ["kimi", "yuanbao", "qianwen", "baidu", "doubao", "deepseek", "qianwenProducts", "doubaoProducts"]) {
     for (const kind of ["ai_search_task", "ai_search_answer", "ai_search_citation"]) assert(isAiSearchResult(kind, { family }));
   }
   for (const kind of ["query_summary", "transcription", "image_task", "article"]) assert(!isAiSearchResult(kind, { family: "kimi" }));
@@ -79,4 +79,21 @@ test("normal processing/completed null failure facts stay diagnostic while actua
   assert.equal(aiSearchFailureRows({ status: "failed", failReason: "" })[0]![1], "空字符串");
   assert.equal(aiSearchFailureRows({ status: "failed" })[0]![1], "未提供");
   assert.equal(aiSearchFailureRows({ status: "processing", failReason: "actual failure" })[0]![1], "actual failure");
+});
+
+test("product engines keep distinct submit/query selections and opaque task IDs", () => {
+  for (const family of ["qianwenProducts", "doubaoProducts"]) {
+    const productOptions={...options,engines:[...options.engines,{engine:family,label:family,submit:"synthetic",family,price:0.12}],queries:[...options.queries,{family,poll:"synthetic"}]};
+    assert.deepEqual(aiSearchCommand("submit",family," 问题 ",productOptions).body,{engine:family,inquiryText:" 问题 "});
+    assert.deepEqual(aiSearchCommand("query",family," opaque task ",productOptions).body,{family,taskId:" opaque task "});
+    assert.equal(aiSearchTaskFacts({progress:{},inputs:{family},results:[{kind:"ai_search_answer",data:{family,taskId:"product-task"}}]}).executionTaskId,"product-task");
+  }
+});
+test("product cards preserve original prices and IDs, isolate searchGuid, and block unsafe links", () => {
+  const card={title:"<img src=x onerror=alert(1)>",price:"2???",originPrice:"",sales:"已售3万+",shopName:"Synthetic",sourceSeq:"tao_assistant_actual",productId:"3750619017870705088",url:"https://example.test/product",image:"https://example.test/image"};
+  const data={family:"doubaoProducts",result:{content:"[(unknown_marker)]",cardData:[card],searchGuid:[{id:"90071992547409931",index:1,title:"Reference",url:"https://example.test/source"}]}};
+  const result=aiSearchProducts(data)!;assert.equal(result.cards[0]!.title,card.title);assert.equal(result.cards[0]!.url,card.url);assert.equal(result.cards[0]!.imageUrl,card.image);assert.ok(result.cards[0]!.rows.some(([label,value])=>label==="价格（原值）"&&value==="2???"));assert.ok(result.cards[0]!.rows.some(([,value])=>value===card.productId));assert.equal(result.references[0]!.url,"https://example.test/source");assert.equal(aiSearchAnswer(data).content,"[(unknown_marker)]");
+  for(const unsafe of ["javascript:alert(1)","data:text/html,x","https://user:password@example.test/item","file:///tmp/item"]){const blocked=aiSearchProducts({family:"doubaoProducts",result:{cardData:[{...card,url:unsafe,image:unsafe}],searchGuid:[{url:unsafe}]}})!;assert.equal(blocked.cards[0]!.url,null);assert.equal(blocked.cards[0]!.imageUrl,null);assert.equal(blocked.references[0]!.url,null);}
+  assert.equal(aiSearchProducts({...data,family:"doubao"}),null);assert.equal(aiSearchProducts({...data,family:"qianwenProducts"})!.references.length,0);
+  for(const cardData of [undefined,null,[]])assert.deepEqual(aiSearchProducts({family:"qianwenProducts",result:{content:"answer",cardData}})!.cards,[]);
 });

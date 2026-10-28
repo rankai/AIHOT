@@ -11,12 +11,12 @@ import {config} from '@aihot/backend/config';
 import {sql,closeDb} from '@aihot/backend/db';
 import {getBoss,stopBoss,QUEUES} from '@aihot/backend/jobs/queue';
 import {prepareUpload,writeUpload,publishUpload,uploadKey,assetPath} from '@aihot/backend/operations/assets';
-import {createImageGeneration,createImageQuery,parseImagePoll,pollImage} from '@aihot/backend/providers/redfox/images';
+import {createImageGeneration,createImageQuery,parseImagePoll,pollImage,submitImage} from '@aihot/backend/providers/redfox/images';
 import {ImageInput,imagePairs,newImagePaths,type ImageModel} from '@aihot/backend/providers/redfox/image-models';
 import {createMediaUpload} from '@aihot/backend/providers/redfox/media-upload';
 import {executeOperationStep} from '@aihot/backend/providers/operations/execute';
 import {releaseOperationReceipt,recoverOperations} from '@aihot/backend/providers/operations/recovery';
-import {abandonRun,claimRun,receiptOptions} from '@aihot/backend/providers/operations/store';
+import {abandonRun,claimRun,receiptOptions,type RunRow} from '@aihot/backend/providers/operations/store';
 const dir=await mkdtemp(path.join(tmpdir(),'aihot-new-images-'));config.dataDir=dir;
 const calls:Array<{url:string;body:any;type:string}>=[],runs:number[]=[];let output:Buffer,mode='ok',outputs=1,downloads=0;
 const server=http.createServer((req,res)=>{const chunks:Buffer[]=[];req.on('data',c=>chunks.push(c));req.on('end',()=>{
@@ -40,8 +40,8 @@ async function asset(width=2,height=2){const bytes=await sharp({create:{width,he
 async function query(model:ImageModel){const r=await createImageQuery({model,taskId:' opaque task | '},'test',tag());runs.push(r.id);return r;}
 async function recover(id:number){const [count]=await sql`SELECT count(*)::int n FROM operation_runs WHERE status IN ('active','waiting')`;for(let i=0;i<Math.ceil(count!.n/200)+3;i++){await recoverOperations();if((await row(id)).job_id)return;}assert.fail('missing recovery job');}
 
-test('four models use all eight fixed endpoints and general reference upload; output uses existing private save',async()=>{
- mode='ok';for(const model of ['gptImage25','geminiBanana21','seedreamPro','seedreamLite'] as const){const a=await asset(),r=await create(model,[a.key]),n=calls.length;assert.equal(r.limits.steps,80);assert.equal(r.limits.saveAttempts,30);await job(r.id);assert.equal(calls[n]!.url,'/story/api/parseWork/videoGen/uploadFile?format=png');assert.match(calls[n]!.type,/multipart/);await job(r.id);const submit=calls[n+1]!;assert.equal(submit.url,newImagePaths[imagePairs[model].submit]);assert.equal(submit.body.prompt,' Synthetic prompt ');assert.equal(submit.body.n,undefined);assert.equal(submit.body.model,undefined);assert.equal(submit.body.referenceUploads,undefined);if(model==='gptImage25')assert.equal(submit.body.referenceImages.length,1);else if(model==='geminiBanana21'){assert.equal(submit.body.imageUrls.length,1);assert.equal(submit.body.metadata.resolution,'2K');}else{assert.equal(submit.body.image.length,1);assert.equal(submit.body.responseFormat,'url');}
+test('available models use their fixed endpoints and general reference upload; output uses existing private save',async()=>{
+ mode='ok';for(const model of ['gptImage25','geminiBanana21','seedreamPro'] as const){const a=await asset(),r=await create(model,[a.key]),n=calls.length;assert.equal(r.limits.steps,80);assert.equal(r.limits.saveAttempts,30);await job(r.id);assert.equal(calls[n]!.url,'/story/api/parseWork/videoGen/uploadFile?format=png');assert.match(calls[n]!.type,/multipart/);await job(r.id);const submit=calls[n+1]!;assert.equal(submit.url,newImagePaths[imagePairs[model].submit]);assert.equal(submit.body.prompt,' Synthetic prompt ');assert.equal(submit.body.n,undefined);assert.equal(submit.body.model,undefined);assert.equal(submit.body.referenceUploads,undefined);if(model==='gptImage25')assert.equal(submit.body.referenceImages.length,1);else if(model==='geminiBanana21'){assert.equal(submit.body.imageUrls.length,1);assert.equal(submit.body.metadata.resolution,'2K');}else{assert.equal(submit.body.image.length,1);assert.equal(submit.body.responseFormat,'url');}
  await job(r.id,true);assert.equal(calls[n+2]!.url,newImagePaths[imagePairs[model].poll]);await job(r.id);assert.equal((await row(r.id)).status,'completed');const [out]=await sql`SELECT * FROM operation_results WHERE run_id=${r.id} AND kind='image'`;assert.ok(out!.file_key);}
 });
 test('explicit same-asset upload is frozen; unselected historical upload is not automatically reused',async()=>{
@@ -86,4 +86,72 @@ test('malformed received response replays locally without another attempt; new m
 test('each fixed family advances a pending poll then persists terminal failure; frozen step limit is authoritative',async()=>{
  for(const model of ['gptImage25','geminiBanana21','seedreamPro','seedreamLite'] as const){mode='pending';const q=await query(model);await job(q.id);assert.equal((await row(q.id)).progress.pollSequence,1);mode='failed';await job(q.id,true);assert.equal((await row(q.id)).status,'failed');assert.equal((await sql`SELECT count(*)::int n FROM operation_results WHERE run_id=${q.id} AND kind='image_task'`)[0]!.n,2);}
  mode='ok';const q=await query('gptImage25');await sql`UPDATE operation_runs SET limits=limits||'{"steps":0}'::jsonb WHERE id=${q.id}`;const before=calls.length;await job(q.id);assert.equal((await row(q.id)).status,'needs_review');assert.equal(calls.length,before);
+});
+
+// Freeze the same persisted input that a Lite command created before retirement.
+async function legacyLite(fileKeys:string[]=[]){
+ const r=await create('seedreamPro',fileKeys),parameters=ImageInput.parse(params('seedreamLite',fileKeys));
+ const input={...r.input,parameters,commandIntent:{operation:'redfox.image.generate',parameters}};
+ await sql`UPDATE operation_runs SET input=${sql.json(input as never)} WHERE id=${r.id}`;
+ return await row(r.id);
+}
+test('Lite new commands reject before asset access; historical idempotency and query stay available',async()=>{
+ const before=calls.length;
+ await assert.rejects(createImageGeneration(params('seedreamLite',['missing-asset']),'test',tag()),/已停止新生成/);
+ const r=await legacyLite();
+ assert.equal((await createImageGeneration(r.input.parameters,r.actor,r.command_key)).id,r.id);
+ await assert.rejects(createImageGeneration({...r.input.parameters,prompt:'changed'},r.actor,r.command_key),/different input/);
+ const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp(),oldAdmin=config.devAdmin;
+ try{config.devAdmin={displayName:'Lite retirement'};const response=await app.inject({method:'POST',url:'/api/admin/redfox/images',headers:{'idempotency-key':tag(),'x-csrf-token':'dev'},payload:params('seedreamLite')});assert.equal(response.statusCode,400);
+ const options=await app.inject({url:'/api/admin/redfox/images/options'});assert.equal(options.json().models.find((m:any)=>m.model==='seedreamLite').generationAvailable,false);
+ }finally{config.devAdmin=oldAdmin;await app.close();}
+ assert.equal(calls.length,before);
+});
+test('queued Lite upload and submit stop without outbound, receipts or automatic waiting',async()=>{
+ const a=await asset();
+ for(const files of [[a.key],[]]){const r=await legacyLite(files),before=calls.length;await job(r.id);const held=await row(r.id);assert.equal(held.status,'needs_review');assert.match(held.wait_reason,/已停止新生成/);assert.equal(held.next_attempt_at,null);assert.equal(held.current_receipt_id,null);assert.equal(calls.length,before);}
+});
+test('Lite received submit replays task ID without resubmitting; original endpoint polls and saves',async()=>{
+ mode='ok';outputs=1;const r=await legacyLite(),execution=await sql.begin(tx=>claimRun(tx,{runId:r.id,stepVersion:r.step_version,generation:r.generation},r.job_id));
+ await submitImage(ImageInput.parse(r.input.parameters),[],`run:${r.id}:submit`,receiptOptions(execution));
+ await sql`UPDATE pgboss.job SET state='completed' WHERE id=${r.job_id}`;await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${r.id}`;
+ const before=calls.length;process.env.MODEL_CALLS_ENABLED='false';process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
+ try{await recover(r.id);await job(r.id);assert.equal(calls.length,before);const current=await row(r.id);assert.equal(current.step_key,'redfox.image.poll');assert.equal(current.progress.taskId,'generated-task');}
+ finally{process.env.MODEL_CALLS_ENABLED='true';process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='synthetic-new-images';}
+ await job(r.id,true);assert.equal(calls.at(-1)!.url,newImagePaths.WH5U8KZE);await job(r.id);assert.equal((await row(r.id)).status,'completed');
+ const [saved]=await sql`SELECT file_key FROM operation_results WHERE run_id=${r.id} AND kind='image'`;assert.ok(saved!.file_key);assert.ok(await (await import('node:fs/promises')).stat(assetPath(saved!.file_key)));
+});
+test('Lite unknown submit remains manual and cannot release into automatic regeneration',async()=>{
+ mode='disconnect';const r=await legacyLite(),execution=await sql.begin(tx=>claimRun(tx,{runId:r.id,stepVersion:r.step_version,generation:r.generation},r.job_id));
+ await assert.rejects(submitImage(ImageInput.parse(r.input.parameters),[],`run:${r.id}:submit`,receiptOptions(execution)));
+ await sql`UPDATE pgboss.job SET state='completed' WHERE id=${r.job_id}`;await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${r.id}`;
+ const before=calls.length;await recoverOperations();const held=await row(r.id);assert.equal(held.status,'needs_review');assert.equal((await releaseOperationReceipt(held.current_receipt_id,true)).released,false);assert.equal(calls.length,before);mode='ok';
+});
+
+test('Lite retirement wins over closed outbound gates and exhausted budgets without waiting',async()=>{
+ const a=await asset(),before=calls.length;
+ const stop=async(files:string[])=>{const r=await legacyLite(files);await job(r.id);const held=await row(r.id);assert.equal(held.status,'needs_review');assert.match(held.wait_reason,/已停止新生成/);assert.equal(held.next_attempt_at,null);assert.equal(held.current_receipt_id,null);};
+ process.env.MODEL_CALLS_ENABLED='false';process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
+ try{await stop([a.key]);await stop([]);}finally{process.env.MODEL_CALLS_ENABLED='true';process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='synthetic-new-images';}
+ const budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.media','redfox.image')`;
+ try{await sql`UPDATE budgets SET per_minute=0,per_hour=0,per_day=0 WHERE service IN ('redfox.media','redfox.image')`;await stop([a.key]);await stop([]);}
+ finally{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;}
+ assert.equal(calls.length,before);
+});
+
+test('Lite busy and unknown receipts bypass retirement, budgets and outbound gates',async()=>{
+ mode='ok';const r=await legacyLite(),execution=await sql.begin(tx=>claimRun(tx,{runId:r.id,stepVersion:r.step_version,generation:r.generation},r.job_id));
+ const submitted=await submitImage(ImageInput.parse(r.input.parameters),[],`run:${r.id}:submit`,receiptOptions(execution));
+ const {executeImageStep}=await import('@aihot/backend/providers/redfox/image-execution');
+ const {ReceiptBusyError,ReceiptUnknownError}=await import('@aihot/backend/providers/receipts');
+ const [budget]=await sql`SELECT * FROM budgets WHERE service='redfox.image'`,before=calls.length;
+ process.env.MODEL_CALLS_ENABLED='false';process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;
+ try{
+  await sql`UPDATE budgets SET per_minute=0 WHERE service='redfox.image'`;
+  await sql`UPDATE receipts SET status='pending',updated_at=now() WHERE id=${submitted.receiptId}`;
+  await assert.rejects(executeImageStep(execution,(await sql<RunRow[]>`SELECT * FROM operation_runs WHERE id=${r.id}`)[0]!),ReceiptBusyError);
+  await sql`UPDATE receipts SET status='unknown' WHERE id=${submitted.receiptId}`;
+  await assert.rejects(executeImageStep(execution,(await sql<RunRow[]>`SELECT * FROM operation_runs WHERE id=${r.id}`)[0]!),ReceiptUnknownError);
+  assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${submitted.receiptId}`)[0]!.attempts,1);assert.equal(calls.length,before);
+ }finally{await sql`UPDATE budgets SET per_minute=${budget!.per_minute} WHERE service='redfox.image'`;process.env.MODEL_CALLS_ENABLED='true';process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='synthetic-new-images';}
 });

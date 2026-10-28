@@ -3,6 +3,7 @@ import type { OperationResult } from "./operation-types.ts";
 import { researchFactText, researchObject } from "./research-platform-data.ts";
 import { imageTaskId, referenceIssue, type ImageDraft, type ImageModel, type ImageModelOption, type ImageOptions, type PrivateAsset } from "./image-types.ts";
 export function imageModelOption(options: ImageOptions, model: string) { return options.models.find(option => option.model === model); }
+export function imageGenerationModels(options: ImageOptions) { return options.models.filter(option => option.generationAvailable !== false); }
 export function imageModelDraft(option: ImageModelOption, options: ImageOptions): ImageDraft {
   return { prompt: "", resolution: (option.resolutions ?? options.resolutions)[0] ?? "", size: (option.sizes ?? options.sizes)[0] ?? "", customSize: "", n: 1, transparent: false, outputFormat: option.outputFormats?.includes("jpeg") ? "jpeg" : option.outputFormats?.[0] ?? "png", watermark: option.watermark === true, optimizeMode: option.optimizePromptModes?.[0] ?? "standard", sequentialMode: option.sequentialModes?.includes("disabled") ? "disabled" : option.sequentialModes?.[0] ?? "disabled", maxImages: option.maxImagesRange ? Math.min(option.maxImagesRange[1]!, Math.max(option.maxImagesRange[0]!, 4)) : 1, selected: [], referenceUploads: [] };
 }
@@ -29,6 +30,7 @@ export function selectedImageUploads(model: ImageModel, selected: readonly Priva
 export function imageGenerationBody(model: ImageModel, draft: ImageDraft, options: ImageOptions): Record<string, unknown> {
   const option = imageModelOption(options, model);
   if (!option) throw new Error("请选择可用图片模型。");
+  if (option.generationAvailable === false) throw new Error("Seedream 5.0 Lite 已停止新生成，请重新选择图片模型；已有任务仍可查询。");
   if (!draft.prompt.trim() || draft.prompt.length > 10000) throw new Error("图片描述须非空，最多 10000 字符。");
   if (draft.selected.length > option.maxReferences) throw new Error(`此模型最多 ${option.maxReferences} 张参考图片。`);
   if (new Set(draft.selected.map(asset => asset.key)).size !== draft.selected.length) throw new Error("参考图片不能重复。");

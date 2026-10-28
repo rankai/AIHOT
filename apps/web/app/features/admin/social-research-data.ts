@@ -3,6 +3,7 @@ import { researchFactText, researchObject } from "./research-platform-data.ts";
 
 export function socialResearchPlatform(operationId: unknown): string | null {
   switch (operationId) {
+    case "API_1792651427970": return "zhihu";
     case "ZMFVK589": return "toutiao";
     case "API_1790577699794": case "API_1790581645603": case "API_1791446025175": return "tiktok";
     case "WULKP6JP": return "youtube";
@@ -70,12 +71,13 @@ const labels: Record<string, string> = {
   likeNum: "点赞数", likeCount: "点赞数", replyCount: "上游回复数", likedByAuthor: "被作品作者点赞", pinnedByAuthor: "被作品作者置顶", isPinned: "置顶", isEdited: "已编辑", isCreator: "频道创作者", isVerified: "认证", isPrivate: "私密账号", hasMoreReplies: "上游 hasMoreReplies", language: "语言",
   fansCount: "粉丝数", followCount: "关注数", favoritingCount: "收藏数", likedTotal: "获赞数", workCount: "作品数", isSecret: "isSecret", region: "地区", userArea: "用户地区", customVerify: "自定义认证", enterpriseVerifyReason: "企业认证说明", enterpriseVerify: "企业认证", verifyInfo: "认证信息", signature: "简介", userSignature: "用户简介",
 };
-const mediaFields = ["avatar", "avatarImage", "avatarUrl", "profilePicUrl", "pictureUrl", "imageUrl", "videoUrl", "shareLink", "channelUrl", "url"];
+const mediaFields = ["avatorUrl","avatar", "avatarImage", "avatarUrl", "profilePicUrl", "pictureUrl", "imageUrl", "videoUrl", "shareLink", "channelUrl", "url"];
 const timeFields = ["ctime", "createTime", "updateTime", "publishTime", "publishedTime", "createdAt", "created_at", "create_time", "time"];
 export function socialRecordRows(value: unknown, data?: Record<string, unknown>): Array<[string, string]> {
   const record = researchObject(value);
   return Object.entries(record).flatMap(([key, value]) => {
     if (["content", "text", ...mediaFields, ...timeFields].includes(key) || value !== null && !["string", "number", "boolean"].includes(typeof value)) return [];
+    if (data?.operationId === "API_1792651427970" && key === "id") return [["评论 ID · id", researchFactText(value)]];
     if (data && isAgentKeyWeiboSocial(data) && data.operationId === "weibo.comments" && (key === "id" || key === "idstr")) return [[`${key === "id" ? "评论 ID" : "评论 ID 字符串"} · ${key}`, researchFactText(value)]];
     return [[key === "id" && (Object.hasOwn(record, "id_str") || Object.hasOwn(record, "note_id")) ? "评论 ID · id" : labels[key] ? `${labels[key]} · ${key}` : key, researchFactText(value)]] as Array<[string, string]>;
   });

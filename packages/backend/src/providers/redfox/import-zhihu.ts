@@ -1,3 +1,7 @@
+import {collectedDetailContext} from "./collection-detail.ts";
+import {applyWorkDetailOrigin} from "./work-detail-origin.ts";
+import {sanitizeBody} from "../../content/sanitize.ts";
+import {stripTags} from "../../lib/text.ts";
 import {importSource} from "../../sources/subscriptions.ts";
 import {requireLiveResult} from "../../operations/result-retention.ts";
 import { collectionDiscoveredAt } from "./collection-page-proof.ts";
@@ -5,7 +9,7 @@ import { z } from "zod";
 import { sql,type Tx } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
 import { audit } from "../../admin/auth.ts";
-import { upsertMaterial } from "../../content/materials.ts";
+import { decideTimeline,upsertMaterial } from "../../content/materials.ts";
 import { queueProcessing } from "../../jobs/content.ts";
 import { StaleOperationError } from "../operations/store.ts";
 import { UnsupportedReplacement } from "../../sources/x-replacement.ts";
@@ -19,18 +23,23 @@ export async function importZhihuResult(resultId:number,raw:unknown,actor:string
   const execute=async(tx:Tx)=>{
     const [snapshot]=await tx`SELECT z.*,r.provider,r.operation_key,r.input,p.model AS receipt_model,p.status AS receipt_status FROM operation_results z JOIN operation_runs r ON r.id=z.run_id LEFT JOIN receipts p ON p.id=z.receipt_id WHERE z.id=${resultId}`;
     if(!snapshot)return null;
-    const operation=ZhihuOperationId.safeParse(snapshot.input.operationId);
+    const collected=await collectedDetailContext(tx,snapshot),executionInput=collected?.input??snapshot.input;
+    const operation=ZhihuOperationId.safeParse(executionInput.operationId);
     if(!operation.success||snapshot.provider!=="redfox"||!["redfox.sync.query","redfox.platform.collection"].includes(snapshot.operation_key)||snapshot.receipt_model!==operation.data||!["received","completed"].includes(snapshot.receipt_status)||snapshot.data.platform!=="zhihu"||snapshot.data.operationId!==operation.data)throw new UnsupportedReplacement("Not a confirmed Zhihu result");
-    const sourceDiscoveredAt=await collectionDiscoveredAt(tx,snapshot,"zhihu",operation.data);
+    const sourceDiscoveredAt=collected?.discoveredAt??await collectionDiscoveredAt(tx,snapshot,"zhihu",operation.data);
     if(snapshot.kind!=="zhihu_work")throw new UnsupportedReplacement("Only received Zhihu works can be imported");
-    const parameters=zhihuOperations[operation.data].schema.parse(snapshot.input.parameters);
-    const parsed=parseZhihu(operation.data,[snapshot.data.record],parameters)[0]!,record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as ZhihuIdentity;
-    const vertical=parameters.vertical??input.supplement?.vertical;
+    const parameters=zhihuOperations[operation.data].schema.parse(executionInput.parameters);
+    const parsed=parseZhihu(operation.data,operation.data==="API_1792651427872"?snapshot.data.record:[snapshot.data.record],parameters)[0]!,record=parsed.data.record as Record<string,unknown>,received=parsed.data.identity as ZhihuIdentity;
+    const origin=applyWorkDetailOrigin(operation.data,parameters,parsed,executionInput.origin);
+    const receivedVertical=operation.data==="API_1792651427872"?"article":("vertical" in parameters?parameters.vertical:undefined);
+    const vertical=receivedVertical??input.supplement?.vertical;
     if(!vertical)throw new UnsupportedReplacement("Verified answer/article/zvide namespace is required");
-    if(parameters.vertical&&input.supplement?.vertical&&parameters.vertical!==input.supplement.vertical)throw new StaleOperationError("Received namespace cannot be replaced");
+    if(receivedVertical&&input.supplement?.vertical&&receivedVertical!==input.supplement.vertical)throw new StaleOperationError("Received namespace cannot be replaced");
     if(received.uid&&input.supplement?.uid&&received.uid!==input.supplement.uid)throw new StaleOperationError("Received author cannot be replaced");
     const identity:ZhihuIdentity={...(received.uid?{uid:received.uid}:input.supplement?.uid?{uid:input.supplement.uid}:{})};
-    const url=address(input.supplement?.url,true);
+    const original=typeof parsed.data.url==="string"?parsed.data.url:null;
+    if(original&&input.supplement?.url&&original!==input.supplement.url)throw new StaleOperationError("Received original URL cannot be replaced");
+    const url=original??address(input.supplement?.url,true);
     if(!url)throw new UnsupportedReplacement("A verified original Zhihu URL and evidence are required");
     const namespace=vertical;
     if(snapshot.article_id&&snapshot.source_id&&snapshot.provenance?.zhihuImport?.key===commandKey){
@@ -39,7 +48,7 @@ export async function importZhihuResult(resultId:number,raw:unknown,actor:string
       if(!completed!.article_id||!completed!.source_id||completed!.provenance?.zhihuImport?.key!==commandKey||stableJson(completed!.provenance.zhihuImport.intent)!==stableJson({sourceId:input.sourceId??null,supplement:input.supplement??null}))throw new StaleOperationError("Completed import command has different input");
       return {resultId,sourceId:completed!.source_id as string,articleId:completed!.article_id as string};
     }
-    const source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,undefined);
+    const source=await importSource(tx,snapshot.input.members??[],input.sourceId,snapshot.input.forceSourceId,origin?{resultId:origin.resultId,provider:snapshot.provider,runId:snapshot.run_id}:undefined);
     if(!source)throw new UnsupportedReplacement("Select an associated source; subscription/source is missing, disabled or changed");
     const sourceId=source.id;
     const [result]=await tx`SELECT * FROM operation_results WHERE id=${resultId} FOR UPDATE`;
@@ -49,9 +58,11 @@ export async function importZhihuResult(resultId:number,raw:unknown,actor:string
     if(result!.source_id||result!.article_id){if(result!.source_id!==sourceId||(previous&&stableJson(previous.intent)!==stableJson(intent)))throw new StaleOperationError("Result already imported with different target or evidence");return {resultId,sourceId,articleId:result!.article_id};}
     let articleId:string|null=null;
     {
-      const discoveredAt=sourceDiscoveredAt;
-      const author=record.authorName??record.nickname;
-      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyStatus:"pending",publishedAt:null,discoveredAt,backfill:"redfox-import-unknown-time",via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
+      const discoveredAt=new Date(origin?.discoveredAt??sourceDiscoveredAt);
+      const publishedAt=operation.data==="API_1792651427872"&&typeof record.publishTime==="number"?new Date(record.publishTime*1000):null;
+      const body=operation.data==="API_1792651427872"&&typeof record.content==="string"?sanitizeBody(record.content,url):null;
+      const author=record.authorNickname??record.authorName??record.nickname;
+      const material=await upsertMaterial({sourceId,url:url!,title:String(parsed.data.title),author:typeof author==="string"?author:null,bodyUpdate:origin?"fill-missing":undefined,bodyHtml:body,bodyText:body?stripTags(body):null,bodyStatus:body?"ok":"pending",publishedAt,discoveredAt,backfill:decideTimeline(publishedAt,discoveredAt).publishedAt?null:"redfox-import-unknown-time",via:"import",raw:{provider:"redfox",resultId,publishTime:record.publishTime??null,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null,request:snapshot.input.parameters,supplement:input.supplement??null}},tx);
       articleId=material.articleId;if(material.created||material.revised)await queueProcessing(articleId,{db:tx});
     }
     await tx`UPDATE operation_results SET source_id=${sourceId},article_id=${articleId},provenance=provenance||${tx.json({zhihuImport:{key:commandKey,intent,namespace,workId:typeof parsed.data.workId==="string"?parsed.data.workId:null}})} WHERE id=${resultId}`;

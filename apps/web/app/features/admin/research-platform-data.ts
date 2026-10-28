@@ -3,7 +3,7 @@ import { platformParameters, safeExternalUrl, type PlatformOperation } from "./p
 const platforms = ["qichezhijia", "dongchedi", "yiche", "baijiahao", "zhihu"] as const;
 export function isResearchPlatform(value: unknown): boolean { return typeof value === "string" && platforms.some(platform => platform === value); }
 export function isResearchResult(kind: string, data: Record<string, unknown>): boolean {
-  return isResearchPlatform(data.platform) && ["query_summary", `${data.platform}_account`, `${data.platform}_work`].includes(kind);
+  return isResearchPlatform(data.platform) && (["query_summary", `${data.platform}_account`, `${data.platform}_work`].includes(kind) || data.platform === "zhihu" && kind === "zhihu_hot_search");
 }
 export function researchQueryParameters(operation: PlatformOperation, values: Record<string, string>) {
   if (operation.id === "API_1789097000885") {
@@ -33,8 +33,8 @@ export function researchScalarRows(value: unknown): Array<[string, string]> {
 export function researchRecordRows(data: Record<string, unknown>): Array<[string, string]> {
   const record = researchObject(data.record), rows: Array<[string, string]> = [];
   const add = (key: string, label: string) => { if (Object.hasOwn(record, key)) rows.push([label, researchFactText(record[key])]); };
-  for (const key of ["workId", "opusId", "id", "videoId", "articleVideoId", "authorId", "userId", "uid", "uk", "secUid", "authorName", "nickname", "displayName", "name", "workType", "infoType", "contentType", "articleType", "articleTypeStr", "threadTitle"]) add(key, `响应 ${key}`);
-  const seconds = data.platform === "dongchedi" && ["W86F8SSK", "API_1791793668086"].includes(String(data.operationId));
+  for (const key of ["workId", "opusId", "id", "videoId", "articleVideoId", "authorId", "userId", "uid", "uk", "secUid", "authorName", "nickname", "displayName", "name", "workType", "infoType", "contentType", "articleType", "articleTypeStr", "threadTitle", "authorNickname", "authorUid", "urlToken", "headline", "verified", "verify", "ipLocation", "hotValue", "label", "rank"]) add(key, `响应 ${key}`);
+  const seconds = data.operationId === "API_1792651427872" || data.platform === "dongchedi" && ["W86F8SSK", "API_1791793668086"].includes(String(data.operationId));
   const milliseconds = data.platform === "yiche" && data.operationId === "YGYYT0G0";
   add("publishTime", `原始 publishTime（${milliseconds ? "毫秒" : seconds ? "秒" : "单位 / 时区未由此确定"}）`);
   add("updateTime", "原始 updateTime（单位 / 时区未由此确定）");
@@ -81,7 +81,7 @@ export function researchCaution(platform: unknown): string {
     case "dongchedi": return "请求作品类型与响应 workType 分别保留；外层 accountContext 单独展示，同页账号证据由后台核对，不按请求定位猜作者。";
     case "yiche": return "authorInfo.userId 与顶层 authorId 分开展示，不推定相等；duration 与 durationSeconds 使用各自字段单位，不互相替代。";
     case "baijiahao": return "uk、uid、secUid 仅在本操作范围内展示，不互相替代；视频响应中的 url 是作者主页，播放链接也不是作品原文。";
-    case "zhihu": return "answer、article、zvide 内容范围保留；没有收到原文时不按 ID 猜地址，发布时间单位未知，isEnd 仅属于本项。";
+    case "zhihu": return "answer、article、zvide 内容范围保留；文章详情核对文章 ID、类型与原文，详情发布时间为秒；搜索时间保留原值，isEnd 仅属于本项。账号与热点仅供研究。";
     default: return "标识仅按收到的本操作事实展示。";
   }
 }

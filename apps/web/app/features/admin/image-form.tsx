@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { useAdminAction } from "./action";
 import { ImageReferences } from "./image-references";
 import { ImageModelFields } from "./image-model-fields";
-import { imageGenerationBody, imageModelDraft, imageModelOption, imageQueryBody, imageReferenceReuseId, selectedImageUploads } from "./image-model-data";
+import { imageGenerationBody, imageGenerationModels, imageModelDraft, imageModelOption, imageQueryBody, imageReferenceReuseId, selectedImageUploads } from "./image-model-data";
 import { referenceIssue, type AssetPage, type ImageDraft, type ImageModel, type ImageOptions, type PrivateAsset } from "./image-types";
 import type { OperationAccepted } from "./operation-types";
 import { Button, Card, Field, Input, Select, Textarea } from "./ui";
@@ -23,6 +23,7 @@ export function ImageForm({ options, assets, reference, referenceError, initialT
   const [taskIds, setTaskIds] = useState<Partial<Record<ImageModel, string>>>({ [startingModel]: initialTaskId });
   const [notice, setNotice] = useState<string | null>(referenceError ?? initialIssue ?? reuseIssue), [uploading, setUploading] = useState(false);
   const option = imageModelOption(options, model)!, draft = drafts[model]!;
+  const generationUnavailable = option.generationAvailable === false;
   const currentSelected = draft.selected.map(asset => assetUpdates.find(update => update.key === asset.key) ?? asset).filter(asset => !referenceIssue(asset, options));
   const currentDraft = { ...draft, selected: currentSelected }, reuse = selectedImageUploads(model, currentSelected, draft.referenceUploads);
   const currentOptions = { ...options, maxReferences: option.maxReferences };
@@ -42,7 +43,8 @@ export function ImageForm({ options, assets, reference, referenceError, initialT
         const result = await run<OperationAccepted>("POST", "/api/admin/redfox/images", body, { label: "image", revalidate: false });
         if (result) navigate(`/admin/operations/${result.runId}`);
       }}>
-        <Field label="图片模型" hint="模型名称按 Redfox 文档展示；各模型独立保留草稿与参考。"><Select aria-label="图片模型" value={model} disabled={disabled} onChange={e => { setModel(e.target.value as ImageModel); setNotice(null); }}>{options.models.map(row => <option key={row.model} value={row.model}>{row.label}</option>)}</Select></Field>
+        <Field label="图片模型" hint="模型名称按 Redfox 文档展示；各模型独立保留草稿与参考。"><Select aria-label="图片模型" value={model} disabled={disabled} onChange={e => { setModel(e.target.value as ImageModel); setNotice(null); }}>{generationUnavailable && <option value={model} disabled>{option.label}（已停止新生成，请重新选择）</option>}{imageGenerationModels(options).map(row => <option key={row.model} value={row.model}>{row.label}</option>)}</Select></Field>
+        {generationUnavailable && <p role="status" className="rounded-control bg-amber/10 p-3 text-[13px] text-amber">Seedream 5.0 Lite 已停止新生成，请重新选择图片模型；已有草稿未切换模型，下方仍可查询已有任务。</p>}
         <Field label="图片描述" hint={model === "gptImage2" ? "最多 10000 字符；此模型移除描述首尾空白。图片不会自动用于新闻。" : "最多 10000 字符；描述原串提交。图片不会自动用于新闻。"}><Textarea aria-label="图片描述" required rows={5} maxLength={10000} disabled={disabled} value={draft.prompt} onChange={e => change({ prompt: e.target.value })} placeholder="描述你希望生成的画面" /></Field>
         <ImageModelFields option={option} options={options} draft={draft} change={change} disabled={disabled} />
         {draft.selected.length !== currentSelected.length && <p role="status" className="text-[12.5px] text-amber">有参考素材已不可用，已排除本次提交，请重新选择。</p>}
@@ -50,7 +52,7 @@ export function ImageForm({ options, assets, reference, referenceError, initialT
         {reuse.length > 0 && <p className="rounded-control bg-bg-sunk p-3 text-[12.5px] text-ink-3">复用这次已确认上传（结果 #{reuse.map(row => row.resultId).join("、#")}），远端地址仍可能过期；失败不会自动补传。移除该参考将同时移除复用关系。</p>}
         <ImageReferences uploadOptions={uploadOptions} updates={assetUpdates} onAssetChange={onAssetChange} options={currentOptions} initialPage={assets} selected={currentSelected} onSelect={select} onRemove={key => change({ selected: draft.selected.filter(asset => asset.key !== key), referenceUploads: draft.referenceUploads.filter(row => row.fileKey !== key) })} disabled={!!pending} onUploadingChange={setUploading} />
         <div className="space-y-1 rounded-control bg-bg-sunk p-3 text-[12.5px] leading-relaxed text-ink-3"><p>本次最多上传 {currentSelected.length - reuse.length} 张未确认参考到供应商、提交生成 1 次，最多查询 {options.pollLimit} 轮（异常重试另计次数预算），最长 {options.pollDeadlineSeconds / 3600} 小时。{model === "gptImage2" ? "已有旧版供应商引用可能复用。" : "普通本地参考将在提交生成后通过通用上传传给供应商；不会自动寻找历史上传。"}</p><p>{option.documentedBaseCny === undefined ? "生成费用估算未知，以 Redfox 账单为准。" : `公开文档基价 ${option.documentedBaseCny} 元；计量方式和实际实扣未核实，不是整轮或按张报价，不按分辨率或张数推算总价。`}文档免费的上传与查询仍占 media / poll 次数预算，生成使用 image 预算。</p><p>提交、查询及仍需远端下载的保存步骤受模型与 Redfox 两个外发开关控制；已收完整本地文件可继续保存。{model !== "gptImage2" ? `参考最多 ${option.maxReferences} 张为本地边界，输出最多 ${option.maxOutputImages ?? option.maxImages} 张为本地处理边界，均不保证上游返回量。` : ""}</p></div>
-        <div className="flex flex-wrap items-center justify-between gap-3"><details className="text-[12px] text-ink-4"><summary className="cursor-pointer">接口验证说明</summary><p className="mt-2 max-w-lg">{options.uploadTransportVerified ? "参考上传接口已完成相应验证。" : "供应商参考上传协议尚未完成真实联调，当前可用性仍需后台验收；不会因此自动切换供应商。"}</p></details><Button type="submit" tone="primary" disabled={disabled || !draft.prompt.trim()} busy={pending === "image"}>提交图片创作</Button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><details className="text-[12px] text-ink-4"><summary className="cursor-pointer">接口验证说明</summary><p className="mt-2 max-w-lg">{options.uploadTransportVerified ? "参考上传接口已完成相应验证。" : "供应商参考上传协议尚未完成真实联调，当前可用性仍需后台验收；不会因此自动切换供应商。"}</p></details><Button type="submit" tone="primary" disabled={disabled || generationUnavailable || !draft.prompt.trim()} busy={pending === "image"}>提交图片创作</Button></div>
       </form>
     </Card>
     <Card title="查询已有图片任务"><form aria-label="已有图片任务查询" className="space-y-3" onSubmit={async e => {
