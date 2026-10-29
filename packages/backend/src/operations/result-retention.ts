@@ -45,7 +45,7 @@ async function expireResultBatch(now:Date){
   let expired=0;
   for(const candidate of candidates){
    const rows=await tx`UPDATE operation_results z SET kind='result_expired',
-    data=jsonb_build_object('originalKind',z.kind,'expiredAt',${now.toISOString()}::text)
+    data=jsonb_build_object('originalKind',z.kind,'originalStatus',z.data->>'status','expiredAt',${now.toISOString()}::text)
     WHERE z.id=${candidate.id} AND z.kind<>'result_expired'
      AND z.article_id IS NULL AND z.source_id IS NULL AND z.file_key IS NULL
      AND coalesce(z.expires_at,z.created_at+interval '30 days')<=${now}

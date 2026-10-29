@@ -11,7 +11,7 @@ import { hasCompleteLocalFile } from "../../operations/assets.ts";
 import { sql, type Tx } from "../../db.ts";
 import { queueOperationStep } from "./queue.ts";
 import { eligibleMembers, releaseSubscriptions, type SubscriptionMember } from "../../sources/subscriptions.ts";
-import { lockRun, resumeRun, setRunState, StaleOperationError, type Execution, type RunRow } from "./store.ts";
+import { lockRun, lockRunAdmission, resumeRun, setRunState, StaleOperationError, type Execution, type RunRow } from "./store.ts";
 import { SUBSCRIPTION_VIDEO_DOWNLOAD } from "../../sources/subscription-video-ownership.ts";
 
 /** Includes terminal unknown evidence: abandonment must not route a receipt back to generic release. */
@@ -81,6 +81,7 @@ export async function settleUnknownReceipt(tx: Tx, execution: Execution, run: Ru
 export async function releaseOperationReceipt(receiptId: number, manual = false) {
   const owners = await sql<RunRow[]>`SELECT * FROM operation_runs WHERE current_receipt_id = ${receiptId} ORDER BY id`;
   return sql.begin(async (tx) => {
+    await lockRunAdmission(tx, owners.map(run => run.id));
     // Lock the complete member set before any individual run, including shared-receipt batches.
     const members = [...new Map(owners.flatMap((r) => r.input.members).map((m) => [m.subscriptionId, m])).values()];
     await eligibleMembers(tx, -1, members);
@@ -129,6 +130,7 @@ export async function recoverOperations() {
   for (const snapshot of rows) {
     try {
       const result = await sql.begin(async (tx) => {
+        await lockRunAdmission(tx, [snapshot.id]);
         const { run, eligible } = await lockRun(tx, snapshot.id);
         if (!["active", "waiting"].includes(run.status)) return 0;
         // Local closeout precedes receipt recovery, even when outbound calls are disabled.
