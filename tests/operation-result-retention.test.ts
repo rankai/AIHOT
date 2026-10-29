@@ -23,6 +23,19 @@ test('more than 200 results and dependent parents converge in one run; raw and p
  const count=await expireOperationResults(now);assert.ok(count>=407);assert.equal((await get(parent)).kind,'result_expired');assert.equal((await get(child)).kind,'result_expired');assert.deepEqual((await get(child)).provenance,{sourcePageResultId:parent});assert.deepEqual((await get(child)).data,{originalKind:'douyin_work',expiredAt:now.toISOString()});
  assert.deepEqual((await sql`SELECT response FROM receipts WHERE id=${receipt!.id}`)[0]!.response,{raw:'unchanged'});assert.equal(await expireOperationResults(now),0);
 });
+test('expiration preserves reported task status but omits missing or null status',async()=>{
+ const id=await run(),samples:Array<{id:number;status:string|null|undefined}>=[];
+ for(const status of [undefined,null,'processing','completed']){
+  const resultId=await result(id,'xhs_comment_task');
+  await sql`UPDATE operation_results SET data=${sql.json(status===undefined?{privatePayload:'discard'}:{status,privatePayload:'discard'})} WHERE id=${resultId}`;
+  samples.push({id:resultId,status});
+ }
+ await expireOperationResults(now);
+ for(const sample of samples){
+  const row=await get(sample.id);assert.equal(row.kind,'result_expired');
+  assert.deepEqual(row.data,{originalKind:'xhs_comment_task',...(sample.status==null?{}:{originalStatus:sample.status}),expiredAt:now.toISOString()});
+ }
+});
 test('live runs, recent results, explicit associations and exact reread dependencies stay intact',async()=>{
  const protectedIds:number[]=[];
  for(const status of ['active','waiting','needs_review','stopped'])protectedIds.push(await result(await run(status)));

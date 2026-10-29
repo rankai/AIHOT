@@ -1,3 +1,4 @@
+import type { ToolAuthorization } from "../../users/credits.ts";
 import {lockOriginResult} from "../../operations/result-retention.ts";
 import { accountDetailOrigin, applyAccountDetailOrigin, AccountDetailTargets } from "./account-detail-origin.ts";
 import {weiboCarDetailOrigin,applyWeiboCarDetailOrigin,WeiboCarDetailTargets} from "./weibo-car-detail-origin.ts";
@@ -49,7 +50,7 @@ import { queryWechat } from "./wechat.ts";
 import { z } from "zod";
 import { sql } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
-import { createRun, StaleOperationError, requireExecution, receiptOptions, saveResult, advanceRun, type RunRow, type Execution } from "../operations/store.ts";
+import { createRun, lockMemberAdmission, StaleOperationError, requireExecution, receiptOptions, saveResult, advanceRun, type RunRow, type Execution } from "../operations/store.ts";
 import { queueOperationStep } from "../operations/queue.ts";
 import { WeiboOperationId,weiboOperations } from "./weibo-contract.ts";
 import { queryWeibo } from "./weibo.ts";
@@ -99,19 +100,24 @@ function selectQuery(id:unknown,origin?:unknown){
   const wb=WeiboOperationId.parse(id);
   return {platform:"weibo",schema:weiboOperations[wb].schema,query:(p:Record<string,unknown>,w:string,o:PaidRequestOptions)=>queryWeibo(wb,p,w,"query",o)};
 }
-export async function createSynchronousQuery(raw:unknown,actor:string,key:unknown){
-  const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
+export function parseSynchronousQuery(raw: unknown) {
   const request=z.object({operationId:z.union([MediaToolOperationId,SocialResearchOperationId,WeiboOperationId,WechatOperationId,DouyinOperationId,XiaohongshuOperationId,TiktokOperationId,BilibiliOperationId,YoutubeOperationId,InstagramOperationId,ShipinhaoOperationId,KuaishouOperationId,ToutiaoOperationId,QichezhijiaOperationId,DongchediOperationId,YicheOperationId,BaijiahaoOperationId,XResearchOperationId,HotResearchOperationId,RedfoxAccountOperationId,ZhihuOperationId]),parameters:z.record(z.string(),z.unknown()),sourceResultId:z.number().int().positive().safe().optional()}).strict().parse(raw);
   const selected=selectQuery(request.operationId),parameters=selected.schema.parse(request.parameters);
+  return { request, parameters, selected };
+}
+export async function createSynchronousQuery(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){
+  const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
+  const { request, parameters, selected } = parseSynchronousQuery(raw);
   const intent={operationId:request.operationId,parameters,...(request.sourceResultId!==undefined?{sourceResultId:request.sourceResultId}:{})};
   return sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
+    await lockMemberAdmission(tx,actor);
     if(request.sourceResultId!==undefined)await lockOriginResult(tx,request.sourceResultId);
     const origin=request.sourceResultId===undefined?undefined:AccountDetailTargets.includes(request.operationId)?await accountDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):(WeiboCarDetailTargets as readonly string[]).includes(request.operationId)?await weiboCarDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):(WorkDetailTargets as readonly string[]).includes(request.operationId)?await workDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):["OE4KUEUO","UOM99OQI"].includes(request.operationId)?await manualWorkOrigin(tx,request.sourceResultId,request.operationId,parameters):request.operationId==="PAB6Z75Y"?await toutiaoOrigin(tx,request.sourceResultId,parameters):request.operationId==="Z9M88QI8"?await instagramOrigin(tx,request.sourceResultId,parameters):await youtubeOrigin(tx,request.sourceResultId,request.operationId,parameters);
     // One command snapshot: retries reuse it; a new explicit query may request fresh provider data.
-    const run=await createRun(tx,{actor,commandKey,provider:"redfox",operationKey:"redfox.sync.query",contractVersion:1,stepKey:"redfox.sync.query",input:{...(origin?{origin}:{}),commandIntent:intent,operationId:request.operationId,parameters,window:`query:${actor}:${commandKey}`,mode:"query",platform:selected.platform},limits:{steps:1,retries:3}});
+    const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:"redfox.sync.query",contractVersion:1,stepKey:"redfox.sync.query",input:{...(origin?{origin}:{}),commandIntent:intent,operationId:request.operationId,parameters,window:`query:${actor}:${commandKey}`,mode:"query",platform:selected.platform},limits:{steps:1,retries:3}});
     await queueOperationStep(tx,run.id);return run;
   });
 }

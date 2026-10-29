@@ -5,8 +5,9 @@ import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { pageMeta } from "../lib/seo";
 import { ThemeSwitch } from "../components/shell/ThemeSwitch";
-import { IconChevronRight, IconMoon } from "../components/icons";
+import { IconApps, IconChevronRight, IconMoon } from "../components/icons";
 import { moreGroups } from "../components/shell/nav";
+import { AccountLink } from "../components/shell/AccountLink";
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -33,6 +34,10 @@ export default function MorePage() {
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
       <h1 className="pb-4 pt-5 text-[22px] font-bold text-ink lg:pt-1">更多</h1>
       <div className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0 2xl:grid-cols-3">
+        <Group title="账号与工具">
+          <li><AccountLink className="h-[50px] px-4 text-[15px] active:bg-bg-sunk lg:hover:bg-bg-sunk" /></li>
+          <li><Link to="/tools" className="flex h-[50px] items-center gap-3 px-4 text-[15px] font-medium text-ink active:bg-bg-sunk lg:hover:bg-bg-sunk"><IconApps size={18} className="text-ink-3" /><span className="flex-1">数据工具</span><IconChevronRight size={16} className="text-ink-4" /></Link></li>
+        </Group>
         {moreGroups(root?.presentation).map((g) => (
           <Group key={g.title} title={g.title}>
             {g.items.map((r) => (

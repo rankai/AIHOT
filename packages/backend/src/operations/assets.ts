@@ -20,6 +20,8 @@ export const VIDEO_BYTES = INPUT_VIDEO_BYTES;
 export const UPLOAD_BYTES = VIDEO_BYTES + 64 * 1024;
 export const UPLOAD_TIMEOUT_MS = 60_000;
 export const IMAGE_PIXELS = 16_000_000;
+export const MEMBER_STORAGE_BYTES = 1024 * 1024 * 1024;
+export const MEMBER_STORAGE_FILES = 200;
 export function assetUploadOptions(){return inputMediaOptions(IMAGE_PIXELS);}
 let uploads = 0;
 const activeTemps = new Set<string>();
@@ -93,10 +95,22 @@ export async function publishUpload(input: { actor: string; key: string; file: s
   const mime=inspected.mime;
   const metadata = { filename: path.posix.basename(input.filename.replaceAll("\\","/")).replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200), ...inspected.metadata, ...(input.origin ? {origin:input.origin} : {}) };
   const publish=async (tx:Tx) => {
+    let owner = input.actor;
+    const generated = /^operation:([1-9][0-9]*)$/.exec(input.actor);
+    if (generated) {
+      const [run] = await tx`SELECT actor FROM operation_runs WHERE id=${generated[1]}`;
+      if (typeof run?.actor === "string" && /^user:[1-9][0-9]*$/.test(run.actor)) owner = run.actor;
+    }
+    if (/^user:[1-9][0-9]*$/.test(owner)) await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`member-storage:${owner}`},0))`;
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${input.key}, 0))`;
     const [existing] = await tx<AssetRow[]>`SELECT * FROM stored_files WHERE key=${input.key} FOR UPDATE`;
     if (existing) {
       if (existing.status !== "available" || assetExpired(existing) || existing.sha256 !== input.sha256) throw new AssetError(409, "This upload command already refers to different content or a deleted asset.");
+    }
+    if (!existing && /^user:[1-9][0-9]*$/.test(owner)) {
+      const [usage] = await tx`SELECT count(*)::int AS files,coalesce(sum(f.bytes),0)::float8 AS bytes FROM stored_files f
+        WHERE f.status <> 'deleted' AND (f.owner_actor=${owner} OR EXISTS (SELECT 1 FROM operation_results z JOIN operation_runs r ON r.id=z.run_id WHERE z.file_key=f.key AND r.actor=${owner}))`;
+      if (usage!.files >= MEMBER_STORAGE_FILES || usage!.bytes + input.bytes > MEMBER_STORAGE_BYTES) throw new AssetError(413, "私有素材已达到 200 个文件或 1 GiB 容量上限，请先清理不再使用的素材");
     }
     const target = assetPath(input.key);
     await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
@@ -105,8 +119,8 @@ export async function publishUpload(input: { actor: string; key: string; file: s
       if (await fileHash(target) !== input.sha256) throw new AssetError(409, "This upload command already published different content.");
     }
     if(existing)return existing;
-    const [asset] = await tx<AssetRow[]>`INSERT INTO stored_files(key,content_type,bytes,purpose,sha256,metadata,expires_at)
-      VALUES (${input.key},${mime},${input.bytes},${input.purpose??'operation-input'},${input.sha256},${tx.json(metadata)},CASE WHEN ${input.origin==='subscription-video'} THEN now()+interval '30 days' ELSE NULL END) RETURNING *`;
+    const [asset] = await tx<AssetRow[]>`INSERT INTO stored_files(key,content_type,bytes,purpose,sha256,metadata,expires_at,owner_actor)
+      VALUES (${input.key},${mime},${input.bytes},${input.purpose??'operation-input'},${input.sha256},${tx.json(metadata)},CASE WHEN ${input.origin==='subscription-video'} THEN now()+interval '30 days' ELSE NULL END,${owner}) RETURNING *`;
     await audit(input.actor,input.purpose==="operation-output"?"asset.save":"asset.upload",input.key,null,null,{bytes:input.bytes,contentType:mime,sha256:input.sha256,...inspected.metadata},undefined,tx);
     return asset!;
   };

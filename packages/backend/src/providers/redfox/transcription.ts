@@ -1,3 +1,4 @@
+import type { ToolAuthorization } from "../../users/credits.ts";
 import { z } from "zod";
 import { sql } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
@@ -16,16 +17,16 @@ export function transcriptionLimits(run: RunRow): typeof TRANSCRIPTION_LIMITS {
   }
   return result;
 }
-export function createTranscription(raw: unknown, actor: string, key: unknown) { return command(TranscriptionInput.parse(raw), actor, key, false); }
-export function createTranscriptionQuery(raw: unknown, actor: string, key: unknown) { return command(TranscriptionQuery.parse(raw), actor, key, true); }
-async function command(parameters: z.infer<typeof TranscriptionInput> | z.infer<typeof TranscriptionQuery>, actor: string, key: unknown, query: boolean) {
+export function createTranscription(raw: unknown, actor: string, key: unknown, authorization?: ToolAuthorization) { return command(TranscriptionInput.parse(raw), actor, key, false, authorization); }
+export function createTranscriptionQuery(raw: unknown, actor: string, key: unknown, authorization?: ToolAuthorization) { return command(TranscriptionQuery.parse(raw), actor, key, true, authorization); }
+async function command(parameters: z.infer<typeof TranscriptionInput> | z.infer<typeof TranscriptionQuery>, actor: string, key: unknown, query: boolean, authorization?: ToolAuthorization) {
   const commandKey = z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const operation = query ? "redfox.transcript.query" : "redfox.transcript.submit", intent = { operation, parameters };
   return sql.begin(async tx => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if (existing) { if (stableJson(existing.input.commandIntent) !== stableJson(intent)) throw new StaleOperationError("Command key reused with different input"); return existing; }
-    const run = await createRun(tx, { actor, commandKey, provider: "redfox", operationKey: operation, contractVersion: 1,
+    const run = await createRun(tx, { actor, authorization, commandKey, provider: "redfox", operationKey: operation, contractVersion: 1,
       input: { commandIntent: intent, parameters, platform: parameters.platform, mode: query ? "transcript-query" : "transcript", startedAt: new Date().toISOString() },
       stepKey: query ? "redfox.transcript.poll" : "redfox.transcript.submit", limits: { ...TRANSCRIPTION_LIMITS } });
     await tx`UPDATE operation_runs SET progress=${tx.json({ pollSequence: 0, ...("taskId" in parameters ? { taskId: parameters.taskId } : {}) })} WHERE id=${run.id}`;

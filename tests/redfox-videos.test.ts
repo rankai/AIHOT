@@ -83,3 +83,28 @@ test('complete orphan is pinned through cleanup and recovered locally, while fro
 test('downloaded container bytes choose canonical MIME and filename independently of URL and Content-Type',async()=>{
  const original=video;lastFrame=false;try{const fixtures=JSON.parse(await readFile(new URL('./fixtures/operation-media.json',import.meta.url),'utf8')).files;for(const [format,mime] of [['webm','video/webm'],['mov','video/quicktime']]){video=Buffer.from(fixtures.find((f:any)=>f.filename===`tiny.${format}`).base64,'base64');const q=await query();await job(q.id);await job(q.id);assert.equal((await row(q.id)).status,'completed');const [file]=await sql`SELECT z.data,f.content_type,f.metadata FROM operation_results z JOIN stored_files f ON f.key=z.file_key WHERE z.run_id=${q.id} AND z.kind='video'`;assert.equal(file!.data.lastFrameMissing,undefined);assert.equal(file!.content_type,mime);assert.equal(file!.metadata.filename,`generated.${format}`);assert.equal(file!.metadata.validation,'type-and-header');}}finally{video=original;lastFrame=true;}
 });
+
+test('member video continuation preserves required last frame and settles only full delivery',async()=>{
+ const {grantCredits,saveToolPrice,readRunCredits}=await import('@aihot/backend/users/credits');
+ const {quoteUserTool,submitUserTool,controlUserTool}=await import('@aihot/backend/users/tools');
+ for(const deliveredFrame of [false,true]){
+  const unique=tag(),prompt=`Continuation ${unique}`;
+  const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Video recovery','synthetic') RETURNING id`;
+  await grantCredits(user.id,{amount:30,reason:'Recovery test'},'test',tag());
+  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'720p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
+  const submit=async(kind:string,value:unknown)=>{const request={kind,input:value},q=await quoteUserTool(user.id,request);const r=await submitUserTool(user.id,kind,{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);return r.runId;};
+  const root=await submit('videos',{...input(),prompt});await job(root);
+  const stopped=await row(root);await controlUserTool(user.id,root,'stop',{stepVersion:stopped.step_version,generation:stopped.generation,reason:'Continue polling'});
+  const child=await submit('videos/query',{runId:root});
+  assert.equal((await row(child)).input.deliveryParameters.returnLastFrame,true);
+  lastFrame=deliveredFrame;
+  try{await job(child);
+   if(!deliveredFrame)await sql`UPDATE operation_runs SET input=input-'deliveryParameters',progress=progress-'lastFrameMissing' WHERE id=${child}`;
+   await job(child);if(deliveredFrame)await job(child);
+   const charge=await readRunCredits(user.id,child);
+   assert.equal(charge?.state,deliveredFrame?'settled':'review');assert.equal(charge?.consumed,deliveredFrame?9:0);
+   const [saved]=await sql`SELECT data FROM operation_results WHERE run_id=${child} AND kind='video'`;
+   assert.equal(saved.data.lastFrameMissing,!deliveredFrame);
+  }finally{lastFrame=true;}
+ }
+});

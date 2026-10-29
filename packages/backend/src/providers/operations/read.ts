@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sql } from "../../db.ts";
 import { audit } from "../../admin/auth.ts";
 import { queueOperationStep } from "./queue.ts";
-import { abandonRun, lockRun, resumeRun, StaleOperationError } from "./store.ts";
+import { abandonRun, lockRun, lockRunAdmission, resumeRun, StaleOperationError } from "./store.ts";
 
 const OperationFilters = z.object({
   subscriptionId: z.coerce.number().int().safe().positive().optional(),
@@ -103,6 +103,7 @@ const Command = z.object({ stepVersion: z.number().int().positive(), generation:
 export async function controlOperation(id: number, action: "resume" | "stop" | "abandon", raw: unknown, actor: string) {
   const input = Command.parse(raw), expected = { runId: id, stepVersion: input.stepVersion, generation: input.generation };
   await sql.begin(async (tx) => {
+    if (action === "resume") await lockRunAdmission(tx, [id]);
     const { run } = await lockRun(tx, id);
     if (run.step_version !== expected.stepVersion || run.generation !== expected.generation) throw new StaleOperationError("Operation changed; refresh first");
     if (action === "resume") {

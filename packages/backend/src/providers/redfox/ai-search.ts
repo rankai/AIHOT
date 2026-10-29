@@ -1,3 +1,4 @@
+import type { ToolAuthorization } from "../../users/credits.ts";
 import { z } from "zod";
 import { sql } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
@@ -16,16 +17,16 @@ export function aiSearchLimits(run: RunRow): typeof AI_SEARCH_LIMITS {
   }
   return result;
 }
-export function createAiSearch(raw: unknown, actor: string, key: unknown) { return command(AiSearchInput.parse(raw), actor, key, false); }
-export function createAiSearchQuery(raw: unknown, actor: string, key: unknown) { return command(AiSearchQuery.parse(raw), actor, key, true); }
-async function command(parameters: z.infer<typeof AiSearchInput> | z.infer<typeof AiSearchQuery>, actor: string, key: unknown, query: boolean) {
+export function createAiSearch(raw: unknown, actor: string, key: unknown, authorization?: ToolAuthorization) { return command(AiSearchInput.parse(raw), actor, key, false, authorization); }
+export function createAiSearchQuery(raw: unknown, actor: string, key: unknown, authorization?: ToolAuthorization) { return command(AiSearchQuery.parse(raw), actor, key, true, authorization); }
+async function command(parameters: z.infer<typeof AiSearchInput> | z.infer<typeof AiSearchQuery>, actor: string, key: unknown, query: boolean, authorization?: ToolAuthorization) {
   const commandKey = z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const operation = query ? "redfox.ai_search.query" : "redfox.ai_search.submit", intent = { operation, parameters };
   return sql.begin(async tx => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if (existing) { if (stableJson(existing.input.commandIntent) !== stableJson(intent)) throw new StaleOperationError("Command key reused with different input"); return existing; }
-    const run = await createRun(tx, { actor, commandKey, provider: "redfox", operationKey: operation, contractVersion: 1,
+    const run = await createRun(tx, { actor, authorization, commandKey, provider: "redfox", operationKey: operation, contractVersion: 1,
       input: { commandIntent: intent, parameters, family: "engine" in parameters ? aiSearchEngines[parameters.engine].family : parameters.family, mode: query ? "ai-search-query" : "ai-search", startedAt: new Date().toISOString() },
       stepKey: query ? "redfox.ai_search.poll" : "redfox.ai_search.submit", limits: { ...AI_SEARCH_LIMITS } });
     await tx`UPDATE operation_runs SET progress=${tx.json({ pollSequence: 0, ...("taskId" in parameters ? { taskId: parameters.taskId } : {}) })} WHERE id=${run.id}`;

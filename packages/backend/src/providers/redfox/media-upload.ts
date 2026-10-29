@@ -1,25 +1,27 @@
+import type { ToolAuthorization } from "../../users/credits.ts";
 import { z } from "zod";
 import { sql, type Tx } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
 import { getAsset, assetPath, assetUploadOptions, lockAssetInputs, AssetError, IMAGE_BYTES, IMAGE_PIXELS } from "../../operations/assets.ts";
 import { inputMediaFormat, MediaValidationError } from "../../operations/asset-media.ts";
-import { advanceRun, createRun, receiptOptions, requireExecution, saveResult, StaleOperationError, type Execution, type RunRow } from "../operations/store.ts";
+import { advanceRun, createRun, lockMemberAdmission, receiptOptions, requireExecution, saveResult, StaleOperationError, type Execution, type RunRow } from "../operations/store.ts";
 import { queueOperationStep } from "../operations/queue.ts";
 import { redfoxRequest, RedfoxResponseError, redfoxBaseUrl } from "./client.ts";
 const Input=z.object({fileKey:z.string().min(1).max(500)}).strict();
 export function mediaUploadOptions(){return {...assetUploadOptions(),operationId:"6L178PZD",service:"redfox.media",transportVerified:false};}
-export async function createMediaUpload(raw:unknown,actor:string,key:unknown){
+export async function createMediaUpload(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){
  const input=Input.parse(raw),commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key),operation="redfox.media.upload",intent={operation,parameters:input};
  return sql.begin(async tx=>{
   await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
   const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
   if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
+  await lockMemberAdmission(tx,actor);
   await lockAssetInputs(tx,[input.fileKey]);
   const [asset]=await tx`SELECT sha256,bytes,content_type FROM stored_files WHERE key=${input.fileKey}`;
   let format;try{format=inputMediaFormat(asset!.content_type,Number(asset!.bytes));}catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);throw error;}
   if(!asset!.sha256)throw new AssetError(400,"Asset lacks a verified content hash.");
   const parameters={fileKey:input.fileKey,format,sha256:asset!.sha256,bytes:Number(asset!.bytes),contentType:asset!.content_type};
-  const run=await createRun(tx,{actor,commandKey,provider:"redfox",operationKey:operation,contractVersion:1,input:{commandIntent:intent,mode:"media-upload",fileKeys:[input.fileKey],parameters},stepKey:operation,limits:{retries:0}});
+  const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:operation,contractVersion:1,input:{commandIntent:intent,mode:"media-upload",fileKeys:[input.fileKey],parameters},stepKey:operation,limits:{retries:0}});
   await queueOperationStep(tx,run.id);return run;
  });
 }

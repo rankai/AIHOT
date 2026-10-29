@@ -6,6 +6,8 @@ import { useChangelogSeen } from "../../lib/local-state";
 import { sidebarGroups, tabIsActive, type NavItem } from "./nav";
 import type { SitePresentation } from "@aihot/contracts/presentation";
 import { ThemeSwitch } from "./ThemeSwitch";
+import { AccountLink } from "./AccountLink";
+import { IconApps } from "../icons";
 
 /** True while the changelog has an entry newer than the one this reader last opened. */
 export function useChangelogDot(latestVersion: string | null): boolean {
@@ -57,8 +59,13 @@ export function Sidebar({ changelogVersion, presentation }: { changelogVersion: 
             </div>
           </div>
         ))}
+        <div>
+          <div className="px-2.5 pb-1 pt-3.5 text-[11px] text-ink-4">工具</div>
+          <SideLink item={{ to: "/tools", label: "数据工具", icon: IconApps }} dot={false} />
+        </div>
       </nav>
       <div className="mt-2 space-y-2.5 px-1 pt-1">
+        <AccountLink className="rounded-control px-2 py-2 hover:bg-bg-sunk" />
         <ThemeSwitch className="mx-1" />
         {SITE.icp && (
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" className="block px-2 text-[10px] text-ink-4 hover:text-ink-3">

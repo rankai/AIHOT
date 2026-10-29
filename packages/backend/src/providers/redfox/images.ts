@@ -1,3 +1,4 @@
+import type { ToolAuthorization } from "../../users/credits.ts";
 import {assertGenerationReference,confirmMediaUpload,uploadMediaReference} from "./media-upload.ts";
 import {OutputFormat,OptimizePromptMode,SequentialMode,MAX_GROUP_IMAGES,GeminiResolution} from "./image-models.ts";
 import { ImageInput, ImageModel, assertImageGenerationAvailable, imageGenerationAvailable, imageModelOf, imagePairs, Resolution, Size, NewTaskId, SafeImageUrl, Gpt25Size, GeminiSize, type ImageParameters } from "./image-models.ts";
@@ -7,7 +8,7 @@ import { z } from "zod";
 import { sql } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
 import { assetPath, getAsset, IMAGE_BYTES, IMAGE_PIXELS, OUTPUT_IMAGE_BYTES, OUTPUT_IMAGE_PIXELS, lockAssetInputs } from "../../operations/assets.ts";
-import { createRun, StaleOperationError, type RunRow } from "../operations/store.ts";
+import { createRun, lockMemberAdmission, StaleOperationError, type RunRow } from "../operations/store.ts";
 import { queueOperationStep } from "../operations/queue.ts";
 import { redfoxRequest, RedfoxResponseError } from "./client.ts";
 import type { PaidRequestOptions } from "../receipts.ts";
@@ -22,9 +23,9 @@ export function imageLimits(run:RunRow):typeof IMAGE_LIMITS {
   }
   return limits;
 }
-export function createImageGeneration(raw:unknown,actor:string,key:unknown){return imageCommand(ImageInput.parse(raw),actor,key,false);}
-export function createImageQuery(raw:unknown,actor:string,key:unknown){return imageCommand(z.object({model:ImageModel.optional(),taskId:NewTaskId}).strict().parse(raw),actor,key,true);}
-async function imageCommand(parameters:Record<string,unknown>,actor:string,key:unknown,query:boolean){
+export function createImageGeneration(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){return imageCommand(ImageInput.parse(raw),actor,key,false,authorization);}
+export function createImageQuery(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){return imageCommand(z.object({model:ImageModel.optional(),taskId:NewTaskId}).strict().parse(raw),actor,key,true,authorization);}
+async function imageCommand(parameters:Record<string,unknown>,actor:string,key:unknown,query:boolean,authorization?:ToolAuthorization){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const operation=query?"redfox.image.query":"redfox.image.generate",intent={operation,parameters};
   return sql.begin(async tx=>{
@@ -33,6 +34,7 @@ async function imageCommand(parameters:Record<string,unknown>,actor:string,key:u
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
     if(!query)assertImageGenerationAvailable(imageModelOf(parameters));
     const fileKeys=(parameters.fileKeys??[]) as string[];
+    await lockMemberAdmission(tx,actor);
     await lockAssetInputs(tx,fileKeys);
     const references: Array<{fileKey:string;resultId:number;resourceUrl:string;format:string;sha256:string;base:string}>=[];
     for(const key of fileKeys){const [asset]=await tx`SELECT bytes,content_type,metadata,sha256 FROM stored_files WHERE key=${key}`;
@@ -41,7 +43,7 @@ async function imageCommand(parameters:Record<string,unknown>,actor:string,key:u
       if(selected)references.push(await confirmMediaUpload(tx,key,selected.resultId,asset! as {bytes:number;content_type:string;sha256:string}));
     }
     const newer=imageModelOf(parameters)!=="gptImage2";
-    const run=await createRun(tx,{actor,commandKey,provider:"redfox",operationKey:operation,contractVersion:1,
+    const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:operation,contractVersion:1,
       input:{commandIntent:intent,parameters,fileKeys,...(newer?{confirmedReferenceUploads:references}:{}),mode:query?"image-query":"image",startedAt:new Date().toISOString()},
       stepKey:query?"redfox.image.poll":fileKeys.length?"redfox.image.upload":"redfox.image.submit",limits:{...IMAGE_LIMITS,...(newer?{steps:80,saveAttempts:30}:{})}});
     await tx`UPDATE operation_runs SET progress=${tx.json({referenceImages:[],uploadIndex:0,pollSequence:0,...(query?{taskId:parameters.taskId}: {})} as never)} WHERE id=${run.id}`;
