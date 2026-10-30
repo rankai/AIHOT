@@ -33,6 +33,7 @@ const api = createServer((req, res) => {
   res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600");
   if (path === "/api/account/me") return send(200, { user: member, csrf: `PRIVATE_CSRF_${member.id}` });
   if (path === "/api/account/credits") return send(200, { balance: { userId: member.id, available: 0, reserved: 0 }, entries: [], nextCursor: null });
+  if (path === "/api/account/tool-pricing") return send(200, { version: "2026-10-30-v2", offers: [], unavailable: [] });
   if (path === "/api/tools/options") return send(200, {});
   if (path === "/api/tools/assets") return send(200, { items: [{ key: `private-file-${member.id}`, filename: `${member.displayName}-asset` }], nextCursor: null });
   if (path === "/api/tools/runs") return send(200, { rows: [{ id: member.id, operationKey: `${member.displayName}-task` }], nextCursor: null });

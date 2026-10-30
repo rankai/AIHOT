@@ -1,4 +1,4 @@
-import {tag} from './setup.ts';
+import {tag,allowTestBudgetScope} from './setup.ts';
 import assert from 'node:assert/strict';
 import {before,after,test} from 'node:test';
 import http from 'node:http';
@@ -35,7 +35,7 @@ after(async()=>{for(const id of runs){const r=await row(id);if(!['completed','fa
 const input=(refs:Array<{fileKey:string;role:string;uploadResultId?:number}>=[])=>({prompt:' Synthetic video ',aspectRatio:'adaptive',duration:4,resolution:'720p',generateAudio:false,returnLastFrame:true,imageWithRoles:refs});
 async function create(refs:Parameters<typeof input>[0]=[]){const r=await createVideoGeneration(input(refs),'video-test',tag());runs.push(r.id);return r;}
 async function query(){const r=await createVideoQuery({taskId:' opaque | task '},'test',tag());runs.push(r.id);return r;}
-async function asset(){const temp=await prepareUpload();try{const content=await writeUpload(Readable.from(png),temp.file,new AbortController().signal);return await publishUpload({actor:'test',key:uploadKey('test',tag()),file:temp.file,filename:'ref.png',mime:'image/png',...content});}finally{await temp.release();}}
+async function asset(actor='test'){const temp=await prepareUpload();try{const content=await writeUpload(Readable.from(png),temp.file,new AbortController().signal);return await publishUpload({actor,key:uploadKey(actor,tag()),file:temp.file,filename:'ref.png',mime:'image/png',...content});}finally{await temp.release();}}
 async function job(id:number,due=false){const r=await row(id);if(due){await sql`UPDATE operation_runs SET next_attempt_at=now()-interval '1 second' WHERE id=${id}`;await sql`UPDATE pgboss.job SET start_after=now()-interval '1 second' WHERE id=${r.job_id}`;}await sql`UPDATE pgboss.job SET priority=2000000000 WHERE id=${r.job_id}`;const boss=await getBoss(),jobs=await boss.fetch<{runId:number;stepVersion:number}>(QUEUES.operation,{minPriority:2000000000});assert.equal(jobs.length,1);assert.equal(jobs[0]!.id,r.job_id);await executeOperationStep(id,jobs[0]!.data.stepVersion,jobs[0]!.id);await boss.complete(QUEUES.operation,jobs[0]!.id);}
 async function recover(id:number){await sql`UPDATE operation_runs SET next_attempt_at=CASE WHEN next_attempt_at IS NULL THEN NULL ELSE now()-interval '1 second' END WHERE id=${id}`;const [count]=await sql`SELECT count(*)::int n FROM operation_runs WHERE status IN ('active','waiting')`;for(let i=0;i<Math.ceil(count!.n/200)+3;i++){await recoverOperations();const r=await row(id),[j]=await sql`SELECT state FROM pgboss.job WHERE id=${r.job_id}`;if(j?.state==='created'||j?.state==='retry')return;}assert.fail('video recovery did not enqueue');}
 async function resume(id:number){const r=await row(id);await sql.begin(async tx=>{await resumeRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation});await queueOperationStep(tx,id);});}
@@ -84,16 +84,18 @@ test('downloaded container bytes choose canonical MIME and filename independentl
  const original=video;lastFrame=false;try{const fixtures=JSON.parse(await readFile(new URL('./fixtures/operation-media.json',import.meta.url),'utf8')).files;for(const [format,mime] of [['webm','video/webm'],['mov','video/quicktime']]){video=Buffer.from(fixtures.find((f:any)=>f.filename===`tiny.${format}`).base64,'base64');const q=await query();await job(q.id);await job(q.id);assert.equal((await row(q.id)).status,'completed');const [file]=await sql`SELECT z.data,f.content_type,f.metadata FROM operation_results z JOIN stored_files f ON f.key=z.file_key WHERE z.run_id=${q.id} AND z.kind='video'`;assert.equal(file!.data.lastFrameMissing,undefined);assert.equal(file!.content_type,mime);assert.equal(file!.metadata.filename,`generated.${format}`);assert.equal(file!.metadata.validation,'type-and-header');}}finally{video=original;lastFrame=true;}
 });
 
-test('member video continuation preserves required last frame and settles only full delivery',async()=>{
+test('member video continuation preserves required last frame and settles only full delivery',async t=>{
+ const restoreScope=await allowTestBudgetScope(['redfox.media','redfox.video','redfox.poll'],'member');t.after(restoreScope);
  const {grantCredits,saveToolPrice,readRunCredits}=await import('@aihot/backend/users/credits');
  const {quoteUserTool,submitUserTool,controlUserTool}=await import('@aihot/backend/users/tools');
  for(const deliveredFrame of [false,true]){
   const unique=tag(),prompt=`Continuation ${unique}`;
   const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Video recovery','synthetic') RETURNING id`;
   await grantCredits(user.id,{amount:30,reason:'Recovery test'},'test',tag());
-  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'720p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
+  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
   const submit=async(kind:string,value:unknown)=>{const request={kind,input:value},q=await quoteUserTool(user.id,request);const r=await submitUserTool(user.id,kind,{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);return r.runId;};
-  const root=await submit('videos',{...input(),prompt});await job(root);
+  const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
+  const root=await submit('videos',{...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true});for(let i=0;i<4;i++)await job(root);
   const stopped=await row(root);await controlUserTool(user.id,root,'stop',{stepVersion:stopped.step_version,generation:stopped.generation,reason:'Continue polling'});
   const child=await submit('videos/query',{runId:root});
   assert.equal((await row(child)).input.deliveryParameters.returnLastFrame,true);
@@ -110,16 +112,18 @@ test('member video continuation preserves required last frame and settles only f
 });
 
 
-test('observed queued and in_progress keep one member generation polling until delivery and charge once',async()=>{
+test('observed queued and in_progress keep one member generation polling until delivery and charge once',async t=>{
+ const restoreScope=await allowTestBudgetScope(['redfox.media','redfox.video','redfox.poll'],'member');t.after(restoreScope);
  const {grantCredits,saveToolPrice,readRunCredits}=await import('@aihot/backend/users/credits');
  const {quoteUserTool,submitUserTool}=await import('@aihot/backend/users/tools');
  const unique=tag(),prompt=`Pending alias ${unique}`;
  const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Polling test','synthetic') RETURNING id`;
  await grantCredits(user.id,{amount:30,reason:'Polling regression'},'test',tag());
- await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'720p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Polling regression'},'test');
- const value={...input(),prompt},q=await quoteUserTool(user.id,{kind:'videos',input:value});
+ await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Polling regression'},'test');
+ const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
+ const value={...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true},q=await quoteUserTool(user.id,{kind:'videos',input:value});
  const r=await submitUserTool(user.id,'videos',{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);
- const before=calls.length;await job(r.runId);
+ const before=calls.length;for(let i=0;i<4;i++)await job(r.runId);
  try{
   for(const status of ['queued','in_progress','pending']){mode=status;await job(r.runId,true);assert.equal((await row(r.runId)).status,'waiting');assert.equal((await row(r.runId)).step_key,'redfox.video.poll');assert.equal((await readRunCredits(user.id,r.runId))?.consumed,0);}
   assert.equal((await row(r.runId)).progress.pollSequence,3);

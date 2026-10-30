@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import {randomUUID} from 'node:crypto';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,6 +81,7 @@ async function withStub(body:unknown,run:(calls:any[])=>Promise<void>){
 async function step(id:number){const [r]=await sql`SELECT step_version FROM operation_runs WHERE id=${id}`;await executeOperationStep(id,r!.step_version,randomUUID());return (await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;}
 test('Weibo integration: dispatcher, API, receipt identity and local recovery',async t=>{
  const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);
+ const restoreAdminScope=await allowTestBudgetScope(['agentkey.query'],'admin');
  const budgets=await sql`SELECT * FROM budgets WHERE service IN ('agentkey.query','redfox.query','agentkey.collect','redfox.collect')`;
  try{
  await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('agentkey.query','redfox.query','agentkey.collect','redfox.collect')`;
@@ -323,7 +325,7 @@ test('Weibo integration: dispatcher, API, receipt identity and local recovery',a
    for(const [operationId,params] of [['weibo.followers',{uid}],['TXQPVGJG',{query:'x',page:2}],['weibo.following',{uid,since_id:'1|20'}]]){const reply=await app.inject({method:'POST',url:'/api/admin/redfox/queries',headers:{'x-csrf-token':'dev','idempotency-key':tag()},payload:{provider:'agentkey',operationId,parameters:params}});assert.equal(reply.statusCode,400,reply.body);}
   }finally{backendConfig.devAdmin=previous;await app.close();}
  });
- }finally{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();}
+ }finally{await restoreAdminScope();for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();}
 });
 
 const chosenWorkSource=tag();
