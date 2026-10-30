@@ -35,12 +35,13 @@ async function command(parameters: z.infer<typeof TranscriptionInput> | z.infer<
 }
 const Milliseconds = z.union([z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^\d+$/)]);
 const Segment = z.object({ textSeg: z.string(), start: Milliseconds, end: Milliseconds }).refine(s => BigInt(s.end) >= BigInt(s.start), "Segment end precedes start");
-const Poll = z.object({ status: z.enum(["processing", "succeeded", "failed"]), taskId: TranscriptionTaskId.optional(), text: z.string().nullable().optional(), stampSents: z.array(Segment).nullable().optional(), failReason: z.string().nullable().optional() });
+const Poll = z.object({ status: z.enum(["processing", "asr_processing", "running", "succeeded", "failed"]), taskId: TranscriptionTaskId.optional(), text: z.string().nullable().optional(), stampSents: z.array(Segment).nullable().optional(), failReason: z.string().nullable().optional() });
 export function parseTranscriptionPoll(raw: unknown, requestedTaskId: string) {
   const data = Poll.parse(raw);
   if (data.taskId !== undefined && data.taskId !== requestedTaskId) throw new RedfoxResponseError("Transcription task ID mismatch");
   if (data.status === "succeeded" && !data.text?.trim()) throw new RedfoxResponseError("Successful transcription lacks complete text");
-  return data;
+  // Observed Bilibili intermediate states remain pending, not failures.
+  return { ...data, status: (data.status === "asr_processing" || data.status === "running") ? "processing" as const : data.status };
 }
 export async function submitTranscription(platform: z.infer<typeof TranscriptionPlatform>, url: string, identity: string, paid: PaidRequestOptions) {
   const result = await redfoxRequest(transcriptionPairs[platform].submit, { url }, identity, "transcript", paid);
