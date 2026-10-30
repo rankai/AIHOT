@@ -170,7 +170,7 @@ export async function listAssets(after?: string) {
 export const ASSET_BACKUP_LOCK = 741904201;
 async function hasActiveInput(tx: Tx, key: string): Promise<boolean> {
   const [row] = await tx`SELECT 1 FROM operation_runs WHERE status IN ('active','waiting','needs_review','stopped')
-    AND (input->'fileKeys' @> ${tx.json([key])} OR (step_key IN ('redfox.image.save','redfox.video.save','subscription.video.save') AND progress->>'expectedFileKey'=${key}))
+    AND (input->'fileKeys' @> ${tx.json([key])} OR (step_key IN ('redfox.image.save','redfox.video.save','aliyun.wan.save','subscription.video.save') AND progress->>'expectedFileKey'=${key}))
     AND NOT (operation_key='subscription.video.download' AND EXISTS (SELECT 1 FROM stored_files f WHERE f.key=${key} AND f.metadata->>'origin'='subscription-video' AND f.expires_at<=now())) LIMIT 1`;
   return !!row;
 }

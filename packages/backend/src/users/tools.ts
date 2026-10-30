@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { createWanGeneration, createWanQuery } from "../providers/aliyun/wan.ts";
+import { wanOptions } from "../providers/aliyun/wan-contract.ts";
 import type { ToolRunAction } from "@aihot/contracts/user-tools";
 import { assetUploadOptions, MEMBER_STORAGE_BYTES, MEMBER_STORAGE_FILES } from "../operations/assets.ts";
 import { platformToolCatalog } from "../providers/redfox/catalog.ts";
@@ -24,7 +26,7 @@ export async function userToolOptions() {
     const { collectionProviders, collectionCapabilities: _, collectionPrice: __, ...query } = operation;
     return { ...query, schedulableType: null, queryProviders: (operation.queryProviders ?? collectionProviders ?? [{ id: "redfox", label: "Redfox" }]).map(({ collectionCapabilities: ___, collectionPrice: ____, ...provider }) => provider) };
   });
-  return { operations, images: imageOptions(), videos: videoOptions(), aiSearch: aiSearchOptions(), transcriptions: transcriptionOptions(),
+  return { operations, images: imageOptions(), videos: videoOptions(), videoReplication: wanOptions(), aiSearch: aiSearchOptions(), transcriptions: transcriptionOptions(),
     xhsComments: { ...xhsCommentOptions(), allDataNum: null, dataNumMax: 1000 }, assets: assetUploadOptions(),
     limits: { activeRuns: 5, submissionsPerMinute: 10, storageBytes: MEMBER_STORAGE_BYTES, storageFiles: MEMBER_STORAGE_FILES } };
 }
@@ -46,8 +48,8 @@ export async function submitUserTool(userId: number, kind: unknown, raw: unknown
     case "x-tweet": result = await createTweetQuery(body, actor, commandKey, authorization); break;
     case "images": result = await createImageGeneration(body, actor, commandKey, authorization); break;
     case "images/query": result = await createImageQuery(body, actor, commandKey, authorization); break;
-    case "videos": result = await createVideoGeneration(body, actor, commandKey, authorization); break;
-    case "videos/query": result = await createVideoQuery(body, actor, commandKey, authorization); break;
+    case "videos": result = body.provider === "aliyun" ? await createWanGeneration(body, actor, commandKey, authorization) : await createVideoGeneration(body, actor, commandKey, authorization); break;
+    case "videos/query": result = body.provider === "aliyun" ? await createWanQuery(body, actor, commandKey, authorization) : await createVideoQuery(body, actor, commandKey, authorization); break;
     case "ai-search": result = await createAiSearch(body, actor, commandKey, authorization); break;
     case "ai-search/query": result = await createAiSearchQuery(body, actor, commandKey, authorization); break;
     case "transcriptions": result = await createTranscription(body, actor, commandKey, authorization); break;

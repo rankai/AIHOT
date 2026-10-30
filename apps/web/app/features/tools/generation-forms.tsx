@@ -1,29 +1,21 @@
-import { useState } from "react";
+import { ReplicateVideoForm } from "./replicate-video-form";
+import { useRef, useState } from "react";
 import type { ToolAsset } from "@aihot/contracts/user-tools";
 import { Button, Input, Select, Textarea } from "../admin/ui";
 import { imageGenerationBody, imageGenerationModels, imageModelDraft } from "../admin/image-model-data";
 import type { ImageModel, ImageOptions, PrivateAsset } from "../admin/image-types";
 import type { VideoOptions } from "../admin/video-types";
+import type { AssetUploadOptions } from "../admin/asset-types";
 import { ToolField as Field } from "./fields";
+import { ReferencePicker, UploadPicker } from "./generation-references";
+import { TalkingVideoForm } from "./talking-video-form";
+import { useVideoMode, VideoModeTabs } from "./video-modes";
+import { useToolCommand } from "./client";
+import { videoGenerationBody } from "../admin/video-data";
+import { assetUploadFile } from "../admin/asset-data";
 
 type Submit = (kind: string, body: unknown) => Promise<void>;
-const references = (assets: ToolAsset[]) => assets.filter(asset => asset.status === "available" && ["image/png", "image/jpeg", "image/webp"].includes(asset.contentType));
 const privateAsset = (asset: ToolAsset): PrivateAsset => ({ key: asset.key, content_type: asset.contentType, bytes: asset.bytes, purpose: "operation-input", status: asset.status, metadata: { filename: asset.filename, width: asset.width, height: asset.height, kind: "image" } });
-
-function ReferencePicker({ assets, selected, max, change }: { assets: ToolAsset[]; selected: string[]; max: number; change: (keys: string[]) => void }) {
-  const choices = references(assets);
-  return <fieldset className="rounded-control border border-line p-3"><legend className="px-1 text-[13px] font-medium text-ink-2">参考图片（可选，最多 {max} 张）</legend>
-    {!choices.length ? <p className="text-[13px] text-ink-3">先在“私有素材”中上传 PNG、JPEG 或 WebP 图片。</p> : <div className="grid max-h-60 gap-2 overflow-y-auto sm:grid-cols-2">{choices.map(asset => <label key={asset.key} className="flex min-w-0 items-center gap-2 rounded-control p-2 hover:bg-bg-sunk"><input type="checkbox" checked={selected.includes(asset.key)} disabled={!selected.includes(asset.key) && selected.length >= max} onChange={event => change(event.target.checked ? [...selected, asset.key] : selected.filter(key => key !== asset.key))} /><img src={asset.contentUrl} alt="" loading="lazy" className="size-10 rounded object-cover" /><span className="truncate text-[12px]">{asset.filename}</span></label>)}</div>}
-  </fieldset>;
-}
-
-function UploadPicker({ assets, selected, values, change }: { assets: ToolAsset[]; selected: string[]; values: Array<{ fileKey: string; resultId: number }>; change: (values: Array<{ fileKey: string; resultId: number }>) => void }) {
-  return <>{selected.map(key => {
-    const asset = assets.find(row => row.key === key);
-    if (!asset?.uploads?.length) return null;
-    return <Field key={key} label={`${asset.filename}的上传方式`} hint="选择已有上传结果可避免再次上传；失效时会提示错误，不会自动重新上传。"><Select value={values.find(row => row.fileKey === key)?.resultId ?? ""} onChange={event => change([...values.filter(row => row.fileKey !== key), ...(event.target.value ? [{ fileKey: key, resultId: Number(event.target.value) }] : [])])}><option value="">本次上传</option>{asset.uploads.map(upload => <option key={upload.resultId} value={upload.resultId}>复用上传 #{upload.resultId} · {new Date(upload.createdAt).toLocaleString("zh-CN")}</option>)}</Select></Field>;
-  })}</>;
-}
 
 export function ImageToolForm({ options, assets, submit, pending }: { options: ImageOptions; assets: ToolAsset[]; submit: Submit; pending: boolean }) {
   const models = imageGenerationModels(options);
@@ -61,18 +53,36 @@ function ImageDraftForm({ options, model, assets, submit, pending, max }: { opti
   </form>;
 }
 
-export function VideoToolForm({ options, assets, submit, pending }: { options: VideoOptions; assets: ToolAsset[]; submit: Submit; pending: boolean }) {
+export function VideoToolForm(props: { options: VideoOptions; assets: ToolAsset[]; uploadOptions: AssetUploadOptions; csrf: string; onAssetChange: (asset: ToolAsset) => void; submit: Submit; pending: boolean }) {
+  const { mode, change } = useVideoMode();
+  const upload = useToolCommand(props.csrf);
+  const uploadAsset = (body: FormData) => upload.run<ToolAsset>("/api/tools/assets", body);
+  const pending = props.pending || upload.pending;
+  return <div className="space-y-5">
+    <VideoModeTabs mode={mode} change={change} idPrefix="user-video" />
+    {upload.error && <p role="alert" className="text-[13px] text-hot">{upload.error}</p>}
+    <div id="user-video-text" role="tabpanel" aria-labelledby="user-video-text-tab" hidden={mode !== "text"}><h2 className="mb-4 text-lg font-semibold">文生视频</h2><GeneralVideoToolForm {...props} mode="text" pending={pending} uploadAsset={uploadAsset} /></div>
+    <div id="user-video-image" role="tabpanel" aria-labelledby="user-video-image-tab" hidden={mode !== "image"}><h2 className="mb-4 text-lg font-semibold">图生视频</h2><GeneralVideoToolForm {...props} mode="image" pending={pending} uploadAsset={uploadAsset} /></div>
+    <div id="user-video-replicate" role="tabpanel" aria-labelledby="user-video-replicate-tab" hidden={mode !== "replicate"}><h2 className="mb-4 text-lg font-semibold">视频复刻</h2><ReplicateVideoForm assets={props.assets} pending={pending} uploadAsset={uploadAsset} submit={props.submit} /></div>
+    <div id="user-video-talking" role="tabpanel" aria-labelledby="user-video-talking-tab" hidden={mode !== "talking"}><h2 className="mb-4 text-lg font-semibold">AI口播</h2><TalkingVideoForm {...props} pending={pending} uploadAsset={uploadAsset} /></div>
+  </div>;
+}
+
+function GeneralVideoToolForm({ options, assets, submit, pending, mode, uploadOptions, uploadAsset, onAssetChange }: { options: VideoOptions; assets: ToolAsset[]; submit: Submit; pending: boolean; mode: "text" | "image"; uploadOptions: AssetUploadOptions; uploadAsset: (body: FormData) => Promise<ToolAsset | null>; onAssetChange: (asset: ToolAsset) => void }) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [uploads, setUploads] = useState<Array<{ fileKey: string; resultId: number }>>([]);
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  return <form className="space-y-4" onSubmit={async event => {
-    event.preventDefault(); setError(null); const form = new FormData(event.currentTarget);
-    const imageWithRoles = selected.map(fileKey => ({ fileKey, role: roles[fileKey] ?? "reference_image", ...(uploads.find(row => row.fileKey === fileKey) ? { uploadResultId: uploads.find(row => row.fileKey === fileKey)!.resultId } : {}) }));
-    if (["first_frame", "last_frame"].some(role => imageWithRoles.filter(row => row.role === role).length > 1)) { setError("首帧与末帧分别只能选择一张图片。"); return; }
-    await submit("videos", { prompt: String(form.get("prompt")), aspectRatio: form.get("aspectRatio"), resolution: form.get("resolution"), duration: Number(form.get("duration")), generateAudio: form.has("generateAudio"), returnLastFrame: form.has("returnLastFrame"), imageWithRoles });
-  }}>
-    <p className="text-[13px] text-ink-3">{options.modelLabel}</p>
+  return <form aria-label={mode === "text" ? "文生视频制作表单" : "图生视频制作表单"} className="space-y-4" onSubmit={async event => {
+    event.preventDefault(); if (pending) return; setError(null); const form = new FormData(event.currentTarget);
+    try {
+      if (mode === "image" && !selected.length) throw new Error("图生视频至少需要一张参考图片。");
+      const keys = mode === "image" ? selected : [];
+      await submit("videos", videoGenerationBody({ prompt: String(form.get("prompt")), aspectRatio: String(form.get("aspectRatio")), resolution: String(form.get("resolution")), duration: Number(form.get("duration")), generateAudio: form.has("generateAudio"), returnLastFrame: form.has("returnLastFrame"), selected: keys.flatMap(key => { const asset = assets.find(row => row.key === key); return asset ? [privateAsset(asset)] : []; }), roles: keys.map((fileKey, id) => ({ id, fileKey, role: (roles[fileKey] ?? "reference_image") as "reference_image" | "first_frame" | "last_frame" })), confirmedUploads: Object.fromEntries(uploads.filter(row => keys.includes(row.fileKey)).map(row => [row.fileKey, row.resultId])) }, options));
+    } catch (error) { setError(error instanceof Error ? error.message : "请检查视频参数。"); }
+  }}><fieldset disabled={pending} className="min-w-0 space-y-4">
+    <p className="text-[13px] text-ink-3">{mode === "text" ? "输入画面、动作与镜头描述，直接生成视频。" : "上传或选择至少一张图片，描述希望发生的动作和镜头变化。可设置首帧、末帧或外观参考。"}</p>
     <Field label="视频描述"><Textarea name="prompt" required maxLength={10000} rows={5} placeholder="描述场景、人物动作、镜头与声音" /></Field>
     <div className="grid gap-4 sm:grid-cols-3">
       <Field label="画面比例"><Select name="aspectRatio" defaultValue="16:9">{options.aspectRatios.map(value => <option key={value}>{value}</option>)}</Select></Field>
@@ -80,10 +90,21 @@ export function VideoToolForm({ options, assets, submit, pending }: { options: V
       <Field label="时长（秒）"><Input name="duration" type="number" required min={options.durationSeconds.min} max={options.durationSeconds.max} defaultValue={options.durationSeconds.min} /></Field>
     </div>
     <div className="flex flex-wrap gap-5 text-[13px]"><label className="flex items-center gap-2"><input name="generateAudio" type="checkbox" />生成音频</label><label className="flex items-center gap-2"><input name="returnLastFrame" type="checkbox" />同时保存末帧</label></div>
-    <ReferencePicker assets={assets} selected={selected} max={options.maxReferenceRoles} change={setSelected} />
+    {mode === "image" && <>
+      <div className="space-y-2 rounded-control border border-dashed border-line-strong p-3"><Field label="上传参考图片"><input ref={fileInput} name="imageUpload" type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-[13px]" /></Field><Button disabled={pending || selected.length >= options.maxReferenceRoles} onClick={async () => {
+        const file = fileInput.current?.files?.[0]; if (!file) { setError("请先选择参考图片。"); return; }
+        setError(null);
+        try {
+          const data = new FormData(); data.set("file", assetUploadFile(file, { ...uploadOptions, formats: uploadOptions.formats.filter(format => ["image/png", "image/jpeg", "image/webp"].includes(format.mime)), limits: { ...uploadOptions.limits, imageBytes: Math.min(uploadOptions.limits.imageBytes, options.referenceBytes) } }));
+          const asset = await uploadAsset(data);
+          if (asset) { onAssetChange(asset); setSelected(previous => [...new Set([...previous, asset.key])]); if (fileInput.current) fileInput.current.value = ""; }
+        } catch (error) { setError(error instanceof Error ? error.message : "上传未完成。"); }
+      }}>上传并选中图片</Button><p className="text-[12px] text-ink-3">PNG、JPEG 或 WebP，最多 {options.referenceBytes / 1_000_000} MB。本地上传不消耗积分。</p></div>
+    <ReferencePicker required assets={assets} selected={selected} max={options.maxReferenceRoles} change={keys => { setSelected(keys); setUploads(previous => previous.filter(row => keys.includes(row.fileKey))); setError(null); }} />
     <UploadPicker assets={assets} selected={selected} values={uploads} change={setUploads} />
     {selected.map(key => <Field key={key} label={`${assets.find(asset => asset.key === key)?.filename ?? "图片"}的用途`}><Select value={roles[key] ?? "reference_image"} onChange={event => setRoles({ ...roles, [key]: event.target.value })}><option value="reference_image">参考图片</option><option value="first_frame">首帧</option><option value="last_frame">末帧</option></Select></Field>)}
+    </>}
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
-    <Button tone="primary" type="submit" disabled={pending} busy={pending}>查看积分报价</Button>
-  </form>;
+    <Button tone="primary" type="submit" disabled={pending || mode === "image" && !selected.length} busy={pending}>查看积分报价</Button>
+  </fieldset></form>;
 }

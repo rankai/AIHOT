@@ -43,6 +43,11 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
 
 export function RedfoxCostReport({ data }: { data: RedfoxCostsData }) {
   return <div className="min-w-0 space-y-5">
+    {data.wan && <Card title="万相视频复刻 · 按任务估算"><p className="mb-3 text-[13px] text-ink-3">按原始生成提交时间归属区间，同一业务空间的任务只计一次；轮询次数不作为生成费用。不含 OSS 费用，未完成或未解析任务尚无终态费用；不是供应商账单。</p><p>已知估价 ¥{data.wan.estimatedCny} · 用量待核对 {data.wan.unknownTasks} 个 · 异常证据 {data.wan.invalidEvidence} 条</p><DataTable rows={data.wan.tasks} rowKey={row => `${row.rootRunId}:${row.taskId}`} empty="暂无终态费用证据" columns={[
+      {key:"task",label:"原任务",render: row => <Link to={`/admin/operations/${row.rootRunId}`}>#{row.rootRunId}</Link>},
+      {key:"seconds",label:"输出秒数",render: row => row.outputSeconds ?? "未知"},
+      {key:"cost",label:"人民币估价",render: row => row.estimatedCny === null ? "待核对" : `¥${row.estimatedCny}`},
+    ]}/></Card>}
     <Card title="本地登记的外发尝试" pad={false}>
       <div className="space-y-2 border-b border-line p-4 text-[12.5px] text-ink-3"><p className="break-all">本次读取范围：{data.local.interval.start} 至 {data.local.interval.end}（外发尝试开始时间，含开始、不含结束）。</p><p>登记的外发尝试不证明上游收到。live 只是来源标记，不等于真实付费；分组按服务、模型、来源、地址、环境、币种与成本依据分别展示，不混加。AgentKey 积分来自已存响应，缺失值显示未知。</p></div>
       <DataTable rows={data.local.groups} rowKey={row => JSON.stringify([row.service, row.model, row.origin, row.base, row.currency, row.costBasis])} empty="所选本地时间范围没有登记的 Redfox 或 AgentKey 外发尝试。" columns={[

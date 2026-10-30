@@ -53,7 +53,7 @@ export async function memberRunPresentation() {
   return { query: sql`SELECT r.id,r.actor,r.provider,r.operation_key,r.status,r.created_at,r.step_version,r.generation,r.step_key,
     receipt.status AS receipt_status,origin.id AS origin_run_id,child.id AS continuation_run_id,
     CASE WHEN r.operation_key IN ('redfox.image.generate','redfox.image.query') THEN 'images'
-      WHEN r.operation_key IN ('redfox.video.generate','redfox.video.query') THEN 'videos'
+      WHEN r.operation_key IN ('redfox.video.generate','redfox.video.query','aliyun.wan.animate-mix.generate','aliyun.wan.animate-mix.query') THEN 'videos'
       WHEN r.operation_key IN ('redfox.ai_search.submit','redfox.ai_search.query') THEN 'ai-search'
       WHEN r.operation_key IN ('redfox.transcript.submit','redfox.transcript.query') THEN 'transcriptions'
       WHEN r.operation_key IN ('redfox.xhs_comments.submit','redfox.xhs_comments.query') THEN 'xhs-comments'
@@ -61,6 +61,7 @@ export async function memberRunPresentation() {
     COALESCE(${sql.json(labels)}::jsonb->>(effective.input->>'operationId'),
       CASE WHEN r.operation_key='redfox.x.account' THEN 'X 账号查询' WHEN r.operation_key='redfox.x.detail' THEN 'X 帖子详情'
         WHEN r.operation_key IN ('redfox.image.generate','redfox.image.query') THEN COALESCE(${sql.json(modelLabels)}::jsonb->>(p->>'model'),'Redfox GPT-Image-2') || ' 图片创作'
+        WHEN r.operation_key IN ('aliyun.wan.animate-mix.generate','aliyun.wan.animate-mix.query') THEN '万相 视频复刻'
         WHEN r.operation_key IN ('redfox.video.generate','redfox.video.query') THEN 'Seedance 视频创作'
         WHEN r.operation_key IN ('redfox.ai_search.submit','redfox.ai_search.query') THEN COALESCE(${sql.json(engineLabels)}::jsonb->>(p->>'engine'),'AI') || ' 搜索'
         WHEN r.operation_key IN ('redfox.transcript.submit','redfox.transcript.query') THEN '音视频转文字'

@@ -27,8 +27,9 @@ export const operationStatus: Record<string, string> = { active: "进行中", wa
 export const operationAction: Record<string, string> = { "view-results": "查看结果", "review-unknown": "核对未知回执", "review-or-resume": "核对后恢复或放弃", "local-recovery": "等待本地恢复已收响应", "wait-for-job": "等待队列执行", "wait-for-recovery": "等待恢复调度" };
 export function operationEnded(status: string) { return status === "completed" || status === "failed"; }
 
-export const operationProviderLabel = (provider: string) => provider === "local" ? "本地保存" : provider;
+export const operationProviderLabel = (provider: string) => provider === "local" ? "本地保存" : provider === "aliyun" ? "阿里云万相" : provider;
 export const operationLabel: Record<string, string> = {
+  "aliyun.wan.animate-mix.generate": "视频复刻", "aliyun.wan.animate-mix.query": "继续视频复刻原任务",
   "subscription.video.download": "订阅视频保存",
   "agentkey.x.search": "AgentKey X 帖子搜索",
   "agentkey.x.account_posts": "AgentKey X 账号帖子",

@@ -100,7 +100,7 @@ async function checkBudget(tx: Db, service: string): Promise<void> {
   const [budget] = await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`
     SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`;
   if (!budget) {
-    if (service.startsWith("redfox.") || service.startsWith("agentkey.")) throw new BudgetExceededError(service, "unconfigured", 3600);
+    if (service.startsWith("redfox.") || service.startsWith("agentkey.") || service.startsWith("aliyun.wan.")) throw new BudgetExceededError(service, "unconfigured", 3600);
     return; // Existing providers retain their missing-row semantics.
   }
   // Every request sent counts, retries of the same logical request included.

@@ -1,3 +1,6 @@
+import { AssetError } from "@aihot/backend/operations/assets";
+import { createWanGeneration } from "@aihot/backend/providers/aliyun/wan";
+import { wanOptions } from "@aihot/backend/providers/aliyun/wan-contract";
 import { platformToolCatalog } from "@aihot/backend/providers/redfox/catalog";
 import { createAgentKeyQuery } from "@aihot/backend/providers/agentkey/queries";
 import { importXDetailResult } from "@aihot/backend/providers/redfox/import-x-detail";
@@ -39,6 +42,8 @@ export function registerAdminRedfox(app: FastifyInstance) {
   app.get("/api/admin/redfox/xiaohongshu/comments/options",adminHandler(async()=>xhsCommentOptions()));
   app.post("/api/admin/redfox/xiaohongshu/comments",adminHandler(async(req,reply,admin)=>{const run=await createXhsComments(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.post("/api/admin/redfox/xiaohongshu/comments/query",adminHandler(async(req,reply,admin)=>{const run=await createXhsCommentQuery(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
+  app.get("/api/admin/aliyun/videos/options",adminHandler(async()=>wanOptions()));
+  app.post("/api/admin/aliyun/videos",adminHandler(async(req,reply,admin)=>{try { const run=await createWanGeneration(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status}); } catch (error) { if (error instanceof AssetError) return sendProblem(req,reply,{status:error.statusCode,code:error.statusCode === 409 ? "conflict" : "invalid_request",detail:error.message}); throw error; }}));
   app.get("/api/admin/redfox/videos/options",adminHandler(async()=>videoOptions()));
   app.post("/api/admin/redfox/videos",adminHandler(async(req,reply,admin)=>{const run=await createVideoGeneration(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.post("/api/admin/redfox/videos/query",adminHandler(async(req,reply,admin)=>{const run=await createVideoQuery(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));

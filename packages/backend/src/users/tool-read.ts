@@ -34,7 +34,7 @@ export async function userToolDetail(userId: number, id: number, raw: unknown = 
     actions.push("abandon");
   }
   const recoveryKind = !child && charge && !["released", "settled"].includes(charge.state) && ["needs_review", "stopped"].includes(row.status) && row.step_key.endsWith(".poll") && !["pending", "unknown"].includes(row.receipt_status ?? "")
-    ? (Object.entries(recoveryKeys).find(([, operationKey]) => operationKey === row.operation_key)?.[0] as ToolRunDetail["recoveryKind"] ?? null) : null;
+    ? (Object.entries(recoveryKeys).find(([, operationKey]) => operationKey === row.operation_key || operationKey === "redfox.video.generate" && row.operation_key === "aliyun.wan.animate-mix.generate")?.[0] as ToolRunDetail["recoveryKind"] ?? null) : null;
   const messages: Record<ToolRunRow["status"], string> = {
     active: "任务已受理，正在处理。可在此查看进度与结果。", waiting: "任务正在等待供应商结果、执行条件或站点预算；已有积分占用保留。",
     needs_review: row.receipt_status === "unknown" ? "供应商请求结果未知，请联系管理员核对；请勿重新提交相同任务。" : "任务暂未完成，需要核对或恢复。已保存的结果仍可查看。",

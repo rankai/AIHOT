@@ -1,3 +1,5 @@
+import { WanInput, WAN_GENERATE, WAN_MODEL } from "../providers/aliyun/wan-contract.ts";
+import { wanMedia } from "../providers/aliyun/wan-media.ts";
 import { z } from "zod";
 import type { ToolCreditIntent, ToolCreditKind } from "@aihot/contracts/credits";
 import { sql, type Db } from "../db.ts";
@@ -29,7 +31,7 @@ export const recoveryKeys = {
 /** A task ID is never accepted from the browser. Only the owner's persisted submission is usable. */
 export async function recoveryInput(actor: string, kind: keyof typeof recoveryKeys, id: number) {
   const [run] = await sql`SELECT r.*,p.status AS receipt_status FROM operation_runs r LEFT JOIN receipts p ON p.id=r.current_receipt_id
-    WHERE r.id=${id} AND r.actor=${actor} AND r.operation_key=${recoveryKeys[kind]}`;
+    WHERE r.id=${id} AND r.actor=${actor} AND (r.operation_key=${recoveryKeys[kind]} OR (${kind} = 'videos/query' AND r.operation_key=${WAN_GENERATE}))`;
   if (!run) throw missing();
   if (!["stopped", "needs_review"].includes(run.status) || !run.step_key.endsWith(".poll") || ["pending", "unknown"].includes(run.receipt_status)) {
     throw new AccountError(409, "conflict", "此任务不能另行续查，请先查看现有结果或由管理员核对；结果保存失败请恢复原任务");
@@ -48,6 +50,9 @@ export async function recoveryInput(actor: string, kind: keyof typeof recoveryKe
     metrics.tier = "resolution" in parsed ? parsed.resolution : "metadata" in parsed ? parsed.metadata.resolution : parsed.size;
     metrics.imageCount = "n" in parsed ? parsed.n : "sequentialImageGenerationOptions" in parsed ? parsed.sequentialImageGenerationOptions?.maxImages ?? 1 : 1;
     metrics.referenceCount = parsed.fileKeys.length;
+  } else if (kind === "videos/query" && run.provider === "aliyun") {
+    const parsed = WanInput.parse(parameters); metrics.provider = "aliyun"; metrics.model = WAN_MODEL; metrics.tier = parsed.mode; metrics.videoSeconds = run.input.media.videoSeconds; metrics.referenceCount = 2;
+    return { commandInput: { provider: "aliyun", runId: id }, metrics };
   } else if (kind === "videos/query") {
     const parsed = VideoInput.parse(parameters); metrics.model = "seedance"; metrics.tier = parsed.resolution; metrics.videoSeconds = parsed.duration;
     metrics.referenceCount = new Set(parsed.imageWithRoles.map(ref => ref.fileKey)).size;
@@ -62,7 +67,7 @@ export async function normalizeToolInput(actor: string, rawKind: unknown, raw: u
   if (kind in recoveryKeys) {
     const { runId } = z.object({ runId: ToolId }).strict().parse(raw);
     const { commandInput, metrics } = await recoveryInput(actor, kind as keyof typeof recoveryKeys, runId);
-    return { intent: { ...metrics, kind, provider: "redfox", input: { runId, ...commandInput }, recoveryRunId: runId }, commandInput };
+    return { intent: { ...metrics, kind, provider: metrics.provider ?? "redfox", input: { runId, ...commandInput }, recoveryRunId: runId }, commandInput };
   }
   let input: Record<string, unknown>, provider = "redfox", model: string | undefined, tier: string | undefined;
   let imageCount: number | undefined, videoSeconds: number | undefined, referenceCount: number | undefined;
@@ -103,6 +108,10 @@ export async function normalizeToolInput(actor: string, rawKind: unknown, raw: u
       break;
     }
     case "videos": {
+      if (typeof raw === "object" && raw !== null && "provider" in raw && raw.provider === "aliyun") {
+        const media = await wanMedia(raw, actor), parameters = media.input;
+        return { intent: { kind, provider: "aliyun", model: WAN_MODEL, tier: parameters.mode, videoSeconds: media.videoSeconds, referenceCount: 2, input: { ...parameters, media: { facts: media.facts, portraitHash: media.portraitHash, videoHash: media.videoHash } } }, commandInput: parameters };
+      }
       const parsed = VideoInput.parse(raw); input = parsed; model = "seedance"; tier = parsed.resolution;
       videoSeconds = parsed.duration; referenceCount = new Set(parsed.imageWithRoles.map(ref => ref.fileKey)).size;
       for (const reference of parsed.imageWithRoles) {

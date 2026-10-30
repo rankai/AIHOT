@@ -61,7 +61,7 @@ export async function createRun(tx: Tx, command: {
     const [used] = await tx`SELECT
       (SELECT count(*)::int FROM operation_results WHERE run_id=${parent.id} AND item_key LIKE 'poll:%' AND kind IN ('image_task','video_task','ai_search_task','ai_search_answer','transcription_task','transcription','xhs_comment_task')) AS polls,
       (SELECT count(*)::int FROM receipt_attempts WHERE receipt_id IN (SELECT receipt_id FROM operation_results WHERE run_id=${parent.id} AND receipt_id IS NOT NULL UNION SELECT current_receipt_id FROM operation_runs WHERE id=${parent.id} AND current_receipt_id IS NOT NULL)) AS attempts`;
-    const polls = Number(parent.limits.polls) - Number(used!.polls);
+    const polls = Number(parent.limits.polls) - Math.max(Number(used!.polls), parent.provider === "aliyun" ? Number(parent.progress.pollAttempts ?? 0) : 0);
     const externalAttempts = Number(parent.limits.externalAttempts) - Math.max(Number(used!.attempts), Number(parent.progress.externalAttempts ?? 0));
     if (!Number.isSafeInteger(polls) || polls <= 0 || !Number.isSafeInteger(externalAttempts) || externalAttempts <= 0) throw new StaleOperationError("原任务的总查询次数已用尽，请联系管理员核对");
     limits = { ...limits, polls, externalAttempts, pollDeadlineSeconds: parent.limits.pollDeadlineSeconds };
