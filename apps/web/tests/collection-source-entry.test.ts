@@ -168,7 +168,7 @@ test("source collection entry, legacy redirect, query draft and task return use 
     });
     await t.test("Redfox workspace loader no longer fetches subscription state",async()=>{
       const calls: string[] = [];
-      globalThis.fetch = async input=>{const path=new URL(String(input)).pathname;calls.push(path);return Response.json(path.endsWith("/operations")?[operation]:{});};
+      globalThis.fetch = async input=>{const path=new URL(String(input)).pathname;calls.push(path);return Response.json(path.endsWith("/operations") ? [operation] : path === "/api/admin/redfox/images/options" ? {models:[]} : {});};
       const data = await redfox.loader({request:new Request("http://local.test/admin/data-tools?view=platforms")});
       assert(!calls.includes("/api/admin/redfox/collections"));assert(!("subscriptions" in data));
     });
