@@ -64,7 +64,7 @@ export async function executeRedfoxMpStep(e:Execution,snapshot:RunRow){
   const item=parseWechat(ops.list,envelope.data,params)[p.indices[p.index]!];
   if(!item)throw new RedfoxResponseError("Retained MP item position unavailable");
   checkAuthor(item,input);const workUuid=uuid(item);
-  const detailPaid={...paid,beforeClaim:async(tx:Tx)=>{await paid.beforeClaim!(tx);checkAuthor(item,input);}};
+  const detailPaid={...paid,beforeClaim:async(tx:Tx)=>{const context=await paid.beforeClaim!(tx);checkAuthor(item,input);return context;}};
   const detail=await queryWechat(ops.detail,{workUuid},input.window,detailPaid,"collect"),value=detail.results[0]!;
   checkAuthor(value,input);
   const listedIdentity=item.data.identity as Record<string,string>,detailIdentity=value.data.identity as Record<string,string>;

@@ -1,3 +1,4 @@
+import { knownNonVideoCost } from '../providers/tool-cost-policy.ts';
 import { randomUUID } from 'node:crypto';
 import type { MemberPriceCatalog, MemberPriceOffer } from '@aihot/contracts/membership';
 import type { ToolCreditIntent } from '@aihot/contracts/credits';
@@ -41,7 +42,8 @@ export async function assertMemberCostEligible(intent: ToolCreditIntent): Promis
  const catalog = await memberPriceCatalog();
  const offer = catalog.offers.find(o => o.kind === intent.kind && o.provider === intent.provider && o.model === (intent.model ?? '') && o.tier === (intent.tier ?? ''));
  let eligible = !!offer;
- if (intent.kind === 'images') eligible &&= intent.imageCount === 1 && intent.input.n === 1 && intent.input.resolution === '1k';
+ eligible &&= knownNonVideoCost(intent.kind,intent.input);
+ if (intent.kind === 'images') eligible &&= intent.imageCount === 1;
  if (intent.kind === 'videos' && intent.provider === 'redfox') {
   const refs = intent.input.imageWithRoles;
   eligible &&= intent.videoSeconds === 8 && intent.input.duration === 8 && intent.input.generateAudio === true && intent.referenceCount === 3

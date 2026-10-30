@@ -9,12 +9,17 @@
 import { sql, type Db, type Tx } from "../db.ts";
 import { sha256, stableJson } from "../lib/ids.ts";
 
+export type BudgetScope = "member" | "admin";
+export interface BudgetContext { budgetScope: BudgetScope | null }
+
 export class BudgetExceededError extends Error {
   readonly service: string;
   readonly retryAfterSeconds: number;
-  constructor(service: string, window: string, retryAfterSeconds: number) {
-    super(`Budget for ${service} exhausted (${window})`);
+  readonly scope: BudgetScope | null;
+  constructor(service: string, window: string, retryAfterSeconds: number, scope: BudgetScope | null = null) {
+    super(`Budget for ${service} exhausted (${scope ?? "total"}: ${window})`);
     this.service = service;
+    this.scope = scope;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
@@ -73,7 +78,7 @@ export interface ReceiptResult {
 
 export interface PaidRequestOptions {
   /** Acquire caller business locks before budget/receipt locks. Local writes only. */
-  beforeClaim?: (tx: Tx) => Promise<void>;
+  beforeClaim?: (tx: Tx) => Promise<void | BudgetContext>;
   /** Local writes only. Throwing rolls back the claim and prevents external dispatch. */
   onReceipt?: (tx: Tx, receiptId: number, info: { kind: "call" | "reuse" | "busy" | "unknown" }) => Promise<void>;
 }
@@ -96,11 +101,12 @@ interface ReceiptRow {
   updated_at: Date;
 }
 
-async function checkBudget(tx: Db, service: string): Promise<void> {
-  const [budget] = await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`
-    SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`;
+async function checkBudget(tx: Db, service: string, scope: BudgetScope | null = null): Promise<void> {
+  const [budget] = scope === null
+    ? await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`
+    : await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`SELECT per_minute, per_hour, per_day FROM budget_scopes WHERE service = ${service} AND scope = ${scope}`;
   if (!budget) {
-    if (service.startsWith("redfox.") || service.startsWith("agentkey.") || service.startsWith("aliyun.wan.")) throw new BudgetExceededError(service, "unconfigured", 3600);
+    if (scope !== null || service.startsWith("redfox.") || service.startsWith("agentkey.") || service.startsWith("aliyun.wan.")) throw new BudgetExceededError(service, "unconfigured", 3600, scope);
     return; // Existing providers retain their missing-row semantics.
   }
   // Every request sent counts, retries of the same logical request included.
@@ -110,14 +116,14 @@ async function checkBudget(tx: Db, service: string): Promise<void> {
       count(*) FILTER (WHERE started_at > now() - interval '1 hour') AS hour,
       count(*) AS day
     FROM receipt_attempts
-    WHERE service = ${service} AND origin = 'live' AND started_at > now() - interval '1 day'`;
+    WHERE service = ${service} AND (${scope}::text IS NULL OR budget_scope = ${scope}) AND origin = 'live' AND started_at > now() - interval '1 day'`;
   const c = counts!;
   if (budget.per_minute <= 0 || budget.per_hour <= 0 || budget.per_day <= 0) {
-    throw new BudgetExceededError(service, "stopped", 3600);
+    throw new BudgetExceededError(service, "stopped", 3600, scope);
   }
-  if (c.minute >= budget.per_minute) throw new BudgetExceededError(service, "minute", 60);
-  if (c.hour >= budget.per_hour) throw new BudgetExceededError(service, "hour", 600);
-  if (c.day >= budget.per_day) throw new BudgetExceededError(service, "day", 3600);
+  if (c.minute >= budget.per_minute) throw new BudgetExceededError(service, "minute", 60, scope);
+  if (c.hour >= budget.per_hour) throw new BudgetExceededError(service, "hour", 600, scope);
+  if (c.day >= budget.per_day) throw new BudgetExceededError(service, "day", 3600, scope);
 }
 
 /**
@@ -128,7 +134,9 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
   const logicalKey = logicalKeyFor(req);
 
   const claimed = await sql.begin(async (tx) => {
-    await options.beforeClaim?.(tx);
+    const context = await options.beforeClaim?.(tx);
+    const budgetScope = context?.budgetScope ?? null;
+    if (budgetScope !== null && budgetScope !== "member" && budgetScope !== "admin") throw new Error("Invalid trusted budget scope");
     // Serialise budget checks per service so concurrent workers cannot overshoot.
     await tx`SELECT pg_advisory_xact_lock(hashtext(${"budget:" + req.service}))`;
     const [existing] = await tx<ReceiptRow[]>`
@@ -153,6 +161,7 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
       }
       // failed: the provider did not take the request, or its answer was unusable; a new attempt is allowed.
       await checkBudget(tx, req.service);
+      if (budgetScope !== null) await checkBudget(tx, req.service, budgetScope);
       const [r] = await tx<{ attempts: number }[]>`
         UPDATE receipts SET status = 'pending', attempts = attempts + 1, error = NULL,
           usage = ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : tx`usage`},
@@ -163,17 +172,18 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
           cost_basis = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE cost_basis END,
           received_at = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE received_at END,
           completed_at = CASE WHEN ${!!req.estimatedUsage} THEN NULL ELSE completed_at END, updated_at = now() WHERE id = ${existing.id} RETURNING attempts`;
-      const attemptId = await startAttempt(tx, existing.id, r!.attempts, req);
+      const attemptId = await startAttempt(tx, existing.id, r!.attempts, req, budgetScope);
       await options.onReceipt?.(tx, existing.id, { kind: "call" });
       return { kind: "call" as const, id: existing.id, attemptId, attempt: r!.attempts };
     }
     await checkBudget(tx, req.service);
+    if (budgetScope !== null) await checkBudget(tx, req.service, budgetScope);
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO receipts (logical_key, service, model, purpose, subject, status, request, attempts, usage)
       VALUES (${logicalKey}, ${req.service}, ${req.model ?? null}, ${req.purpose}, ${req.subject ?? null}, 'pending',
               ${tx.json((req.requestSummary ?? {}) as never)}, 1, ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : null})
       RETURNING id`;
-    const attemptId = await startAttempt(tx, row!.id, 1, req);
+    const attemptId = await startAttempt(tx, row!.id, 1, req, budgetScope);
     await options.onReceipt?.(tx, row!.id, { kind: "call" });
     return { kind: "call" as const, id: row!.id, attemptId, attempt: 1 };
   });
@@ -241,9 +251,9 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
   return { receiptId, attempt, response: outcome.response, reused: false };
 }
 
-async function startAttempt(tx: Db, receiptId: number, attempt: number, req: ReceiptRequest): Promise<number> {
+async function startAttempt(tx: Db, receiptId: number, attempt: number, req: ReceiptRequest, budgetScope: BudgetScope | null): Promise<number> {
   const [row] = await tx<{ id: number }[]>`
-    INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status, usage) VALUES (${receiptId}, ${attempt}, ${req.service}, ${req.model ?? null}, 'pending', ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : null})
+    INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status, usage, budget_scope) VALUES (${receiptId}, ${attempt}, ${req.service}, ${req.model ?? null}, 'pending', ${req.estimatedUsage ? tx.json(req.estimatedUsage as never) : null}, ${budgetScope})
     RETURNING id`;
   return row!.id;
 }

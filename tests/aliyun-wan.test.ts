@@ -1,4 +1,4 @@
-import { tag } from './setup.ts';
+import { allowTestBudgetScope, tag } from './setup.ts';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import http from 'node:http';
@@ -47,15 +47,17 @@ const server = http.createServer((req, res) => { const chunks: Buffer[] = []; re
   else res.end(JSON.stringify({ output: { task_id: fault === 'wrong' ? 'other-task' : url.pathname.split('/').at(-1), task_status: status, ...(status === 'SUCCEEDED' ? { results: { video_url: `${process.env.ALIYUN_WAN_TEST_BASE_URL}/output.mp4?Signature=private-output` } } : {}) }, ...(status === 'SUCCEEDED' && fault !== 'no-usage' ? { usage: { video_duration: 3.2, video_ratio: 'standard' } } : {}) }));
 }); });
 const row = async (id: number) => (await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
+let restoreMemberScopes: (() => Promise<void>) | undefined;
 before(async () => {
   execFileSync('ffmpeg', ['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=320x320:rate=15','-t','3.2','-c:v','libx264','-pix_fmt','yuv420p',path.join(dir,'reference.mp4')]);
   video = await readFile(path.join(dir,'reference.mp4')); png = await sharp({create:{width:300,height:300,channels:3,background:'#487aaf'}}).png().toBuffer();
   await new Promise<void>(r => server.listen(0,'127.0.0.1',r)); const base = `http://127.0.0.1:${(server.address() as {port:number}).port}`;
   Object.assign(process.env, { ALIYUN_WAN_TEST_BASE_URL:base, ALIYUN_WAN_OSS_TEST_BASE_URL:base, ALIYUN_WAN_OSS_BUCKET:'wan-test-bucket', ALIYUN_WAN_WORKSPACE_ID:workspace, DASHSCOPE_API_KEY:'synthetic-wan-key', ALIYUN_WAN_OSS_ACCESS_KEY_ID:'synthetic-oss-id', ALIYUN_WAN_OSS_ACCESS_KEY_SECRET:'synthetic-oss-secret', ALIYUN_WAN_CALLS_ENABLED:'true', MODEL_CALLS_ENABLED:'true' });
   config.allowPrivateNetworkFetch=true;
+  const scopedServices=await sql`SELECT service FROM budgets WHERE service LIKE 'aliyun.wan.%'`;restoreMemberScopes=await allowTestBudgetScope(scopedServices.map(row=>row.service),'member');
   await sql`UPDATE budgets SET per_minute=10000,per_hour=100000,per_day=1000000 WHERE service LIKE 'aliyun.wan.%'`;
 });
-after(async () => { for(const id of runs){const r=await row(id); if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'test cleanup'));} await sql`UPDATE budgets SET per_minute=0,per_hour=0,per_day=0 WHERE service LIKE 'aliyun.wan.%'`; await new Promise<void>(r=>server.close(()=>r())); await stopBoss(); await closeDb(); await rm(dir,{recursive:true,force:true}); });
+after(async () => { await restoreMemberScopes?.();for(const id of runs){const r=await row(id); if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'test cleanup'));} await sql`UPDATE budgets SET per_minute=0,per_hour=0,per_day=0 WHERE service LIKE 'aliyun.wan.%'`; await new Promise<void>(r=>server.close(()=>r())); await stopBoss(); await closeDb(); await rm(dir,{recursive:true,force:true}); });
 async function asset(kind:'image'|'video',actor='wan-test',buffer?:Buffer) { const temp=await prepareUpload(50_000_000); try { const content=await writeUpload(Readable.from(buffer??(kind==='image'?png:video)),temp.file,new AbortController().signal,50_000_000); return await publishUpload({actor,key:uploadKey(actor,tag()),file:temp.file,filename:kind==='image'?'portrait.png':'reference.mp4',mime:kind==='image'?'image/png':'video/mp4',...content}); } finally{await temp.release();} }
 async function input(actor='wan-test') {const a=await asset('image',actor), b=await asset('video',actor); return {provider:'aliyun',model:'wan2.2-animate-mix',mode:'wan-std',portraitFileKey:a.key,referenceVideoFileKey:b.key};}
 async function create() {const r=await createWanGeneration(await input(),'wan-test',tag());runs.push(r.id);return r;}
@@ -112,7 +114,8 @@ test('complete OSS → one submit → fresh pending/running polls → private ou
 test('both gates, missing credentials, missing/zero budget prevent dispatch and receipt claim',async()=>{
  const n=calls.length;for(const gate of ['MODEL_CALLS_ENABLED','ALIYUN_WAN_CALLS_ENABLED']){process.env[gate]='false';const r=await create();await job(r.id);assert.equal((await row(r.id)).current_receipt_id,null);process.env[gate]='true';}
  delete process.env.DASHSCOPE_API_KEY;const r=await create();await job(r.id);assert.equal((await row(r.id)).current_receipt_id,null);process.env.DASHSCOPE_API_KEY='synthetic-wan-key';
- for(const missing of [false,true]){if(missing)await sql`DELETE FROM budgets WHERE service='aliyun.wan.media'`;else await sql`UPDATE budgets SET per_minute=0 WHERE service='aliyun.wan.media'`;const run=await create();await job(run.id);assert.equal((await row(run.id)).current_receipt_id,null);await sql`INSERT INTO budgets(service,per_minute,per_hour,per_day) VALUES ('aliyun.wan.media',10000,100000,1000000) ON CONFLICT(service) DO UPDATE SET per_minute=10000`;}
+ const scopedMedia=await sql`SELECT * FROM budget_scopes WHERE service='aliyun.wan.media'`;
+ for(const missing of [false,true]){if(missing){await sql`DELETE FROM budget_scopes WHERE service='aliyun.wan.media'`;await sql`DELETE FROM budgets WHERE service='aliyun.wan.media'`;}else await sql`UPDATE budgets SET per_minute=0 WHERE service='aliyun.wan.media'`;const run=await create();await job(run.id);assert.equal((await row(run.id)).current_receipt_id,null);await sql`INSERT INTO budgets(service,per_minute,per_hour,per_day) VALUES ('aliyun.wan.media',10000,100000,1000000) ON CONFLICT(service) DO UPDATE SET per_minute=10000`;if(missing&&scopedMedia.length)await sql`INSERT INTO budget_scopes ${sql(scopedMedia)}`;}
  assert.equal(calls.length,n);
 });
 test('submit unknown is never automatically released or resubmitted; poll unknown has one 30-minute recovery',async()=>{

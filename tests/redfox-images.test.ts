@@ -1,4 +1,4 @@
-import {tag} from "./setup.ts";
+import {allowTestBudgetScope,tag} from "./setup.ts";
 import assert from "node:assert/strict";
 import {before,after,test} from "node:test";
 import http from "node:http";
@@ -147,10 +147,10 @@ test("budget and cumulative attempt limit roll back new dispatch; image APIs kee
   try{
     config.devAdmin=null;assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:input(),headers:{"idempotency-key":tag()}})).statusCode,401);
     config.devAdmin={displayName:"Image test"};assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:input(),headers:{"idempotency-key":tag()}})).statusCode,403);
-    const headers={"idempotency-key":tag(),"x-csrf-token":"dev"};const one=await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:input(),headers});assert.equal(one.statusCode,202);runs.push(one.json().runId);
+    const headers={"idempotency-key":tag(),"x-csrf-token":"dev"};assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:input(),headers:{...headers,"idempotency-key":tag()}})).statusCode,409);const one=await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:{...input(),resolution:"1k"},headers});assert.equal(one.statusCode,202);runs.push(one.json().runId);
     assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:{...input(),n:2},headers})).statusCode,409);
     assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:{...input(),n:5},headers:{...headers,"idempotency-key":tag()}})).statusCode,400);
-    assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:input([`uploads/redfox/${"9".repeat(64)}`]),headers:{...headers,"idempotency-key":tag()}})).statusCode,409);
+    assert.equal((await app.inject({method:"POST",url:"/api/admin/redfox/images",payload:{...input([`uploads/redfox/${"9".repeat(64)}`]),resolution:"1k"},headers:{...headers,"idempotency-key":tag()}})).statusCode,409);
     assert.equal((await app.inject({url:"/api/admin/redfox/images/options"})).statusCode,200);assert.equal(submitted+polled+uploaded,before);
     await sql`UPDATE budgets SET per_minute=0 WHERE service='redfox.image'`;await runJob(one.json().runId);assert.equal((await row(one.json().runId)).current_receipt_id,null);assert.equal(submitted+polled+uploaded,before);
     const limited=await createImageQuery({taskId:tag()},"test",tag());runs.push(limited.id);await sql`UPDATE operation_runs SET progress=progress||'{"externalAttempts":1}'::jsonb,limits=limits||'{"externalAttempts":1,"polls":2,"pollDeadlineSeconds":120}'::jsonb WHERE id=${limited.id}`;await runJob(limited.id);
@@ -171,4 +171,17 @@ test("recovery keyset advances past a full batch of future waiting image tasks",
     const [cursor]=await sql`SELECT value FROM settings WHERE key='operations.recovery-cursor'`;assert.equal(cursor!.value,rows[199]!.id);
     await recoverOperations();assert.ok((await row(last.id)).job_id);
   }finally{await sql`DELETE FROM operation_runs WHERE actor=${marker}`;if(prior)await sql`UPDATE settings SET value=${sql.json(prior.value)} WHERE key='operations.recovery-cursor'`;else await sql`DELETE FROM settings WHERE key='operations.recovery-cursor'`;}
+});
+
+test("real admin actor reaches local image delivery with admin-scoped attempts",async()=>{
+ const restore=await allowTestBudgetScope(['redfox.image','redfox.poll'],'admin');
+ const oldCompleted=completedPoll,oldMissing=missingImages;completedPoll=true;missingImages=false;
+ try {
+  const r=await createImageGeneration({...input(),resolution:'1k'},'admin:4242',tag());runs.push(r.id);
+  await runJob(r.id);await runJob(r.id,true);await runJob(r.id);
+  assert.equal((await row(r.id)).status,'completed');
+  const attempts=await sql`SELECT DISTINCT a.id,a.budget_scope FROM receipt_attempts a JOIN operation_results z ON z.receipt_id=a.receipt_id WHERE z.run_id=${r.id}`;
+  assert.ok(attempts.length>=2);assert.ok(attempts.every(a=>a.budget_scope==='admin'));
+  assert.equal((await sql`SELECT * FROM member_credit_charges WHERE root_run_id=${r.id}`).length,0);
+ }finally{completedPoll=oldCompleted;missingImages=oldMissing;await restore();}
 });

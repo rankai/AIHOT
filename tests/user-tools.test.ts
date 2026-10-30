@@ -1,4 +1,4 @@
-import { assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
+import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -28,11 +28,13 @@ test("member tools keep task, asset, quote and execution ownership through the r
   assertConfiguredTestDatabase(db.name, db.port);
   const supplier = await stub(() => ({ code: 2000, data: { userId: "99123456789", username: screenName, displayName: "Synthetic account", secret: "SENSITIVE_RAW_SENTINEL" } }));
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+  let restoreScope: (() => Promise<void>) | undefined;
   let savedBudget: { per_minute: number; per_hour: number; per_day: number } | undefined;
   try {
     config.devAdmin = null; config.allowPrivateNetworkFetch = true;
     process.env.REDFOX_TEST_BASE_URL = supplier.url; process.env.REDFOX_API_KEY = "synthetic-member-tools-key";
     process.env.REDFOX_CALLS_ENABLED = "true"; process.env.MODEL_CALLS_ENABLED = "false";
+    restoreScope = await allowTestBudgetScope(["redfox.query"],"member");
     [savedBudget] = await sql`SELECT per_minute,per_hour,per_day FROM budgets WHERE service='redfox.query'`;
     assert(savedBudget, "The migrated test database must contain the redfox.query budget");
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;
@@ -111,6 +113,10 @@ test("member tools keep task, asset, quote and execution ownership through the r
       assert.equal(done.statusCode, 200, done.body); assert.equal(done.json().status, "completed", done.body);
       assert.equal(done.json().charge.state, "settled"); assert.equal(done.json().charge.consumed, 7);
       assert.equal(done.json().results[0].details.username, screenName);
+      const attempts = await sql`SELECT a.budget_scope FROM receipt_attempts a
+        WHERE a.receipt_id IN (SELECT receipt_id FROM operation_results WHERE run_id=${runId})`;
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0].budget_scope, "member");
       assert(!done.body.includes("SENSITIVE_RAW_SENTINEL")); assert(!done.body.includes("receiptId")); assert(!done.body.includes("command_key"));
       const [finished] = await sql`SELECT * FROM operation_runs WHERE id=${runId}`;
       await executeOperationStep(runId, finished.step_version, finished.job_id ?? run.job_id);
@@ -254,6 +260,7 @@ test("member tools keep task, asset, quote and execution ownership through the r
   } finally {
     // Unique fixtures remain in this disposable database: their ledger and audit history are append-only.
     try {
+      await restoreScope?.();
       if (savedBudget) await sql`UPDATE budgets SET per_minute=${savedBudget.per_minute},per_hour=${savedBudget.per_hour},per_day=${savedBudget.per_day} WHERE service='redfox.query'`;
     } finally {
       config.devAdmin = previousAdmin; config.allowPrivateNetworkFetch = previousPrivate;

@@ -1,3 +1,4 @@
+import { assertKnownNonVideoCost, isAdminToolActor } from '../tool-cost-policy.ts';
 import { lockAssetInputs } from "../../operations/assets.ts";
 import type { Tx } from "../../db.ts";
 import { sha256, stableJson } from "../../lib/ids.ts";
@@ -151,10 +152,16 @@ export async function claimRun(tx: Tx, expected: Execution, jobId: string): Prom
 
 /** Runs in paidRequest's placeholder/reuse transaction, before any external request. */
 export function receiptOptions(execution: Execution): PaidRequestOptions {
-  return { beforeClaim: async (tx) => { await requireExecution(tx, execution); }, onReceipt: async (tx, receiptId) => {
+  return { beforeClaim: async (tx) => { const run = await requireExecution(tx, execution);
+    return { budgetScope: /^user:[1-9][0-9]*$/.test(run.actor) ? "member" as const : /^(admin|dev):.+$/.test(run.actor) ? "admin" as const : null };
+  }, onReceipt: async (tx, receiptId, info) => {
     // beforeClaim owns the business locks in this same transaction.
     const [run] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE id = ${execution.runId}`;
     if (!run) throw new StaleOperationError("Operation not found");
+    if (info.kind === "call" && isAdminToolActor(run.actor)) {
+      if (run.operation_key === "redfox.image.generate" && ["redfox.image.upload","redfox.image.submit"].includes(run.step_key)) assertKnownNonVideoCost("images",run.input.parameters as Record<string,unknown>);
+      if (run.operation_key === "redfox.xhs_comments.submit" && run.step_key === "redfox.xhs_comments.submit") assertKnownNonVideoCost("xhs-comments",run.input.parameters as Record<string,unknown>);
+    }
     if (run.current_receipt_id !== null && run.current_receipt_id !== receiptId) throw new Error("Consume or retain current receipt before replacing it");
     await tx`UPDATE operation_runs SET current_receipt_id = ${receiptId}, updated_at = now() WHERE id = ${run.id}`;
   } };

@@ -14,7 +14,7 @@ import { contentChain, detachFromFact, mergeStories, overrideFields, rerun, sear
 import { banSource, eraseFeedback, feedbackScreenshot, listFeedback, unbanSource, updateFeedback } from "@aihot/backend/admin/feedback";
 import { listMonitorEvents, listMonitorPosts, relinkPost, resolveMonitorPost, reviewReceipt, setWithdrawn, updateMonitorEvent } from "@aihot/backend/admin/monitor";
 import { releaseReceipt, requeueFailedArticles, resolveDelivery, runsOverview } from "@aihot/backend/admin/runs";
-import { listBudgets, listTargets, replaceContactQr, setTargetEnabled, updateBudget } from "@aihot/backend/admin/settings";
+import { listBudgets, listBudgetScopes, updateBudgetScope, listTargets, replaceContactQr, setTargetEnabled, updateBudget } from "@aihot/backend/admin/settings";
 import { createSource, fetchNow, listSources, previewSource, sourceDetail, updateSource } from "@aihot/backend/admin/sources";
 import { sql } from "@aihot/backend/db";
 import { loadContact } from "@aihot/backend/site/contact";
@@ -139,7 +139,7 @@ export function registerAdmin(app: FastifyInstance) {
   app.post("/api/admin/monitor/posts/:id/resolve", adminHandler(async (req, reply, admin) => orNotFound(req, reply, await resolveMonitorPost(param(req, "id"), body(req) as never, actorOf(admin)))));
 
   // Settings
-  app.get("/api/admin/settings", adminHandler(async () => ({ contact: await loadContact(), targets: await listTargets(), budgets: await listBudgets() })));
+  app.get("/api/admin/settings", adminHandler(async () => ({ contact: await loadContact(), targets: await listTargets(), budgets: await listBudgets(), budgetScopes: await listBudgetScopes() })));
   app.get("/api/admin/settings/presentation", adminHandler(async () => loadPresentationSettings()));
   app.put("/api/admin/settings/presentation", adminHandler(async (req, _reply, admin) => savePresentation(req.body, actorOf(admin))));
   app.post("/api/admin/settings/contact-qr", adminHandler(async (req, _reply, admin) => {
@@ -150,6 +150,7 @@ export function registerAdmin(app: FastifyInstance) {
     const b = body<{ enabled: boolean; reason: string }>(req);
     return orNotFound(req, reply, await setTargetEnabled(param(req, "key"), !!b.enabled, b.reason, actorOf(admin)));
   }));
+  app.put("/api/admin/budgets/:service/scopes/:scope", adminHandler(async (req, _reply, admin) => updateBudgetScope(param(req,"service"),param(req,"scope"),req.body,actorOf(admin))));
   app.put("/api/admin/budgets/:service", adminHandler(async (req, _reply, admin) => updateBudget(param(req, "service"), body(req) as never, actorOf(admin))));
 
 
