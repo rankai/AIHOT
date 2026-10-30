@@ -92,7 +92,7 @@ test('member video continuation preserves required last frame and settles only f
   const unique=tag(),prompt=`Continuation ${unique}`;
   const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Video recovery','synthetic') RETURNING id`;
   await grantCredits(user.id,{amount:30,reason:'Recovery test'},'test',tag());
-  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
+  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt,duration:8,generateAudio:true},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
   const submit=async(kind:string,value:unknown)=>{const request={kind,input:value},q=await quoteUserTool(user.id,request);const r=await submitUserTool(user.id,kind,{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);return r.runId;};
   const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
   const root=await submit('videos',{...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true});for(let i=0;i<4;i++)await job(root);
@@ -119,7 +119,7 @@ test('observed queued and in_progress keep one member generation polling until d
  const unique=tag(),prompt=`Pending alias ${unique}`;
  const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Polling test','synthetic') RETURNING id`;
  await grantCredits(user.id,{amount:30,reason:'Polling regression'},'test',tag());
- await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Polling regression'},'test');
+ await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt,duration:8,generateAudio:true},baseCredits:9,enabled:true,reason:'Polling regression'},'test');
  const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
  const value={...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true},q=await quoteUserTool(user.id,{kind:'videos',input:value});
  const r=await submitUserTool(user.id,'videos',{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);
