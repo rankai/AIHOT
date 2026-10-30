@@ -34,6 +34,7 @@ test("admin columns is the sole editor with shared desktop/mobile entry and inde
     const general = {
       contact: { wechatQr: "/synthetic-wechat.png", feishuQr: "/synthetic-feishu.png" },
       targets: [{ key: "synthetic-target", purpose: "content", kind: "feishu", enabled: false, enabled_at: null, config_ref: "synthetic", note: "测试通知", deliveries_7d: 0, last_sent_at: null }],
+      budgetScopes: [],
       budgets: [{ service: "synthetic-service", per_minute: 2, per_hour: 3, per_day: 4, note: null, updated_at: "2026-10-25T03:00:00.000Z", used_day: 0, used_hour: 0 }],
     };
     const admin = { me: { name: "测试管理员", csrf: "synthetic-csrf", dev: false }, counts: {} };

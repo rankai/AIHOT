@@ -4,8 +4,8 @@ import type { OperationResult } from "./operation-types.ts";
 import { researchFactText, researchObject } from "./research-platform-data.ts";
 import type { VideoDraft, VideoOptions, VideoReferences, VideoRole } from "./video-types.ts";
 export const videoRoleLabels: Record<VideoRole, string> = { first_frame: "首帧", last_frame: "末帧", reference_image: "参考图片" };
-export function isVideoOperation(key: string) { return key === "redfox.video.generate" || key === "redfox.video.query"; }
-export function isVideoResult(kind: string, data: Record<string, unknown>) { return ["video_task", "video_reference"].includes(kind) || kind === "video" && data.role === "video" || kind === "image" && data.role === "last_frame"; }
+export function isVideoOperation(key: string) { return ["redfox.video.generate", "redfox.video.query", "aliyun.wan.animate-mix.generate", "aliyun.wan.animate-mix.query"].includes(key); }
+export function isVideoResult(kind: string, data: Record<string, unknown>) { return ["video_task", "video_reference"].includes(kind) || kind === "video" && (data.role === "video" || data.model === "wan2.2-animate-mix") || kind === "image" && data.role === "last_frame"; }
 export function videoDraft(options: VideoOptions): VideoDraft { return { prompt: "", aspectRatio: options.aspectRatios.includes("16:9") ? "16:9" : options.aspectRatios[0] ?? "", duration: options.durationSeconds.min, resolution: options.resolutions.includes("720p") ? "720p" : options.resolutions[0] ?? "", generateAudio: false, returnLastFrame: false, selected: [], roles: [], confirmedUploads: {} }; }
 export function videoFileKeys(roles: ReadonlyArray<{ fileKey: string }>) { return [...new Set(roles.map(row => row.fileKey))]; }
 export function removeVideoAsset<T extends VideoReferences>(draft: T, fileKey: string): T { const confirmedUploads = { ...draft.confirmedUploads }; delete confirmedUploads[fileKey]; return { ...draft, selected: draft.selected.filter(row => row.key !== fileKey), roles: draft.roles.filter(row => row.fileKey !== fileKey), confirmedUploads }; }

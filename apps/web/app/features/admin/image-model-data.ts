@@ -30,7 +30,7 @@ export function selectedImageUploads(model: ImageModel, selected: readonly Priva
 export function imageGenerationBody(model: ImageModel, draft: ImageDraft, options: ImageOptions): Record<string, unknown> {
   const option = imageModelOption(options, model);
   if (!option) throw new Error("请选择可用图片模型。");
-  if (option.generationAvailable === false) throw new Error("Seedream 5.0 Lite 已停止新生成，请重新选择图片模型；已有任务仍可查询。");
+  if (option.generationAvailable === false) throw new Error("当前图片模型/规格暂不开放新生成；请重新选择，已有任务仍可查询。");
   if (!draft.prompt.trim() || draft.prompt.length > 10000) throw new Error("图片描述须非空，最多 10000 字符。");
   if (draft.selected.length > option.maxReferences) throw new Error(`此模型最多 ${option.maxReferences} 张参考图片。`);
   if (new Set(draft.selected.map(asset => asset.key)).size !== draft.selected.length) throw new Error("参考图片不能重复。");

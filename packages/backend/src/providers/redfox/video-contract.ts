@@ -14,8 +14,9 @@ export type VideoParameters=z.infer<typeof VideoInput>;
 export const VIDEO_LIMITS={steps:80,polls:60,retries:3,pollDeadlineSeconds:7200,externalAttempts:100,saveAttempts:12,downloadTimeoutMs:60_000,pollIntervalSeconds:10,maxPollIntervalSeconds:30};
 export const VideoResourceUrl=z.url().refine(v=>{const u=new URL(v);return ["http:","https:"].includes(u.protocol)&&!u.username&&!u.password;});
 export function parseVideoPoll(raw:unknown,taskId:string){
- const data=z.object({taskId:VideoTaskId,status:z.enum(["processing","completed","failed"]),videoUrl:VideoResourceUrl.nullable().optional(),lastFrameUrl:VideoResourceUrl.nullable().optional(),failReason:z.string().nullable().optional(),progress:z.number().int().min(0).max(100).optional(),seed:z.string().nullable().optional(),model:z.string().min(1).optional(),duration:z.number().int().positive().optional(),aspectRatio:z.string().min(1).optional(),resolution:z.string().min(1).optional(),generateAudio:z.boolean().optional(),usage:z.record(z.string(),z.unknown()).nullable().optional()}).passthrough().parse(raw);
+ const data=z.object({taskId:VideoTaskId,status:z.enum(["processing","in_progress","queued","completed","failed"]),videoUrl:VideoResourceUrl.nullable().optional(),lastFrameUrl:VideoResourceUrl.nullable().optional(),failReason:z.string().nullable().optional(),progress:z.number().int().min(0).max(100).optional(),seed:z.string().nullable().optional(),model:z.string().min(1).optional(),duration:z.number().int().positive().optional(),aspectRatio:z.string().min(1).optional(),resolution:z.string().min(1).optional(),generateAudio:z.boolean().optional(),usage:z.record(z.string(),z.unknown()).nullable().optional()}).passthrough().parse(raw);
  if(data.taskId!==taskId)throw new Error("Video task identity mismatch");
  if(data.status==="completed"&&(!data.videoUrl||data.failReason?.trim()))throw new Error("Video completion lacks a video or conflicts with failure");
- return data;
+ // Queued and in-progress generation both keep polling; raw receipts stay unchanged.
+ return {...data,status:data.status==="in_progress"||data.status==="queued"?"processing" as const:data.status};
 }

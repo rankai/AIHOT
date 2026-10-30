@@ -1,3 +1,4 @@
+import { assertKnownNonVideoCost, isAdminToolActor } from '../tool-cost-policy.ts';
 import { lockAssetInputs } from "../../operations/assets.ts";
 import type { Tx } from "../../db.ts";
 import { sha256, stableJson } from "../../lib/ids.ts";
@@ -61,7 +62,7 @@ export async function createRun(tx: Tx, command: {
     const [used] = await tx`SELECT
       (SELECT count(*)::int FROM operation_results WHERE run_id=${parent.id} AND item_key LIKE 'poll:%' AND kind IN ('image_task','video_task','ai_search_task','ai_search_answer','transcription_task','transcription','xhs_comment_task')) AS polls,
       (SELECT count(*)::int FROM receipt_attempts WHERE receipt_id IN (SELECT receipt_id FROM operation_results WHERE run_id=${parent.id} AND receipt_id IS NOT NULL UNION SELECT current_receipt_id FROM operation_runs WHERE id=${parent.id} AND current_receipt_id IS NOT NULL)) AS attempts`;
-    const polls = Number(parent.limits.polls) - Number(used!.polls);
+    const polls = Number(parent.limits.polls) - Math.max(Number(used!.polls), parent.provider === "aliyun" ? Number(parent.progress.pollAttempts ?? 0) : 0);
     const externalAttempts = Number(parent.limits.externalAttempts) - Math.max(Number(used!.attempts), Number(parent.progress.externalAttempts ?? 0));
     if (!Number.isSafeInteger(polls) || polls <= 0 || !Number.isSafeInteger(externalAttempts) || externalAttempts <= 0) throw new StaleOperationError("原任务的总查询次数已用尽，请联系管理员核对");
     limits = { ...limits, polls, externalAttempts, pollDeadlineSeconds: parent.limits.pollDeadlineSeconds };
@@ -151,10 +152,16 @@ export async function claimRun(tx: Tx, expected: Execution, jobId: string): Prom
 
 /** Runs in paidRequest's placeholder/reuse transaction, before any external request. */
 export function receiptOptions(execution: Execution): PaidRequestOptions {
-  return { beforeClaim: async (tx) => { await requireExecution(tx, execution); }, onReceipt: async (tx, receiptId) => {
+  return { beforeClaim: async (tx) => { const run = await requireExecution(tx, execution);
+    return { budgetScope: /^user:[1-9][0-9]*$/.test(run.actor) ? "member" as const : /^(admin|dev):.+$/.test(run.actor) ? "admin" as const : null };
+  }, onReceipt: async (tx, receiptId, info) => {
     // beforeClaim owns the business locks in this same transaction.
     const [run] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE id = ${execution.runId}`;
     if (!run) throw new StaleOperationError("Operation not found");
+    if (info.kind === "call" && isAdminToolActor(run.actor)) {
+      if (run.operation_key === "redfox.image.generate" && ["redfox.image.upload","redfox.image.submit"].includes(run.step_key)) assertKnownNonVideoCost("images",run.input.parameters as Record<string,unknown>);
+      if (run.operation_key === "redfox.xhs_comments.submit" && run.step_key === "redfox.xhs_comments.submit") assertKnownNonVideoCost("xhs-comments",run.input.parameters as Record<string,unknown>);
+    }
     if (run.current_receipt_id !== null && run.current_receipt_id !== receiptId) throw new Error("Consume or retain current receipt before replacing it");
     await tx`UPDATE operation_runs SET current_receipt_id = ${receiptId}, updated_at = now() WHERE id = ${run.id}`;
   } };

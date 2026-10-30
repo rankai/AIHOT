@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import {randomUUID} from 'node:crypto';
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,8 +43,9 @@ const fixtures=[
  {route:bilibiliHotSearchRoute,params:{limit:10},data:{trending:{list:[{keyword:'合成关键词',show_name:'合成显示词',heat_score:3,goto:'search',uri:'bilibili://search'}]}},kind:'hotspot_research'},
 ];
 let budgets:any[]=[];
-before(async()=>{const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);budgets=await sql`SELECT * FROM budgets WHERE service IN ('agentkey.query','agentkey.collect','redfox.query')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('agentkey.query','agentkey.collect','redfox.query')`;});
-after(async()=>{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
+let restoreAdminScope:()=>Promise<void>;
+before(async()=>{restoreAdminScope=await allowTestBudgetScope(['agentkey.query'],'admin');const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);budgets=await sql`SELECT * FROM budgets WHERE service IN ('agentkey.query','agentkey.collect','redfox.query')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('agentkey.query','agentkey.collect','redfox.query')`;});
+after(async()=>{await restoreAdminScope?.();for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
 async function withStub(f:{route:typeof fixtures[number]['route'];data:unknown},fn:(calls:any[])=>Promise<void>){
  const calls:any[]=[];const server=await stub(async(_hit,req)=>{const q=JSON.parse(req.body);if(q.method?.startsWith('notifications/'))return {};if(q.method==='initialize')return {jsonrpc:'2.0',id:q.id,result:{protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fake',version:'1'}}};calls.push(q.params.arguments);const data=typeof f.data==='function'?await f.data(q.params.arguments):f.data;return {jsonrpc:'2.0',id:q.id,result:{content:[],structuredContent:{...response(data,f.route===bilibiliRelationRoute).envelope,credits_charged:.2}}};});
  const previous={...process.env};Object.assign(process.env,{AGENTKEY_API_KEY:'fake-bilibili-test-key',AGENTKEY_MCP_URL:server.url,AGENTKEY_CALLS_ENABLED:'true',COLLECT_ENABLED:'false',REDFOX_CALLS_ENABLED:'false'});

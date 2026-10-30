@@ -44,6 +44,10 @@ jobs:
 
       - name: Install
         run: npm ci --no-audit --no-fund
+      - name: Install media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Typecheck
         run: npm run typecheck
       - name: Build web

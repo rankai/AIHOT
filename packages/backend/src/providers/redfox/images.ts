@@ -1,3 +1,4 @@
+import { assertKnownNonVideoCost, isAdminToolActor } from '../tool-cost-policy.ts';
 import type { ToolAuthorization } from "../../users/credits.ts";
 import {assertGenerationReference,confirmMediaUpload,uploadMediaReference} from "./media-upload.ts";
 import {OutputFormat,OptimizePromptMode,SequentialMode,MAX_GROUP_IMAGES,GeminiResolution} from "./image-models.ts";
@@ -32,6 +33,7 @@ async function imageCommand(parameters:Record<string,unknown>,actor:string,key:u
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
+    if(!query && isAdminToolActor(actor))assertKnownNonVideoCost("images",parameters);
     if(!query)assertImageGenerationAvailable(imageModelOf(parameters));
     const fileKeys=(parameters.fileKeys??[]) as string[];
     await lockMemberAdmission(tx,actor);

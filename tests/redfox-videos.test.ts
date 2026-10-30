@@ -1,4 +1,4 @@
-import {tag} from './setup.ts';
+import {tag,allowTestBudgetScope} from './setup.ts';
 import assert from 'node:assert/strict';
 import {before,after,test} from 'node:test';
 import http from 'node:http';
@@ -25,7 +25,7 @@ const server=http.createServer((req,res)=>{const chunks:Buffer[]=[];req.on('data
  if(req.url!.startsWith('/output/')){downloads++;assert.equal(req.headers.redfox_api_key,undefined);if(downloadMode==='disconnect'){res.writeHead(200,{'content-length':99999});res.write(video.subarray(0,12));res.destroy();return;}if(downloadMode==='oversize'){res.writeHead(200,{'content-length':50000001});res.end();return;}res.setHeader('content-type','image/bogus');res.end(req.url!.endsWith('frame')||downloadMode==='fake'?png:video);return;}
  assert.equal(req.method,'POST');assert.equal(req.headers.redfox_api_key,'synthetic-video-key');const raw=Buffer.concat(chunks),type=String(req.headers['content-type']),body=type.startsWith('multipart/')?raw:JSON.parse(raw.toString());calls.push({url:req.url!,body,type});
  if(mode==='unknown'){req.socket.destroy();return;}res.setHeader('content-type','application/json');if(mode==='bad'){res.end('{broken');return;}
- let data:any;if(req.url!.includes('uploadFile'))data={imageUrl:`https://supplier.example.test/reference-${calls.length}`,format:new URL(req.url!,'http://localhost').searchParams.get('format')};else if(req.url!.endsWith('seedanceSubmit'))data={taskId:'generated-task'};else data={taskId:mode==='wrong'?'wrong':body.taskId,status:mode==='pending'?'processing':mode==='failed'?'failed':'completed',progress:mode==='pending'?0:100,seed:null,model:'upstream-model-label',usage:{unknownUnit:0},failReason:mode==='conflict'?'failure':null,...(!['pending','failed'].includes(mode)?{videoUrl:`${process.env.REDFOX_TEST_BASE_URL}/output/video`,lastFrameUrl:lastFrame?`${process.env.REDFOX_TEST_BASE_URL}/output/frame`:null}:{})};
+ let data:any;if(req.url!.includes('uploadFile'))data={imageUrl:`https://supplier.example.test/reference-${calls.length}`,format:new URL(req.url!,'http://localhost').searchParams.get('format')};else if(req.url!.endsWith('seedanceSubmit'))data={taskId:'generated-task'};else data={taskId:mode==='wrong'?'wrong':body.taskId,status:mode==='queued'?'queued':mode==='in_progress'?'in_progress':mode==='pending'?'processing':mode==='failed'?'failed':'completed',progress:['queued','pending'].includes(mode)?0:100,seed:null,model:'upstream-model-label',usage:{unknownUnit:0},failReason:mode==='conflict'?'failure':null,...(!['queued','in_progress','pending','failed'].includes(mode)?{videoUrl:`${process.env.REDFOX_TEST_BASE_URL}/output/video`,lastFrameUrl:lastFrame?`${process.env.REDFOX_TEST_BASE_URL}/output/frame`:null}:{})};
  res.end(JSON.stringify({code:2000,data}));
 });});
 let budgets:any[]=[];
@@ -35,7 +35,7 @@ after(async()=>{for(const id of runs){const r=await row(id);if(!['completed','fa
 const input=(refs:Array<{fileKey:string;role:string;uploadResultId?:number}>=[])=>({prompt:' Synthetic video ',aspectRatio:'adaptive',duration:4,resolution:'720p',generateAudio:false,returnLastFrame:true,imageWithRoles:refs});
 async function create(refs:Parameters<typeof input>[0]=[]){const r=await createVideoGeneration(input(refs),'video-test',tag());runs.push(r.id);return r;}
 async function query(){const r=await createVideoQuery({taskId:' opaque | task '},'test',tag());runs.push(r.id);return r;}
-async function asset(){const temp=await prepareUpload();try{const content=await writeUpload(Readable.from(png),temp.file,new AbortController().signal);return await publishUpload({actor:'test',key:uploadKey('test',tag()),file:temp.file,filename:'ref.png',mime:'image/png',...content});}finally{await temp.release();}}
+async function asset(actor='test'){const temp=await prepareUpload();try{const content=await writeUpload(Readable.from(png),temp.file,new AbortController().signal);return await publishUpload({actor,key:uploadKey(actor,tag()),file:temp.file,filename:'ref.png',mime:'image/png',...content});}finally{await temp.release();}}
 async function job(id:number,due=false){const r=await row(id);if(due){await sql`UPDATE operation_runs SET next_attempt_at=now()-interval '1 second' WHERE id=${id}`;await sql`UPDATE pgboss.job SET start_after=now()-interval '1 second' WHERE id=${r.job_id}`;}await sql`UPDATE pgboss.job SET priority=2000000000 WHERE id=${r.job_id}`;const boss=await getBoss(),jobs=await boss.fetch<{runId:number;stepVersion:number}>(QUEUES.operation,{minPriority:2000000000});assert.equal(jobs.length,1);assert.equal(jobs[0]!.id,r.job_id);await executeOperationStep(id,jobs[0]!.data.stepVersion,jobs[0]!.id);await boss.complete(QUEUES.operation,jobs[0]!.id);}
 async function recover(id:number){await sql`UPDATE operation_runs SET next_attempt_at=CASE WHEN next_attempt_at IS NULL THEN NULL ELSE now()-interval '1 second' END WHERE id=${id}`;const [count]=await sql`SELECT count(*)::int n FROM operation_runs WHERE status IN ('active','waiting')`;for(let i=0;i<Math.ceil(count!.n/200)+3;i++){await recoverOperations();const r=await row(id),[j]=await sql`SELECT state FROM pgboss.job WHERE id=${r.job_id}`;if(j?.state==='created'||j?.state==='retry')return;}assert.fail('video recovery did not enqueue');}
 async function resume(id:number){const r=await row(id);await sql.begin(async tx=>{await resumeRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation});await queueOperationStep(tx,id);});}
@@ -55,7 +55,7 @@ test('role limits and strict commands reject before runs; HTTP options/auth/CSRF
  const {buildApp}=await import('../apps/api/src/app.ts'),app=await buildApp(),old=config.devAdmin,before=calls.length;try{config.devAdmin=null;assert.equal((await app.inject({url:'/api/admin/redfox/videos/options'})).statusCode,401);config.devAdmin={displayName:'Video test'};assert.equal((await app.inject({url:'/api/admin/redfox/videos/options'})).json().roles.reference_image,9);assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/videos',payload:input()})).statusCode,403);const headers={'idempotency-key':tag(),'x-csrf-token':'dev'},payload=input();assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/videos',headers,payload:{...payload,duration:3}})).statusCode,400);const first=await app.inject({method:'POST',url:'/api/admin/redfox/videos',headers,payload});assert.equal(first.statusCode,202);runs.push(first.json().runId);assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/videos',headers,payload})).json().runId,first.json().runId);assert.equal((await app.inject({method:'POST',url:'/api/admin/redfox/videos',headers,payload:{...payload,duration:5}})).statusCode,409);assert.equal(calls.length,before);}finally{config.devAdmin=old;await app.close();}
 });
 test('strict poll preserves zero/null/extra fields, rejects conflicting success and wrong task; failed task is terminal',async()=>{
- const base={taskId:'x',status:'processing',progress:0,seed:null,usage:null,extra:{zero:0}};assert.deepEqual(parseVideoPoll(base,'x'),base);for(const bad of [{...base,taskId:'y'},{...base,status:'unknown'},{...base,status:'completed'},{...base,status:'completed',videoUrl:'https://example.test/v',failReason:'failure'},{...base,status:'completed',videoUrl:'https://secret@example.test/v'}])assert.throws(()=>parseVideoPoll(bad,'x'));
+ const base={taskId:'x',status:'processing',progress:0,seed:null,usage:null,extra:{zero:0}};assert.deepEqual(parseVideoPoll(base,'x'),base);for(const status of ['in_progress','queued']){const raw={...base,status};assert.deepEqual(parseVideoPoll(raw,'x'),base);assert.equal(raw.status,status);assert.throws(()=>parseVideoPoll({...raw,taskId:'other'},'x'));}for(const bad of [{...base,taskId:'y'},{...base,status:'unknown'},{...base,status:'completed'},{...base,status:'completed',videoUrl:'https://example.test/v',failReason:'failure'},{...base,status:'completed',videoUrl:'https://secret@example.test/v'}])assert.throws(()=>parseVideoPoll(bad,'x'));
  mode='failed';const r=await query();await job(r.id);assert.equal((await row(r.id)).status,'failed');mode='ok';
 });
 test('unknown upload/submit remain manual; poll waits thirty minutes and retries the original receipt once',async()=>{
@@ -84,16 +84,18 @@ test('downloaded container bytes choose canonical MIME and filename independentl
  const original=video;lastFrame=false;try{const fixtures=JSON.parse(await readFile(new URL('./fixtures/operation-media.json',import.meta.url),'utf8')).files;for(const [format,mime] of [['webm','video/webm'],['mov','video/quicktime']]){video=Buffer.from(fixtures.find((f:any)=>f.filename===`tiny.${format}`).base64,'base64');const q=await query();await job(q.id);await job(q.id);assert.equal((await row(q.id)).status,'completed');const [file]=await sql`SELECT z.data,f.content_type,f.metadata FROM operation_results z JOIN stored_files f ON f.key=z.file_key WHERE z.run_id=${q.id} AND z.kind='video'`;assert.equal(file!.data.lastFrameMissing,undefined);assert.equal(file!.content_type,mime);assert.equal(file!.metadata.filename,`generated.${format}`);assert.equal(file!.metadata.validation,'type-and-header');}}finally{video=original;lastFrame=true;}
 });
 
-test('member video continuation preserves required last frame and settles only full delivery',async()=>{
+test('member video continuation preserves required last frame and settles only full delivery',async t=>{
+ const restoreScope=await allowTestBudgetScope(['redfox.media','redfox.video','redfox.poll'],'member');t.after(restoreScope);
  const {grantCredits,saveToolPrice,readRunCredits}=await import('@aihot/backend/users/credits');
  const {quoteUserTool,submitUserTool,controlUserTool}=await import('@aihot/backend/users/tools');
  for(const deliveredFrame of [false,true]){
   const unique=tag(),prompt=`Continuation ${unique}`;
   const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Video recovery','synthetic') RETURNING id`;
   await grantCredits(user.id,{amount:30,reason:'Recovery test'},'test',tag());
-  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'720p',parameterMatch:{prompt},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
+  await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt,duration:8,generateAudio:true},baseCredits:9,enabled:true,reason:'Recovery test'},'test');
   const submit=async(kind:string,value:unknown)=>{const request={kind,input:value},q=await quoteUserTool(user.id,request);const r=await submitUserTool(user.id,kind,{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);return r.runId;};
-  const root=await submit('videos',{...input(),prompt});await job(root);
+  const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
+  const root=await submit('videos',{...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true});for(let i=0;i<4;i++)await job(root);
   const stopped=await row(root);await controlUserTool(user.id,root,'stop',{stepVersion:stopped.step_version,generation:stopped.generation,reason:'Continue polling'});
   const child=await submit('videos/query',{runId:root});
   assert.equal((await row(child)).input.deliveryParameters.returnLastFrame,true);
@@ -107,4 +109,28 @@ test('member video continuation preserves required last frame and settles only f
    assert.equal(saved.data.lastFrameMissing,!deliveredFrame);
   }finally{lastFrame=true;}
  }
+});
+
+
+test('observed queued and in_progress keep one member generation polling until delivery and charge once',async t=>{
+ const restoreScope=await allowTestBudgetScope(['redfox.media','redfox.video','redfox.poll'],'member');t.after(restoreScope);
+ const {grantCredits,saveToolPrice,readRunCredits}=await import('@aihot/backend/users/credits');
+ const {quoteUserTool,submitUserTool}=await import('@aihot/backend/users/tools');
+ const unique=tag(),prompt=`Pending alias ${unique}`;
+ const [user]=await sql`INSERT INTO site_users(username,display_name,password_hash) VALUES (${`video-${unique}`},'Polling test','synthetic') RETURNING id`;
+ await grantCredits(user.id,{amount:30,reason:'Polling regression'},'test',tag());
+ await saveToolPrice({kind:'videos',provider:'redfox',model:'seedance',tier:'480p',parameterMatch:{prompt,duration:8,generateAudio:true},baseCredits:9,enabled:true,reason:'Polling regression'},'test');
+ const refs=[];for(let i=0;i<3;i++)refs.push({fileKey:(await asset(`user:${user.id}`)).key,role:'reference_image'});
+ const value={...input(refs),prompt,duration:8,resolution:'480p',generateAudio:true},q=await quoteUserTool(user.id,{kind:'videos',input:value});
+ const r=await submitUserTool(user.id,'videos',{input:value,quoteId:q.quoteId},tag());runs.push(r.runId);
+ const before=calls.length;for(let i=0;i<4;i++)await job(r.runId);
+ try{
+  for(const status of ['queued','in_progress','pending']){mode=status;await job(r.runId,true);assert.equal((await row(r.runId)).status,'waiting');assert.equal((await row(r.runId)).step_key,'redfox.video.poll');assert.equal((await readRunCredits(user.id,r.runId))?.consumed,0);}
+  assert.equal((await row(r.runId)).progress.pollSequence,3);
+  mode='ok';await job(r.runId,true);await job(r.runId);await job(r.runId);
+  assert.equal((await row(r.runId)).status,'completed');assert.equal((await readRunCredits(user.id,r.runId))?.consumed,9);
+  assert.equal(calls.slice(before).filter(call=>call.url.endsWith('seedanceSubmit')).length,1);
+  assert.equal(calls.slice(before).filter(call=>call.url.endsWith('seedanceResult')).length,4);
+  for(const status of ['queued','in_progress']){const [raw]=await sql`SELECT p.response FROM receipts p JOIN operation_results s ON s.receipt_id=p.id WHERE s.run_id=${r.runId} AND p.response::text LIKE ${`%${status}%`} LIMIT 1`;assert.ok(raw);assert.equal(JSON.parse(raw.response.body).data.status,status);}
+ }finally{mode='ok';}
 });

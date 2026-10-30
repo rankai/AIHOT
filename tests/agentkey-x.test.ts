@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import {randomUUID} from 'node:crypto';
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,8 +27,9 @@ const parameters=[{keyword:' ordinary keyword '},{screen_name:'sample'},{tweet_i
 const bodies=[{status:'ok',timeline:[{...tweet,type:'tweet',author:undefined,user_info:author}],next_cursor:'next'}, {status:'ok',timeline:[{...tweet,author:{...author,screen_name:null},screen_name:undefined}],pinned:{...tweet},user:profile,next_cursor:'next'},detail,{...detail,thread:[{...detail,id:'9876543210123456790',conversation_id:tid}],cursor:'next'},profile,{status:'ok',followers:[member],next_cursor:'next',more_users:true},{status:'ok',following:[member],next_cursor:'next',more_users:true},{timeline:[tweet],cursor:'next'},{timeline:[tweet],cursor:'next'},{trends:[{name:'Term',description:null,context:'Context'}]},{status:'ok',members:[member],next_cursor:'next',more_users:true},{status:'ok',members:[member],next_cursor:'unusable'}];
 const response=(body:unknown)=>({httpStatus:200,mcp:{},envelope:{provider:'TikHub',data:{code:200,data:body}}});
 let budgets:any[]=[];
-before(async()=>{const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);budgets=await sql`SELECT * FROM budgets WHERE service='agentkey.query'`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.query'`;});
-after(async()=>{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
+let restoreAdminScope:()=>Promise<void>;
+before(async()=>{restoreAdminScope=await allowTestBudgetScope(['agentkey.query'],'admin');const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);budgets=await sql`SELECT * FROM budgets WHERE service='agentkey.query'`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='agentkey.query'`;});
+after(async()=>{await restoreAdminScope?.();for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await stopBoss();await closeDb();});
 async function withStub(body:unknown,run:(calls:any[])=>Promise<void>){
  const calls:any[]=[];const server=await stub(async(_hit,req)=>{const q=JSON.parse(req.body);if(q.method?.startsWith('notifications/'))return {};if(q.method==='initialize')return {jsonrpc:'2.0',id:q.id,result:{protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'fake',version:'1'}}};calls.push(q.params.arguments);return {jsonrpc:'2.0',id:q.id,result:{content:[],structuredContent:{provider:'TikHub',credits_charged:.2,data:{code:200,data:body}}}};});
  const previous={...process.env};Object.assign(process.env,{AGENTKEY_API_KEY:'fake-x-test-key',AGENTKEY_MCP_URL:server.url,AGENTKEY_CALLS_ENABLED:'true',COLLECT_ENABLED:'false',REDFOX_CALLS_ENABLED:'false'});

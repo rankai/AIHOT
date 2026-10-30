@@ -1,3 +1,4 @@
+import { AdminMembership } from '../account/membership';
 import { useState } from "react";
 import { useAdminAction } from "./action";
 import { Button, Card, Input, Select, Textarea } from "./ui";
@@ -16,7 +17,7 @@ function UserCreditPanel({ userId }: { userId: number }) {
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   return <Card title="用户积分" right={<Button size="sm" disabled={loading || !!pending} onClick={() => void refresh()}>刷新</Button>}>
-    {error && <AccountNotice error message={error} />}
+    <AdminMembership userId={userId} onChanged={refresh}/>{error && <AccountNotice error message={error} />}
     {page ? <CreditBalanceSummary page={page} /> : loading && <p className="text-[13px] text-ink-3">正在读取积分…</p>}
     <form className="my-5 space-y-4 border-y border-line py-5" onSubmit={async event => {
       event.preventDefault(); setNotice(null);

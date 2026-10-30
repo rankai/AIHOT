@@ -54,7 +54,7 @@ test("custom sizes enforce explicit positive integer ratio/pixel caps without in
 });
 test("retired Lite drafts require reselection while old task queries retain the model", () => {
   assert.equal(imageGenerationModels(options).some(row => row.model === "seedreamLite"), false);
-  assert.throws(() => imageGenerationBody("seedreamLite", draft("seedreamLite"), options), /已停止新生成/);
+  assert.throws(() => imageGenerationBody("seedreamLite", draft("seedreamLite"), options), /暂不开放新生成/);
   assert.deepEqual(imageQueryBody("seedreamLite", "old-task", options), { model: "seedreamLite", taskId: "old-task" });
   assert.equal(imageTaskModel({model:"seedreamLite"}, options)?.model, "seedreamLite");
 });

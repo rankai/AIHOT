@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import { tag } from './setup.ts';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
@@ -28,11 +29,12 @@ const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c)
   res.end(JSON.stringify({code:family==='deepseek'?200:2000,data}));
 });});
 let budgets:any[]=[];
-before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='synthetic-ai-search-key';process.env.REDFOX_CALLS_ENABLED='true';process.env.MODEL_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;
+let restoreAdminScope:()=>Promise<void>;
+before(async()=>{restoreAdminScope=await allowTestBudgetScope(['redfox.ai_search', 'redfox.poll'],'admin');await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='synthetic-ai-search-key';process.env.REDFOX_CALLS_ENABLED='true';process.env.MODEL_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;
  budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.ai_search','redfox.poll')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('redfox.ai_search','redfox.poll')`;
 });
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
-after(async()=>{for(const id of runs){const r=await row(id);if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'synthetic cleanup'));}for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+after(async()=>{await restoreAdminScope?.();for(const id of runs){const r=await row(id);if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'synthetic cleanup'));}for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 async function query(){const r=await createAiSearchQuery({family:'kimi',taskId:tag()},'ai-search-test',tag());runs.push(r.id);return r;}
 async function job(id:number,due=false){const r=await row(id);if(due){await sql`UPDATE operation_runs SET next_attempt_at=now()-interval '1 second' WHERE id=${id}`;await sql`UPDATE pgboss.job SET start_after=now()-interval '1 second' WHERE id=${r.job_id}`;}await sql`UPDATE pgboss.job SET priority=2000000000 WHERE id=${r.job_id}`;const boss=await getBoss(),jobs=await boss.fetch<{runId:number;stepVersion:number}>(QUEUES.operation,{minPriority:2000000000});assert.equal(jobs.length,1);assert.equal(jobs[0]!.id,r.job_id);await executeOperationStep(id,jobs[0]!.data.stepVersion,jobs[0]!.id);await boss.complete(QUEUES.operation,jobs[0]!.id);}
 async function missingJob(id:number){const r=await row(id);await sql`UPDATE pgboss.job SET state='completed' WHERE id=${r.job_id}`;await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${id}`;}

@@ -80,3 +80,14 @@ export function gate<T = void>() {
 
 /** A short unique tag for the rows a test creates. */
 export const tag = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+/** Explicit local-stub fixture allocation; restores the prior child caps and never changes total caps. */
+export async function allowTestBudgetScope(services: string[], scope: "member" | "admin") {
+ const { sql } = await import("@aihot/backend/db");
+ const rows = await sql`SELECT current_database() AS name`; assertConfiguredTestDatabase(rows[0]!.name);
+ const before = await sql`SELECT * FROM budget_scopes WHERE service IN ${sql(services)} AND scope=${scope}`;
+ for (const service of services) await sql`INSERT INTO budget_scopes(service,scope,per_minute,per_hour,per_day,note) VALUES (${service},${scope},10000,100000,1000000,'Synthetic local-stub fixture')
+  ON CONFLICT(service,scope) DO UPDATE SET per_minute=EXCLUDED.per_minute,per_hour=EXCLUDED.per_hour,per_day=EXCLUDED.per_day`;
+ return async () => { for (const service of services) { const prior=before.find(row=>row.service===service); if(prior) await sql`UPDATE budget_scopes SET per_minute=${prior.per_minute},per_hour=${prior.per_hour},per_day=${prior.per_day},note=${prior.note} WHERE service=${service} AND scope=${scope}`;
+  else await sql`DELETE FROM budget_scopes WHERE service=${service} AND scope=${scope}`; } };
+}
