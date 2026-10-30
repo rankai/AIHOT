@@ -1,3 +1,4 @@
+import { AccountMembership } from './membership';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { CreditEntry, CreditPage } from "@aihot/contracts/credits";
@@ -65,7 +66,7 @@ export function CreditLedger({ entries, admin = false }: { entries: CreditEntry[
 }
 
 export function AccountCredits({ csrf }: { csrf: string }) {
-  return <AccountCreditPanel key={csrf} />;
+  return <><AccountMembership key={`membership:${csrf}`}/><AccountCreditPanel key={csrf} /></>;
 }
 
 function AccountCreditPanel() {
@@ -73,7 +74,7 @@ function AccountCreditPanel() {
   return <section className="card mb-5 p-5 sm:p-6">
     <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-[16px] font-semibold text-ink">我的积分</h2><Button size="sm" disabled={loading} onClick={() => void refresh()}>刷新</Button></div>
     {error && <AccountNotice error message={error} />}
-    {page ? <><CreditBalanceSummary page={page} /><p className="mb-4 mt-3 text-[12.5px] leading-relaxed text-ink-3">工具提交时占用积分，任务完成后结算。暂不支持充值，需要补充积分请联系管理员。</p><CreditLedger entries={page.entries} />
+    {page ? <><CreditBalanceSummary page={page} /><p className="mb-4 mt-3 text-[12.5px] leading-relaxed text-ink-3">工具提交时占用积分，任务完成后结算。可通过上方月费套餐联系管理员办理线下付款补充积分。</p><CreditLedger entries={page.entries} />
       {page.nextCursor && <div className="mt-4 text-center"><Button size="sm" disabled={loading} onClick={() => void loadMore()}>{loading ? "正在加载…" : "查看更早记录"}</Button></div>}</> : loading && <p role="status" className="text-[13px] text-ink-3">正在读取积分…</p>}
   </section>;
 }

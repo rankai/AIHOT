@@ -1,3 +1,4 @@
+import { ToolSubmit } from './tool-submit';
 import { useRef, useState } from "react";
 import type { ToolAsset } from "@aihot/contracts/user-tools";
 import { assetUploadAccept, assetUploadFile } from "../admin/asset-data";
@@ -8,7 +9,7 @@ import { ToolField as Field } from "./fields";
 import { UploadPicker } from "./generation-references";
 import { TALKING_PORTRAIT_TYPES, talkingVideoBody } from "./talking-video-data";
 
-export function TalkingVideoForm({ options, assets, uploadOptions, uploadAsset, onAssetChange, submit, pending, submitLabel = "查看积分报价" }: { options: VideoOptions; assets: ToolAsset[]; uploadOptions: AssetUploadOptions; uploadAsset: (body: FormData) => Promise<ToolAsset | null>; onAssetChange?: (asset: ToolAsset) => void; submit: (kind: string, body: unknown) => Promise<void>; pending: boolean; submitLabel?: string }) {
+export function TalkingVideoForm({ options, assets, uploadOptions, uploadAsset, onAssetChange, submit, pending, submitLabel = "提交AI口播" }: { options: VideoOptions; assets: ToolAsset[]; uploadOptions: AssetUploadOptions; uploadAsset: (body: FormData) => Promise<ToolAsset | null>; onAssetChange?: (asset: ToolAsset) => void; submit: (kind: string, body: unknown) => Promise<void>; pending: boolean; submitLabel?: string }) {
   const [pictures, setPictures] = useState({ portrait: "", product: "", scene: "" });
   const [uploadTarget, setUploadTarget] = useState<keyof typeof pictures>("portrait");
   const slots = [["portrait", "人物照片"], ["product", "产品参考图（选填）"], ["scene", "场景参考图（选填）"]] as const;
@@ -39,7 +40,7 @@ export function TalkingVideoForm({ options, assets, uploadOptions, uploadAsset, 
       <Field label="图片用途"><Select value={uploadTarget} onChange={event => setUploadTarget(event.target.value as keyof typeof pictures)} disabled={pending || uploading}>{slots.map(([slot, label]) => <option key={slot} value={slot}>{label}</option>)}</Select></Field>
       <Field label="上传参考图片"><input ref={fileInput} type="file" name="referenceImage" required accept={assetUploadAccept(portraitUploads)} disabled={pending || uploading} className="block w-full text-[13px]" /></Field>
       <p className="text-[12px] text-ink-3">PNG、JPEG 或 WebP，最多 {portraitUploads.limits.imageBytes / 1_000_000} MB。本地上传不消耗积分。</p>
-      <Button type="submit" disabled={pending || uploading} busy={uploading}>上传并选中图片</Button>
+      <ToolSubmit selection={{kind:"media-upload",free:true}} type="submit" disabled={pending || uploading} busy={uploading}>上传并选中图片</ToolSubmit>
     </form>
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
     {notice && <p role="status" className="text-[13px] text-ok">{notice}</p>}
@@ -62,7 +63,7 @@ export function TalkingVideoForm({ options, assets, uploadOptions, uploadAsset, 
         <Field label="时长（秒）"><Input name="duration" type="number" required min={options.durationSeconds.min} max={options.durationSeconds.max} defaultValue={options.durationSeconds.min} /></Field>
       </div>
       <p className="text-[12px] leading-relaxed text-ink-3">{options.modelLabel} · 已开启生成音频。图片按人物、产品、场景的顺序作为外观参考；提交生成时，所选图片和脚本会发送至视频服务。请将台词控制在 {options.durationSeconds.min}–{options.durationSeconds.max} 秒内。</p>
-      <Button type="submit" tone="primary" disabled={pending || uploading || !portrait} busy={pending}>{submitLabel}</Button>
+      <ToolSubmit inputFromForm={values => { try { return talkingVideoBody({dialogue:String(values.dialogue ?? ""),actionScript:String(values.actionScript ?? ""),portraitKey:pictures.portrait,productKey:pictures.product,sceneKey:pictures.scene,referenceUploads:uploads,aspectRatio:String(values.aspectRatio),resolution:String(values.resolution),duration:Number(values.duration)},assets,options); } catch { return values; } }} selection={{kind:"videos",input:{generateAudio:true,returnLastFrame:false,imageWithRoles:Object.values(pictures).filter(Boolean).map(fileKey=>({fileKey,role:"reference_image"}))}}} type="submit" tone="primary" disabled={pending || uploading || !portrait} busy={pending}>{submitLabel}</ToolSubmit>
     </fieldset></form>
   </div>;
 }

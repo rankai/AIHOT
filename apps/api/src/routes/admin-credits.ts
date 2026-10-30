@@ -1,3 +1,5 @@
+import { confirmMembershipPayment, getMembership } from '@aihot/backend/users/membership';
+import { applyApprovedMemberPrices, memberPriceCatalog } from '@aihot/backend/users/member-pricing';
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { actorOf } from "@aihot/backend/admin/auth";
@@ -16,6 +18,10 @@ function creditAdminHandler(fn: AdminHandler) {
 }
 
 export function registerAdminCredits(app: FastifyInstance) {
+  app.get('/api/admin/users/:id/membership', creditAdminHandler(async req => getMembership(userId(req.params))));
+  app.post('/api/admin/users/:id/membership', { bodyLimit: 4096 }, creditAdminHandler(async (req, _reply, admin) => confirmMembershipPayment(userId(req.params),req.body,actorOf(admin),req.headers['idempotency-key'])));
+  app.get('/api/admin/member-pricing', creditAdminHandler(async () => memberPriceCatalog(true)));
+  app.post('/api/admin/member-pricing/apply', creditAdminHandler(async (req, _reply, admin) => { z.object({confirm:z.literal(true)}).strict().parse(req.body); return applyApprovedMemberPrices(actorOf(admin)); }));
   app.get("/api/admin/users/:id/credits", creditAdminHandler(async req => getCreditPage(userId(req.params), req.query)));
   app.post("/api/admin/users/:id/credits", { bodyLimit: 4096 }, creditAdminHandler(async (req, _reply, admin) => {
     const id = userId(req.params);

@@ -1,3 +1,4 @@
+import { ToolSubmit } from './tool-submit';
 import { ReplicateVideoForm } from "./replicate-video-form";
 import { useRef, useState } from "react";
 import type { ToolAsset } from "@aihot/contracts/user-tools";
@@ -49,7 +50,7 @@ function ImageDraftForm({ options, model, assets, submit, pending, max }: { opti
     <ReferencePicker assets={assets} selected={selected} max={max} change={keys => setDraft({ ...draft, selected: keys.flatMap(key => { const asset = assets.find(row => row.key === key); return asset ? [privateAsset(asset)] : []; }) })} />
     {model !== "gptImage2" && <UploadPicker assets={assets} selected={selected} values={draft.referenceUploads} change={referenceUploads => setDraft({ ...draft, referenceUploads })} />}
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
-    <Button tone="primary" type="submit" disabled={pending} busy={pending}>查看积分报价</Button>
+    <ToolSubmit selection={{kind:"images",model,input:{prompt:draft.prompt.trim(),resolution:draft.resolution,size:draft.size,n:draft.n,fileKeys:selected}}} tone="primary" type="submit" disabled={pending} busy={pending}>提交图片</ToolSubmit>
   </form>;
 }
 
@@ -59,7 +60,7 @@ export function VideoToolForm(props: { options: VideoOptions; assets: ToolAsset[
   const uploadAsset = (body: FormData) => upload.run<ToolAsset>("/api/tools/assets", body);
   const pending = props.pending || upload.pending;
   return <div className="space-y-5">
-    <VideoModeTabs mode={mode} change={change} idPrefix="user-video" />
+    <p className="text-sm text-ink-3">Seedance 仅开放 8 秒、480p、有声、3 张参考图；其他规格成本待核。万相复刻按输入秒扣分。已有任务恢复不受影响。</p><VideoModeTabs mode={mode} change={change} idPrefix="user-video" />
     {upload.error && <p role="alert" className="text-[13px] text-hot">{upload.error}</p>}
     <div id="user-video-text" role="tabpanel" aria-labelledby="user-video-text-tab" hidden={mode !== "text"}><h2 className="mb-4 text-lg font-semibold">文生视频</h2><GeneralVideoToolForm {...props} mode="text" pending={pending} uploadAsset={uploadAsset} /></div>
     <div id="user-video-image" role="tabpanel" aria-labelledby="user-video-image-tab" hidden={mode !== "image"}><h2 className="mb-4 text-lg font-semibold">图生视频</h2><GeneralVideoToolForm {...props} mode="image" pending={pending} uploadAsset={uploadAsset} /></div>
@@ -87,11 +88,11 @@ function GeneralVideoToolForm({ options, assets, submit, pending, mode, uploadOp
     <div className="grid gap-4 sm:grid-cols-3">
       <Field label="画面比例"><Select name="aspectRatio" defaultValue="16:9">{options.aspectRatios.map(value => <option key={value}>{value}</option>)}</Select></Field>
       <Field label="分辨率"><Select name="resolution">{options.resolutions.map(value => <option key={value}>{value}</option>)}</Select></Field>
-      <Field label="时长（秒）"><Input name="duration" type="number" required min={options.durationSeconds.min} max={options.durationSeconds.max} defaultValue={options.durationSeconds.min} /></Field>
+      <Field label="时长（秒）"><Input name="duration" type="number" required min={options.durationSeconds.min} max={options.durationSeconds.max} defaultValue={8} /></Field>
     </div>
-    <div className="flex flex-wrap gap-5 text-[13px]"><label className="flex items-center gap-2"><input name="generateAudio" type="checkbox" />生成音频</label><label className="flex items-center gap-2"><input name="returnLastFrame" type="checkbox" />同时保存末帧</label></div>
+    <div className="flex flex-wrap gap-5 text-[13px]"><label className="flex items-center gap-2"><input name="generateAudio" type="checkbox" defaultChecked />生成音频</label><label className="flex items-center gap-2"><input name="returnLastFrame" type="checkbox" />同时保存末帧</label></div>
     {mode === "image" && <>
-      <div className="space-y-2 rounded-control border border-dashed border-line-strong p-3"><Field label="上传参考图片"><input ref={fileInput} name="imageUpload" type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-[13px]" /></Field><Button disabled={pending || selected.length >= options.maxReferenceRoles} onClick={async () => {
+      <div className="space-y-2 rounded-control border border-dashed border-line-strong p-3"><Field label="上传参考图片"><input ref={fileInput} name="imageUpload" type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-[13px]" /></Field><ToolSubmit selection={{kind:"media-upload",free:true}} disabled={pending || selected.length >= options.maxReferenceRoles} onClick={async () => {
         const file = fileInput.current?.files?.[0]; if (!file) { setError("请先选择参考图片。"); return; }
         setError(null);
         try {
@@ -99,12 +100,12 @@ function GeneralVideoToolForm({ options, assets, submit, pending, mode, uploadOp
           const asset = await uploadAsset(data);
           if (asset) { onAssetChange(asset); setSelected(previous => [...new Set([...previous, asset.key])]); if (fileInput.current) fileInput.current.value = ""; }
         } catch (error) { setError(error instanceof Error ? error.message : "上传未完成。"); }
-      }}>上传并选中图片</Button><p className="text-[12px] text-ink-3">PNG、JPEG 或 WebP，最多 {options.referenceBytes / 1_000_000} MB。本地上传不消耗积分。</p></div>
+      }}>上传并选中图片</ToolSubmit><p className="text-[12px] text-ink-3">PNG、JPEG 或 WebP，最多 {options.referenceBytes / 1_000_000} MB。本地上传不消耗积分。</p></div>
     <ReferencePicker required assets={assets} selected={selected} max={options.maxReferenceRoles} change={keys => { setSelected(keys); setUploads(previous => previous.filter(row => keys.includes(row.fileKey))); setError(null); }} />
     <UploadPicker assets={assets} selected={selected} values={uploads} change={setUploads} />
     {selected.map(key => <Field key={key} label={`${assets.find(asset => asset.key === key)?.filename ?? "图片"}的用途`}><Select value={roles[key] ?? "reference_image"} onChange={event => setRoles({ ...roles, [key]: event.target.value })}><option value="reference_image">参考图片</option><option value="first_frame">首帧</option><option value="last_frame">末帧</option></Select></Field>)}
     </>}
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
-    <Button tone="primary" type="submit" disabled={pending || mode === "image" && !selected.length} busy={pending}>查看积分报价</Button>
+    <ToolSubmit selection={{kind:"videos",input:{imageWithRoles:(mode === "image" ? selected : []).map(fileKey => ({fileKey,role:roles[fileKey] ?? "reference_image"}))}}} tone="primary" type="submit" disabled={pending || mode === "text" || selected.length !== 3} busy={pending}>{mode === "text" ? "提交文生视频" : "提交图生视频"}</ToolSubmit>
   </fieldset></form>;
 }

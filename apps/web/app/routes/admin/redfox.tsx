@@ -1,3 +1,5 @@
+import type { MemberPriceCatalog } from '@aihot/contracts/membership';
+import { ToolPricingProvider, ToolSubmit } from '../../features/tools/tool-submit';
 import { collectionSubscriptionsHref } from "../../features/admin/collection-subscription-data";
 import { RedfoxCosts } from "../../features/admin/redfox-costs";
 import { redfoxCostDefaults } from "../../features/admin/redfox-cost-data";
@@ -33,7 +35,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const costInterval = redfoxCostDefaults(new Date());
   const after = url.searchParams.get("after");
   const key = url.searchParams.get("reference");
-  const [options, assets, reference, operations, transcriptionOptions, assetUploadOptions, aiSearchOptions, supplierUploadOptions, videoOptions, xhsCommentOptions] = await Promise.all([
+  const [options, assets, reference, operations, transcriptionOptions, assetUploadOptions, aiSearchOptions, supplierUploadOptions, videoOptions, xhsCommentOptions, pricing] = await Promise.all([
     adminGet<ImageOptions>(request, "/api/admin/redfox/images/options"),
     adminGet<AssetPage>(request, `/api/admin/assets${after ? `?after=${encodeURIComponent(after)}` : ""}`),
     key ? adminGet<PrivateAsset>(request, `/api/admin/assets/${encodeURIComponent(key)}`).then(asset => ({ asset, error: null })).catch(() => ({ asset: null, error: "无法读取此参考素材，可能已删除或暂不可用。" })) : Promise.resolve({ asset: null, error: null }),
@@ -44,8 +46,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     adminGet<MediaUploadOptions>(request, "/api/admin/redfox/media/uploads/options"),
     adminGet<VideoOptions>(request, "/api/admin/redfox/videos/options"),
     adminGet<XhsCommentOptions>(request, "/api/admin/redfox/xiaohongshu/comments/options"),
+    adminGet<MemberPriceCatalog>(request, "/api/admin/member-pricing"),
   ]);
-  return { costInterval, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "costs" ? "costs" : url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
+  return { pricing, costInterval, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "costs" ? "costs" : url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
 }
 export const meta: Route.MetaFunction = () => [{ title: `数据工具 · ${SITE.name} 后台` }];
 export default function Redfox({ loaderData }: Route.ComponentProps) {
@@ -60,7 +63,7 @@ export default function Redfox({ loaderData }: Route.ComponentProps) {
   const [accountType, setAccountType] = useState<"screenName" | "restId">("screenName");
   const [account, setAccount] = useState("");
   const [tweetId, setTweetId] = useState("");
-  return <AdminPage title="数据工具" subtitle="查询与创作提交后会自动进入对应执行记录，查看进度与结果；本地素材上传后在私有素材库查看。费用受现有预算控制。定时采集在采集订阅中配置，已有信源的主订阅与公开权限仍在信源详情管理。" actions={<><ButtonLink tone="primary" to="/admin/operations">进度与结果</ButtonLink><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink></>}>
+  return <ToolPricingProvider catalog={loaderData.pricing} admin><AdminPage title="数据工具" subtitle="查询与创作提交后会自动进入对应执行记录，查看进度与结果；本地素材上传后在私有素材库查看。费用受现有预算控制。定时采集在采集订阅中配置，已有信源的主订阅与公开权限仍在信源详情管理。" actions={<><ButtonLink tone="primary" to="/admin/operations">进度与结果</ButtonLink><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink></>}>
     <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区">{[["x", "X 查询"], ["platforms", "平台查询"], ["ai-search", "AI 搜索"], ["images", "图片创作"], ["videos", "视频创作"], ["tools", "辅助工具"], ["assets", "私有素材"], ["costs", "费用与账单"]].map(([key, label]) => <Button key={key} tone={view === key ? "primary" : "secondary"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
     <div hidden={view !== "costs"}><div className="mb-4 flex flex-wrap gap-2"><ButtonLink to="/admin/settings">预算设置</ButtonLink><ButtonLink to="/admin/runs">运行与回执</ButtonLink></div><RedfoxCosts initialInterval={loaderData.costInterval} /></div>
     <div hidden={view !== "ai-search"}><AiSearchForm options={loaderData.aiSearchOptions} initialFamily={loaderData.aiSearchFamily} initialTaskId={loaderData.aiSearchTaskId} /></div>
@@ -73,12 +76,12 @@ export default function Redfox({ loaderData }: Route.ComponentProps) {
       <Card title="X 账号查询"><form className="space-y-4" onSubmit={async e => { e.preventDefault(); const result = await run<OperationAccepted>("POST", "/api/admin/redfox/x/accounts/query", { [accountType]: account.trim() }, { label: "account", revalidate: false }); if (result) navigate(`/admin/operations/${result.runId}`); }}>
         <Field label="账号标识类型" hint="账号名与稳定 ID 二选一"><Select value={accountType} onChange={e => { setAccountType(e.target.value as typeof accountType); setAccount(""); }}><option value="screenName">账号名（不含 @）</option><option value="restId">稳定账号 ID（数字）</option></Select></Field>
         <Field label={accountType === "screenName" ? "账号名" : "稳定账号 ID"}><Input required value={account} onChange={e => setAccount(e.target.value)} pattern={accountType === "screenName" ? "[A-Za-z0-9_]{1,15}" : "[0-9]{1,30}"} maxLength={accountType === "screenName" ? 15 : 30} placeholder={accountType === "screenName" ? "OpenAI" : "数字 ID"} /></Field>
-        <p className="text-[12.5px] text-ink-3">结果可显式绑定到对应的已有 X 信源，保留原权限，再由信源页预检切换。</p><Button type="submit" tone="primary" disabled={!!pending || !account.trim()} busy={pending === "account"}>查询账号</Button>
+        <p className="text-[12.5px] text-ink-3">结果可显式绑定到对应的已有 X 信源，保留原权限，再由信源页预检切换。</p><ToolSubmit selection={{kind:"x-account",input:{[accountType]:account.trim()}}} type="submit" tone="primary" disabled={!!pending || !account.trim()} busy={pending === "account"}>提交查询</ToolSubmit>
       </form></Card>
       <Card title="X 推文详情查询"><form className="space-y-4" onSubmit={async e => { e.preventDefault(); const result = await run<OperationAccepted>("POST", "/api/admin/redfox/x/tweets/query", { tweetId: tweetId.trim() }, { label: "tweet", revalidate: false }); if (result) navigate(`/admin/operations/${result.runId}`); }}>
         <Field label="推文 ID" hint="只填数字 ID，保留完整精度"><Input required value={tweetId} onChange={e => setTweetId(e.target.value)} pattern="[0-9]{1,30}" maxLength={30} placeholder="推文数字 ID" /></Field>
-        <p className="text-[12.5px] text-ink-3">查询结果保存在执行记录中；已关联文章可直接查看。此入口不会自动授予发布权限。</p><Button type="submit" tone="primary" disabled={!!pending || !tweetId.trim()} busy={pending === "tweet"}>查询详情</Button>
+        <p className="text-[12.5px] text-ink-3">查询结果保存在执行记录中；已关联文章可直接查看。此入口不会自动授予发布权限。</p><ToolSubmit selection={{kind:"x-tweet",input:{tweetId:tweetId.trim()}}} type="submit" tone="primary" disabled={!!pending || !tweetId.trim()} busy={pending === "tweet"}>提交查询</ToolSubmit>
       </form></Card>
     </div></div>
-  </AdminPage>;
+  </AdminPage></ToolPricingProvider>;
 }

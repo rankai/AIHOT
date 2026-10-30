@@ -1,3 +1,4 @@
+import { ToolSubmit } from '../tools/tool-submit';
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAdminAction } from "./action";
@@ -27,6 +28,6 @@ export function MediaToolForm({ operations }: { operations: PlatformOperation[] 
     <p className="text-[12px] text-ink-4" aria-live="polite">已输入 {value.length} / {field?.constraints?.maxLength ?? "—"} 字符</p>
     <div className="space-y-1 rounded-control bg-bg-sunk p-3 text-[12.5px] leading-relaxed text-ink-3"><p>{operation.purpose}</p><p>所选工具文档估价 {spec.estimatedCny} 元/请求，使用 {spec.purpose} 次数预算，实际实扣未核对。</p><p>{text ? "只展示文本检查与安全标注，不改变发布规则或既有筛选，不提供导入或绑定动作。" : "名称中的“下载”指获取地址或元数据，本次查询不会下载或保存本地文件，也不自动加载媒体、读取字幕内容或写入材料。查询完成后，可在结果中显式保存支持的媒体或字幕私有附件；文本附件可关联已有材料，TXT/SRT/VTT 可填入缺失正文，JSON/json3 仅可关联，媒体附件仅供私有保存。不发布、不改变权限。"}</p></div>
     {error && <p role="alert" className="break-words text-[13px] text-hot">{error}</p>}
-    <div className="flex flex-wrap gap-2"><Button type="submit" tone="primary" disabled={!!pending || !value.trim()} busy={pending === "media-tool-query"}>查询工具并查看执行记录</Button><Button disabled={!!pending || !value} onClick={() => { setDrafts(previous => ({ ...previous, [operation.id]: "" })); setError(null); }}>清空工具草稿</Button></div>
+    <div className="flex flex-wrap gap-2"><ToolSubmit selection={{kind:"query",input:{operationId:operation.id,parameters:{[operation.fields[0]?.name ?? "url"]:value}}}} type="submit" tone="primary" disabled={!!pending || !value.trim()} busy={pending === "media-tool-query"}>提交查询</ToolSubmit><Button disabled={!!pending || !value} onClick={() => { setDrafts(previous => ({ ...previous, [operation.id]: "" })); setError(null); }}>清空工具草稿</Button></div>
   </form></Card>;
 }

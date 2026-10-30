@@ -1,3 +1,4 @@
+import { ToolSubmit } from '../tools/tool-submit';
 import type { AssetUploadOptions } from "./asset-types";
 import { useState } from "react";
 import { useNavigate } from "react-router";
@@ -52,7 +53,7 @@ export function ImageForm({ options, assets, reference, referenceError, initialT
         {reuse.length > 0 && <p className="rounded-control bg-bg-sunk p-3 text-[12.5px] text-ink-3">复用这次已确认上传（结果 #{reuse.map(row => row.resultId).join("、#")}），远端地址仍可能过期；失败不会自动补传。移除该参考将同时移除复用关系。</p>}
         <ImageReferences uploadOptions={uploadOptions} updates={assetUpdates} onAssetChange={onAssetChange} options={currentOptions} initialPage={assets} selected={currentSelected} onSelect={select} onRemove={key => change({ selected: draft.selected.filter(asset => asset.key !== key), referenceUploads: draft.referenceUploads.filter(row => row.fileKey !== key) })} disabled={!!pending} onUploadingChange={setUploading} />
         <div className="space-y-1 rounded-control bg-bg-sunk p-3 text-[12.5px] leading-relaxed text-ink-3"><p>本次最多上传 {currentSelected.length - reuse.length} 张未确认参考到供应商、提交生成 1 次，最多查询 {options.pollLimit} 轮（异常重试另计次数预算），最长 {options.pollDeadlineSeconds / 3600} 小时。{model === "gptImage2" ? "已有旧版供应商引用可能复用。" : "普通本地参考将在提交生成后通过通用上传传给供应商；不会自动寻找历史上传。"}</p><p>{option.documentedBaseCny === undefined ? "生成费用估算未知，以 Redfox 账单为准。" : `公开文档基价 ${option.documentedBaseCny} 元；计量方式和实际实扣未核实，不是整轮或按张报价，不按分辨率或张数推算总价。`}文档免费的上传与查询仍占 media / poll 次数预算，生成使用 image 预算。</p><p>提交、查询及仍需远端下载的保存步骤受模型与 Redfox 两个外发开关控制；已收完整本地文件可继续保存。{model !== "gptImage2" ? `参考最多 ${option.maxReferences} 张为本地边界，输出最多 ${option.maxOutputImages ?? option.maxImages} 张为本地处理边界，均不保证上游返回量。` : ""}</p></div>
-        <div className="flex flex-wrap items-center justify-between gap-3"><details className="text-[12px] text-ink-4"><summary className="cursor-pointer">接口验证说明</summary><p className="mt-2 max-w-lg">{options.uploadTransportVerified ? "参考上传接口已完成相应验证。" : "供应商参考上传协议尚未完成真实联调，当前可用性仍需后台验收；不会因此自动切换供应商。"}</p></details><Button type="submit" tone="primary" disabled={disabled || generationUnavailable || !draft.prompt.trim()} busy={pending === "image"}>提交图片创作</Button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><details className="text-[12px] text-ink-4"><summary className="cursor-pointer">接口验证说明</summary><p className="mt-2 max-w-lg">{options.uploadTransportVerified ? "参考上传接口已完成相应验证。" : "供应商参考上传协议尚未完成真实联调，当前可用性仍需后台验收；不会因此自动切换供应商。"}</p></details><ToolSubmit selection={{kind:"images",model,input:{prompt:currentDraft.prompt.trim(),resolution:currentDraft.resolution,size:currentDraft.size,n:currentDraft.n,fileKeys:currentSelected.map(asset=>asset.key)}}} type="submit" tone="primary" disabled={disabled || generationUnavailable || !draft.prompt.trim()} busy={pending === "image"}>提交图片</ToolSubmit></div>
       </form>
     </Card>
     <Card title="查询已有图片任务"><form aria-label="已有图片任务查询" className="space-y-3" onSubmit={async e => {
@@ -64,7 +65,7 @@ export function ImageForm({ options, assets, reference, referenceError, initialT
     }}>
       <Field label="已有任务模型"><Select aria-label="已有图片任务模型" value={queryModel} disabled={disabled} onChange={e => setQueryModel(e.target.value as ImageModel)}>{options.models.map(row => <option key={row.model} value={row.model}>{row.label}</option>)}</Select></Field>
       <Field label="供应商任务 ID" hint="已有任务只查询并保存结果，不重新提交生成；原始 ID 保留，最多 500 字符。"><Input aria-label="供应商任务 ID" required maxLength={500} disabled={disabled} value={taskId} onChange={e => { const value = e.target.value; setTaskIds(previous => ({ ...previous, [queryModel]: value })); }} /></Field>
-      <p className="text-[12.5px] text-ink-3">最多查询 {options.pollLimit} 轮，免费轮询仍计入 poll 次数预算；远端图片保存仍需两个外发开关开启。</p><Button type="submit" disabled={disabled || !taskId.trim()} busy={pending === "image-query"}>查询已有任务</Button>
+      <p className="text-[12.5px] text-ink-3">最多查询 {options.pollLimit} 轮，免费轮询仍计入 poll 次数预算；远端图片保存仍需两个外发开关开启。</p><ToolSubmit selection={{kind:"images/query"}} type="submit" disabled={disabled || !taskId.trim()} busy={pending === "image-query"}>提交查询</ToolSubmit>
     </form></Card>
   </div>;
 }

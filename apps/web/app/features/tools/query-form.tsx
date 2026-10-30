@@ -1,3 +1,5 @@
+import { ToolSubmit } from './tool-submit';
+import { pricingParameters } from './price-estimate';
 import { useState, type ReactNode } from "react";
 import type { PlatformOperationDescriptor } from "@aihot/contracts/redfox";
 import { Button, Input, Select } from "../admin/ui";
@@ -50,7 +52,7 @@ function OperationForm({ operation, pending, submit }: { operation: PlatformOper
       return <Field key={field.name} label={field.label} hint={`${field.hint ?? ""}${field.type.endsWith("-array") ? "（多项用逗号分隔）" : ""}`}>{control}</Field>;
     })}
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
-    <Button type="submit" tone="primary" busy={pending} disabled={pending}>查看积分报价</Button>
+    <ToolSubmit selection={{kind:"query",input:{provider,operationId:operation.id,parameters:pricingParameters(selected.fields,values)}}} type="submit" tone="primary" busy={pending} disabled={pending}>提交查询</ToolSubmit>
   </form>;
 }
 

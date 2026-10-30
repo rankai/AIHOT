@@ -1,3 +1,4 @@
+import { ToolSubmit } from '../tools/tool-submit';
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAdminAction } from "./action";
@@ -32,6 +33,6 @@ export function TranscriptionForm({ options, initialTaskId = "", initialPlatform
       <p>{options.resultPurpose}。转写不自动写入文章；成功结果可显式保存 TXT 附件、关联已有材料或申请填入缺失正文，不发布、不改变权限。</p>
     </div>
     {error && <p role="alert" className="break-words text-[13px] text-hot">{error}</p>}
-    <div className="flex flex-wrap gap-2"><Button type="submit" tone="primary" disabled={!!pending || !draft.value.trim()} busy={pending === `transcription-${mode}`}>{mode === "submit" ? "提交转写并查看执行记录" : "查询转写并查看执行记录"}</Button><Button disabled={!!pending || !draft.value} onClick={() => { setDrafts(previous => ({ ...previous, [mode]: { ...previous[mode], value: "" } })); setError(null); }}>清空当前草稿</Button></div>
+    <div className="flex flex-wrap gap-2"><ToolSubmit selection={{kind:mode === "submit" ? "transcriptions" : "transcriptions/query",input:{platform:draft.platform,url:draft.value}}} type="submit" tone="primary" disabled={!!pending || !draft.value.trim()} busy={pending === `transcription-${mode}`}>{mode === "submit" ? "提交转写" : "提交查询"}</ToolSubmit><Button disabled={!!pending || !draft.value} onClick={() => { setDrafts(previous => ({ ...previous, [mode]: { ...previous[mode], value: "" } })); setError(null); }}>清空当前草稿</Button></div>
   </form></Card>;
 }

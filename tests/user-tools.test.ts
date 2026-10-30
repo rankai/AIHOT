@@ -45,7 +45,7 @@ test("member tools keep task, asset, quote and execution ownership through the r
     await grantCredits(b.id, { amount: 100, reason: "Synthetic member tools test" }, admin, randomUUID());
     for (const price of [
       { kind: "x-account", model: "", tier: "", parameterMatch: { screenName } },
-      { kind: "images", model: "gptImage2", tier: "1k", parameterMatch: { prompt } },
+      { kind: "images", model: "gptImage2", tier: "1k", parameterMatch: { prompt, n: 1 } },
     ]) await saveToolPrice({ ...price, provider: "redfox", baseCredits: 7, imageCredits: 0, videoSecondCredits: 0, referenceCredits: 0, enabled: true, reason: "Synthetic test price" }, admin);
     app = await buildApp();
     const api = app;

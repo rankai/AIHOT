@@ -1,3 +1,4 @@
+import { assertMemberCostEligible } from './member-pricing.ts';
 import { z } from "zod";
 import { createWanGeneration, createWanQuery } from "../providers/aliyun/wan.ts";
 import { wanOptions } from "../providers/aliyun/wan-contract.ts";
@@ -26,7 +27,9 @@ export async function userToolOptions() {
     const { collectionProviders, collectionCapabilities: _, collectionPrice: __, ...query } = operation;
     return { ...query, schedulableType: null, queryProviders: (operation.queryProviders ?? collectionProviders ?? [{ id: "redfox", label: "Redfox" }]).map(({ collectionCapabilities: ___, collectionPrice: ____, ...provider }) => provider) };
   });
-  return { operations, images: imageOptions(), videos: videoOptions(), videoReplication: wanOptions(), aiSearch: aiSearchOptions(), transcriptions: transcriptionOptions(),
+  const allImages = imageOptions();
+  const images = {...allImages, maxImages:1, resolutions:['1k'], models:allImages.models.map(model => model.model === 'gptImage2' ? {...model,resolutions:['1k'],generationAvailable:true} : {...model,generationAvailable:false})};
+  return { operations, images, videos: videoOptions(), videoReplication: wanOptions(), aiSearch: aiSearchOptions(), transcriptions: transcriptionOptions(),
     xhsComments: { ...xhsCommentOptions(), allDataNum: null, dataNumMax: 1000 }, assets: assetUploadOptions(),
     limits: { activeRuns: 5, submissionsPerMinute: 10, storageBytes: MEMBER_STORAGE_BYTES, storageFiles: MEMBER_STORAGE_FILES } };
 }
@@ -34,12 +37,14 @@ export async function userToolOptions() {
 export async function quoteUserTool(userId: number, raw: unknown) {
   const { kind, input } = z.object({ kind: ToolKind, input: z.record(z.string(), z.unknown()) }).strict().parse(raw);
   const normalized = await normalizeToolInput(`user:${userId}`, kind, input);
+  await assertMemberCostEligible(normalized.intent);
   return quoteTool(userId, normalized.intent);
 }
 export async function submitUserTool(userId: number, kind: unknown, raw: unknown, key: unknown) {
   const { input, quoteId } = z.object({ input: z.record(z.string(), z.unknown()), quoteId: z.string().min(1).max(200) }).strict().parse(raw);
   const commandKey = z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/, "请提供有效的提交标识").parse(key), actor = `user:${userId}`;
   const normalized = await normalizeToolInput(actor, kind, input);
+  await assertMemberCostEligible(normalized.intent);
   const authorization: ToolAuthorization = { quoteId, intent: normalized.intent }, body = normalized.commandInput;
   let result;
   switch (normalized.intent.kind) {

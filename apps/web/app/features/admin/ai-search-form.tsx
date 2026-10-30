@@ -1,3 +1,4 @@
+import { ToolSubmit } from '../tools/tool-submit';
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAdminAction } from "./action";
@@ -27,6 +28,6 @@ export function AiSearchForm({ options, initialFamily = "", initialTaskId = "" }
     <p className="text-[12px] text-ink-4">{value.length} / {mode === "submit" ? options.inquiryMaxCharacters : 500} 字符</p>
     <div className="space-y-1 rounded-control bg-bg-sunk p-3 text-[12.5px] text-ink-3"><p>{mode === "submit" ? `所选引擎文档提交估价 ${selectedEngine?.price} 元/请求，使用 AI 搜索预算。` : "本轮提交步骤 0 个，仅查询已有任务。"}轮询文档估价 {options.pollEstimatedCny} 元/请求，即使为 0 仍占 poll 次数预算；实际实扣未核对。</p><p>执行须同时开启模型与 Redfox 外部调用开关，并满足相应预算。新一轮执行最多轮询 {options.limits.polls} 轮（异常重试另计次数预算），最长等待 {options.limits.pollDeadlineSeconds} 秒；创建后以执行记录中的冻结限额为准。</p><p>答案、引用与可选商品卡仅供研究，不自动写入文章。停止本地处理不取消远端搜索，也不保证退款；提交结果未知时先核对，不自动重复购买。</p></div>
     {error && <p role="alert" className="text-[13px] text-hot">{error}</p>}
-    <div className="flex flex-wrap gap-2"><Button type="submit" tone="primary" disabled={!!pending || !value.trim()} busy={pending === `ai-search-${mode}`}>{mode === "submit" ? "提交 AI 搜索并查看执行记录" : "查询 AI 搜索并查看执行记录"}</Button><Button disabled={!!pending || !value} onClick={() => { change(""); setError(null); }}>清空当前 AI 草稿</Button></div>
+    <div className="flex flex-wrap gap-2"><ToolSubmit selection={{kind:mode === "submit" ? "ai-search" : "ai-search/query",input:{engine,inquiryText:value}}} type="submit" tone="primary" disabled={!!pending || !value.trim()} busy={pending === `ai-search-${mode}`}>{mode === "submit" ? "提交AI搜索" : "提交查询"}</ToolSubmit><Button disabled={!!pending || !value} onClick={() => { change(""); setError(null); }}>清空当前 AI 草稿</Button></div>
   </form></Card>;
 }
