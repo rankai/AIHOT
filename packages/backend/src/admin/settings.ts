@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import type { BudgetScope } from '../providers/receipts.ts';
 // Operator settings: about-page QR codes (replaced without a release), notification targets
 // (switching a group on records enabled_at so older content is never back-filled) and per-service
 // request budgets (the circuit breaker paid calls check before sending).
@@ -58,14 +60,37 @@ export async function listBudgets() {
     FROM budgets b ORDER BY b.service`;
 }
 
-export async function updateBudget(service: string, input: { perMinute: number; perHour: number; perDay: number; reason: string }, actor: string) {
-  if (!input.reason?.trim()) throw new Error("reason is required");
-  for (const v of [input.perMinute, input.perHour, input.perDay]) if (!Number.isInteger(v) || v < 0) throw new Error("budgets are non-negative integers (0 stops the service)");
-  const [before] = await sql`SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`;
-  const [after] = await sql`
-    INSERT INTO budgets (service, per_minute, per_hour, per_day, note) VALUES (${service}, ${input.perMinute}, ${input.perHour}, ${input.perDay}, ${input.reason})
-    ON CONFLICT (service) DO UPDATE SET per_minute = EXCLUDED.per_minute, per_hour = EXCLUDED.per_hour, per_day = EXCLUDED.per_day, note = EXCLUDED.note, updated_at = now()
-    RETURNING service, per_minute, per_hour, per_day`;
-  await audit(actor, "budget.update", `budget:${service}`, input.reason, before ?? null, after);
-  return after;
+const BudgetInput=z.object({perMinute:z.number().int().min(0).max(2147483647),perHour:z.number().int().min(0).max(2147483647),perDay:z.number().int().min(0).max(2147483647),reason:z.string().trim().min(2).max(500)}).strict();
+const BudgetService=z.string().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/);
+export async function listBudgetScopes() {
+ return sql`SELECT b.service,s.scope,COALESCE(c.per_minute,0) AS per_minute,COALESCE(c.per_hour,0) AS per_hour,COALESCE(c.per_day,0) AS per_day,
+  c.note,COALESCE(c.updated_at,b.updated_at) AS updated_at,
+  (SELECT count(*)::int FROM receipt_attempts a WHERE a.service=b.service AND a.budget_scope=s.scope AND a.origin='live' AND a.started_at>now()-interval '1 hour') AS used_hour,
+  (SELECT count(*)::int FROM receipt_attempts a WHERE a.service=b.service AND a.budget_scope=s.scope AND a.origin='live' AND a.started_at>now()-interval '1 day') AS used_day
+ FROM budgets b CROSS JOIN (VALUES ('member'),('admin')) AS s(scope) LEFT JOIN budget_scopes c ON c.service=b.service AND c.scope=s.scope
+ WHERE b.service LIKE 'redfox.%' OR b.service LIKE 'agentkey.%' OR b.service LIKE 'aliyun.wan.%' ORDER BY b.service,s.scope`;
+}
+export async function updateBudget(service: string, raw: unknown, actor: string) {
+ return saveBudget(service,raw,actor,null);
+}
+export async function updateBudgetScope(service: string, scope: unknown, raw: unknown, actor: string) {
+ return saveBudget(service,raw,actor,z.enum(['member','admin']).parse(scope));
+}
+async function saveBudget(service: string, raw: unknown, actor: string, scope: BudgetScope | null) {
+ BudgetService.parse(service);const input=BudgetInput.parse(raw);
+ return sql.begin(async tx=>{
+  await tx`SELECT pg_advisory_xact_lock(hashtext(${"budget:"+service}))`;
+  if(scope){
+   const [parent]=await tx`SELECT service FROM budgets WHERE service=${service}`;
+   if(!parent)throw Object.assign(new Error('请先配置服务的全站预算'),{code:'conflict'});
+   const [before]=await tx`SELECT per_minute,per_hour,per_day FROM budget_scopes WHERE service=${service} AND scope=${scope}`;
+   const [after]=await tx`INSERT INTO budget_scopes(service,scope,per_minute,per_hour,per_day,note) VALUES (${service},${scope},${input.perMinute},${input.perHour},${input.perDay},${input.reason})
+    ON CONFLICT(service,scope) DO UPDATE SET per_minute=EXCLUDED.per_minute,per_hour=EXCLUDED.per_hour,per_day=EXCLUDED.per_day,note=EXCLUDED.note,updated_at=now() RETURNING service,scope,per_minute,per_hour,per_day`;
+   await audit(actor,'budget.scope.update',`budget:${service}:${scope}`,input.reason,before??null,after,undefined,tx);return after;
+  }
+  const [before]=await tx`SELECT per_minute,per_hour,per_day FROM budgets WHERE service=${service}`;
+  const [after]=await tx`INSERT INTO budgets(service,per_minute,per_hour,per_day,note) VALUES (${service},${input.perMinute},${input.perHour},${input.perDay},${input.reason})
+   ON CONFLICT(service) DO UPDATE SET per_minute=EXCLUDED.per_minute,per_hour=EXCLUDED.per_hour,per_day=EXCLUDED.per_day,note=EXCLUDED.note,updated_at=now() RETURNING service,per_minute,per_hour,per_day`;
+  await audit(actor,'budget.update',`budget:${service}`,input.reason,before??null,after,undefined,tx);return after;
+ });
 }

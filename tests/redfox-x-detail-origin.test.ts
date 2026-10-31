@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import {createTweetQuery} from '@aihot/backend/providers/redfox/queries';
 import {importXDetailResult} from '@aihot/backend/providers/redfox/import-x-detail';
 import {resumeRun} from '@aihot/backend/providers/operations/store';
@@ -20,8 +21,9 @@ const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c)
 let budgets:Record<string,any>[];
 function valves(on=true){process.env.REDFOX_CALLS_ENABLED=String(on);process.env.COLLECT_ENABLED=String(on);if(on)process.env.REDFOX_API_KEY='fake-x-search';else delete process.env.REDFOX_API_KEY;}
 const chosenWorkSource=tag();
-before(async()=>{await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Selected X source','rss','isolated',false)`;const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;config.allowPrivateNetworkFetch=true;valves();budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.query','redfox.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('redfox.query','redfox.collect')`;});
-after(async()=>{try{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;}finally{valves(false);if(server.listening)await new Promise<void>(r=>server.close(()=>r()));try{await stopBoss();}finally{await closeDb();}}});
+let restoreAdminScope:()=>Promise<void>;
+before(async()=>{restoreAdminScope=await allowTestBudgetScope(['redfox.query'],'admin');await sql`INSERT INTO sources(id,name,kind,participation_mode,site_fulltext) VALUES (${chosenWorkSource},'Selected X source','rss','isolated',false)`;const [db]=await sql`SELECT current_database() AS name,inet_server_port() AS port`;assertConfiguredTestDatabase(db!.name,db!.port);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;config.allowPrivateNetworkFetch=true;valves();budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.query','redfox.collect')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('redfox.query','redfox.collect')`;});
+after(async()=>{await restoreAdminScope?.();try{for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;}finally{valves(false);if(server.listening)await new Promise<void>(r=>server.close(()=>r()));try{await stopBoss();}finally{await closeDb();}}});
 const id=()=>BigInt('0x'+randomUUID().replaceAll('-','').slice(0,20)).toString();
 const tweet=(uid=id(),tid=id(),text='Synthetic X text')=>({tweetId:tid,text,createdAt:new Date().toISOString(),user:{userId:uid,username:'synthetic_x',displayName:'Synthetic author'}});
 const row=async(n:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${n}`)[0]!;

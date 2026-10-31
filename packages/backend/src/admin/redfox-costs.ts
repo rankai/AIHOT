@@ -1,3 +1,4 @@
+import { wanTaskCosts } from "../providers/aliyun/wan-costs.ts";
 import { z } from 'zod';
 import { sql } from '../db.ts';
 import { stableJson } from '../lib/ids.ts';
@@ -93,7 +94,7 @@ export async function redfoxCosts(input: z.input<typeof RedfoxCostsQuery>) {
       jsonb_build_object('pending',count(*) FILTER (WHERE a.status='pending'),'received',count(*) FILTER (WHERE a.status='received'),
         'failed',count(*) FILTER (WHERE a.status='failed'),'unknown',count(*) FILTER (WHERE a.status='unknown')) AS "statusCounts"
     FROM receipt_attempts a JOIN receipts r ON r.id=a.receipt_id
-    WHERE (a.service LIKE 'redfox.%' OR a.service LIKE 'agentkey.%') AND a.started_at>=${new Date(query.start)} AND a.started_at<${new Date(query.end)}
+    WHERE (a.service LIKE 'redfox.%' OR a.service LIKE 'agentkey.%' OR a.service LIKE 'aliyun.wan.%') AND a.started_at>=${new Date(query.start)} AND a.started_at<${new Date(query.end)}
     GROUP BY a.service,a.model,a.origin,r.request->>'base',a.currency,a.cost_basis
     ORDER BY a.service,a.model,a.origin,base,a.currency,a.cost_basis`;
   const recent = await sql`SELECT r.id AS "runId",p.id AS "receiptId",r.created_at AS "queriedAt",p.received_at AS "receivedAt",r.input->'parameters' AS parameters
@@ -103,7 +104,7 @@ export async function redfoxCosts(input: z.input<typeof RedfoxCostsQuery>) {
       AND s.data->>'platform'='redfox' AND s.data->>'operationId'=${operation}
       AND p.service='redfox.account' AND p.model=${operation} AND p.status IN ('received','completed')
     ORDER BY r.created_at DESC,r.id DESC LIMIT 50`;
-  return { local: { interval: { start: query.start, end: query.end, timeBasis: 'attempt_started_at' },
+  return { wan: await wanTaskCosts(query.start, query.end), local: { interval: { start: query.start, end: query.end, timeBasis: 'attempt_started_at' },
       groups: groups.map(g => ({ ...g, environment: environmentOf(g.base) })) },
     billPages: recent.map(r => ({ ...r, runId: Number(r.runId), receiptId: Number(r.receiptId), responseIdentity: `receipt:${r.receiptId}` })),
     selectedBill: query.billRunId ? await selectedBill(query.billRunId) : null,

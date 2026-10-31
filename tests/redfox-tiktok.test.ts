@@ -1,3 +1,4 @@
+import {allowTestBudgetScope} from './setup.ts';
 import { tag } from './setup.ts';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -25,8 +26,9 @@ const cases:{id:TiktokOperation;path:string;parameters:Record<string,unknown>;da
 ];
 let fixture=cases[0]!,hits=0,rawOverride:string|undefined,saved:Record<string,unknown>;
 const server=http.createServer((req,res)=>{hits++;let body='';req.on('data',c=>body+=c);req.on('end',()=>{try{assert.equal(req.method,'POST');assert.equal(req.url,fixture.path);assert.equal(req.headers.redfox_api_key,'fake-tiktok');assert.equal(body,JSON.stringify(tiktokWireInput(fixture.id,tiktokOperations[fixture.id].schema.parse(fixture.parameters))));for(const key of fixture.id==='API_1790149158205'?['ch_id','cursor']:fixture.id==='API_1790581450500'?['max_cursor']:fixture.id==='API_1790149281139'?['offset']:[])assert.ok(body.includes(`"${key}":${id}`),'integer stays unquoted and exact');res.end(rawOverride??JSON.stringify({code:2000,data:fixture.data}));}catch(e){res.statusCode=400;res.end(JSON.stringify({error:String(e)}));}});});
-before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='fake-tiktok';process.env.REDFOX_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
-after(async()=>{await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+let restoreAdminScope:()=>Promise<void>;
+before(async()=>{restoreAdminScope=await allowTestBudgetScope(['redfox.query'],'admin');await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='fake-tiktok';process.env.REDFOX_CALLS_ENABLED='true';config.allowPrivateNetworkFetch=true;saved=(await sql`SELECT * FROM budgets WHERE service='redfox.query'`)[0]!;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='redfox.query'`;});
+after(async()=>{await restoreAdminScope?.();await sql`UPDATE budgets SET per_minute=${saved.per_minute as number},per_hour=${saved.per_hour as number},per_day=${saved.per_day as number} WHERE service='redfox.query'`;process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
 const step=async(id:number)=>{const r=await row(id);await executeOperationStep(id,r.step_version,randomUUID());};
 async function query(){const run=await createSynchronousQuery({operationId:fixture.id,parameters:fixture.parameters},'tiktok-test',tag());await step(run.id);return {run:await row(run.id),results:await sql`SELECT * FROM operation_results WHERE run_id=${run.id} ORDER BY id`};}

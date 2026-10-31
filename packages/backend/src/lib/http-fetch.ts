@@ -42,7 +42,7 @@ function dispatcherFor(viaProxy: boolean): Dispatcher | undefined {
 export interface GuardedFetchOptions {
   method?: string;
   headers?: Record<string, string>;
-  body?: string | import("undici").FormData;
+  body?: string | Blob | import("undici").FormData;
   timeoutMs?: number;
   maxBytes?: number;
   /** Follow redirects manually; zero returns the original response without following. */

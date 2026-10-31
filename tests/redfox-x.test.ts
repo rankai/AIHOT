@@ -59,9 +59,11 @@ test("missing key and missing budget cannot create attempts or dispatch",async()
   const missingKey=await create(); await step(missingKey.id);
   assert.equal((await runOf(missingKey.id)).status,"waiting"); assert.equal((await runOf(missingKey.id)).current_receipt_id,null);
   process.env.REDFOX_API_KEY=key;
-  await sql`DELETE FROM budgets WHERE service='redfox.query'`;
+  const [budget]=await sql`SELECT * FROM budgets WHERE service='redfox.query'`;
+  const scopes=await sql`SELECT * FROM budget_scopes WHERE service='redfox.query'`;
+  await sql.begin(async tx=>{await tx`DELETE FROM budget_scopes WHERE service='redfox.query'`;await tx`DELETE FROM budgets WHERE service='redfox.query'`;});
   try { const missingBudget=await create(); await step(missingBudget.id); assert.equal((await runOf(missingBudget.id)).current_receipt_id,null); assert.match((await runOf(missingBudget.id)).wait_reason,/unconfigured/); }
-  finally {await sql`INSERT INTO budgets(service,per_minute,per_hour,per_day) VALUES ('redfox.query',1000,10000,100000)`;}
+  finally {await sql.begin(async tx=>{await tx`INSERT INTO budgets ${tx(budget!)}`;for(const scope of scopes)await tx`INSERT INTO budget_scopes ${tx(scope)}`;});}
   assert.equal(hits,before);
 });
 

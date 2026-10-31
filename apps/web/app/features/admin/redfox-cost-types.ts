@@ -17,6 +17,7 @@ export interface RedfoxSelectedBill extends RedfoxBillPage {
   summary: { signedPoints: string; knownApiConsumptionPoints: string; otherRecords: number; nominalCny: { amount: string; label: string; pointsPerCny: string; evidence: string; actualCost: false } };
 }
 export interface RedfoxCostsData {
+  wan?: { estimatedCny: number; unknownTasks: number; invalidEvidence: number; tasks: Array<{taskId: string; rootRunId: number; submittedAt: string; status: string; outputSeconds: number | null; estimatedCny: number | null; needsReview: boolean}> };
   local: { interval: RedfoxCostInterval & { timeBasis: "attempt_started_at" }; groups: RedfoxCostGroup[] };
   billPages: RedfoxBillPage[]; selectedBill: RedfoxSelectedBill | null;
   comparison: { comparable: false; reasonCodes: string[] };

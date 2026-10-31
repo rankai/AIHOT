@@ -70,6 +70,7 @@ export function adminHandler(fn: AdminHandler) {
           : String((error as Error).message);
         return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: detail.slice(0, 300) });
       }
+      if ((error as { code?: string }).code === "cost_unverified") return sendProblem(req, reply, {status:409,code:"cost_unverified",detail:(error as Error).message});
       if ((error as { code?: string }).code === "conflict") return sendProblem(req, reply, { status: 409, code: "conflict", detail: (error as Error).message });
       if ((error as { code?: string }).code === "unsupported_configuration") return sendProblem(req, reply, { status: 422, code: "unsupported_configuration", detail: (error as Error).message });
       req.log.error({ err: error, path: req.url.split("?")[0] }, "admin api error");

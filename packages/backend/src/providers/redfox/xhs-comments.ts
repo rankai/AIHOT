@@ -1,3 +1,4 @@
+import { assertKnownNonVideoCost, isAdminToolActor } from '../tool-cost-policy.ts';
 import type { ToolAuthorization } from "../../users/credits.ts";
 import {z} from "zod";
 import {sql} from "../../db.ts";
@@ -13,6 +14,7 @@ async function command(parameters:Record<string,unknown>,actor:string,key:unknow
   await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
   const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
   if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
+  if(!query && isAdminToolActor(actor))assertKnownNonVideoCost("xhs-comments",parameters);
   const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:operation,contractVersion:1,input:{commandIntent:intent,parameters,mode:query?"xhs-comments-query":"xhs-comments",startedAt:new Date().toISOString()},stepKey:query?"redfox.xhs_comments.poll":"redfox.xhs_comments.submit",limits:{...XHS_COMMENT_LIMITS,...(query?{pollDeadlineSeconds:48*3600}: {})}});
   await tx`UPDATE operation_runs SET progress=${tx.json({pollSequence:0,...(query?{taskId:parameters.taskId}: {})} as never)} WHERE id=${run.id}`;await queueOperationStep(tx,run.id);return run;
  });

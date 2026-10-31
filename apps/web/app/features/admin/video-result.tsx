@@ -13,7 +13,7 @@ export function VideoResult({ result: r, imageOptions }: { result: OperationResu
     <ResearchFacts items={videoFailureRows(r.data)} />
     {missing && <p className="rounded-control bg-amber/10 p-3 text-[12px] text-amber">{video ? "收到视频已保存，未返回请求的末帧；可查询已有任务核对。" : "本次响应未返回请求的末帧；视频是否保存以上方本地状态与实际结果为准。"}不会自动重新生成或补发请求。</p>}
     {!control && <PrivateAssetView asset={operationFileAsset(r.file)} options={imageOptions} />}
-    {!control && !reference && <p className="text-[12px] text-ink-3">视频和末帧图片保存到私有素材，可在后台预览、播放或下载，不会自动发布。播放器使用本地文件，上游地址仅保留在诊断中。</p>}
+    {!control && !reference && <p className="text-[12px] text-ink-3">视频和末帧图片保存到私有素材，可在后台预览、播放或下载，不会自动发布。播放器使用本地文件。</p>}
     <Json value={{ resultId: r.id, receiptId: r.receiptId, kind: r.kind, data: r.data }} label="视频任务字段与回执诊断" />
   </article>;
 }

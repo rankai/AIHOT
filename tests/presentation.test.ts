@@ -109,7 +109,7 @@ test("invalid stored configuration is an admin error while public metadata uses 
   const general = await app.inject({ method: "GET", url: "/api/admin/settings", headers: { cookie } });
   assert.equal(general.statusCode, 200, general.body);
   assert.match(general.headers["cache-control"]!, /no-store/);
-  assert.deepEqual(Object.keys(general.json()).sort(), ["budgets", "contact", "targets"]);
+  assert.deepEqual(Object.keys(general.json()).sort(), ["budgetScopes", "budgets", "contact", "targets"]);
   const restored = await savePresentation(DEFAULT_PRESENTATION, actor);
   assert.deepEqual(restored.presentation, normalizePresentation(null));
 });

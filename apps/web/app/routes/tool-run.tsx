@@ -1,3 +1,4 @@
+import { ToolSubmit } from '../features/tools/tool-submit';
 import { useEffect, useState } from "react";
 import { Link, useLoaderData, useNavigate, useRevalidator, useSearchParams, type LoaderFunctionArgs } from "react-router";
 import type { AccountMe } from "@aihot/contracts/account";
@@ -62,11 +63,11 @@ function ToolRunContent({ me, run }: Awaited<ReturnType<typeof loader>>) {
       {results.cursor !== null && <Button busy={results.loading} onClick={() => void results.loadMore()}>加载更多成果</Button>}
     </section>
     {run.processCount > 0 && <details className="card p-4" onToggle={event => setShowProcess(event.currentTarget.open)}><summary className="cursor-pointer text-[13px] font-medium text-ink-2">执行过程（{run.processCount} 条）</summary>{showProcess && <div className="mt-4 space-y-3"><ToolProcessResults results={process.items} />{process.error && <p role="alert" className="text-[13px] text-hot">{process.error}</p>}{process.cursor !== null && <Button busy={process.loading} onClick={() => void process.loadMore()}>加载更多过程记录</Button>}</div>}</details>}
-    {run.recoveryKind && <section className="card space-y-3 p-4"><p className="text-[13px] leading-relaxed text-ink-3">可以继续查询这次任务的供应商结果。续查关联原积分占用，不重复收取生成费用。</p><Button disabled={command.pending} onClick={async () => { const result = await command.run<ToolQuote>("/api/tools/quote", { kind: run.recoveryKind, input: { runId: run.id } }); if (result) setQuote(result); }}>续查原任务</Button></section>}
-    {!!run.actions.length && <section className="card space-y-3 p-4"><ToolField label="操作说明" hint="恢复与停止沿用原任务记录。停止后续调度不代表供应商取消或立即退回积分。"><Textarea value={reason} maxLength={500} onChange={event => setReason(event.target.value)} placeholder="简要说明本次操作的原因" /></ToolField><div className="flex flex-wrap gap-2">{run.actions.map(action => <Button key={action} tone={action === "abandon" ? "danger" : "secondary"} disabled={command.pending || !reason.trim()} busy={command.pending} onClick={async () => {
+    {run.recoveryKind && <section className="card space-y-3 p-4"><p className="text-[13px] leading-relaxed text-ink-3">可以继续查询这次任务的供应商结果。续查关联原积分占用，不重复收取生成费用。</p><ToolSubmit selection={{kind:run.recoveryKind,free:true}} disabled={command.pending} onClick={async () => { const result = await command.run<ToolQuote>("/api/tools/quote", { kind: run.recoveryKind, input: { runId: run.id } }); if (result) setQuote(result); }}>提交续查</ToolSubmit></section>}
+    {!!run.actions.length && <section className="card space-y-3 p-4"><ToolField label="操作说明" hint="恢复与停止沿用原任务记录。停止后续调度不代表供应商取消或立即退回积分。"><Textarea value={reason} maxLength={500} onChange={event => setReason(event.target.value)} placeholder="简要说明本次操作的原因" /></ToolField><div className="flex flex-wrap gap-2">{run.actions.map(action => <div key={action} className="flex flex-wrap items-center gap-3"><Button tone={action === "abandon" ? "danger" : "secondary"} disabled={command.pending || !reason.trim()} busy={command.pending} onClick={async () => {
       const result = await command.run(`/api/tools/runs/${run.id}/${action}`, { stepVersion: run.stepVersion, generation: run.generation, reason: reason.trim() });
       if (result) { setReason(""); refresh(); }
-    }}>{ACTION_LABELS[action] ?? action}</Button>)}</div></section>}
+    }}>{ACTION_LABELS[action] ?? action}</Button>{action === "resume" && <span className="text-[12.5px] text-ink-3">额外消耗 0 积分</span>}</div>)}</div></section>}
     {command.error && !quote && <p role="alert" className="rounded-control bg-hot-soft p-3 text-[13px] text-hot">{command.error}</p>}
     {quote && run.recoveryKind && <QuoteDialog quote={quote} pending={command.pending} error={command.error} close={() => setQuote(null)} confirm={async () => { const result = await command.run<{ runId: number }>(`/api/tools/${run.recoveryKind}`, { input: { runId: run.id }, quoteId: quote.quoteId }); if (result) { setQuote(null); navigate(runDetailHref(result.runId, history)); } }} />}
   </div>;

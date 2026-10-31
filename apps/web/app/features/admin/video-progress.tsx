@@ -6,6 +6,7 @@ import { researchFactText } from "./research-platform-data";
 import { ResearchFacts } from "./research-platform-result";
 const steps: Record<string, string> = { "redfox.video.upload": "上传或复用参考图片", "redfox.video.submit": "提交视频生成", "redfox.video.poll": "等待并查询视频进度", "redfox.video.save": "保存视频与已返回末帧" };
 export function VideoProgress({ operation: r }: { operation: OperationDetail }) {
+  if (r.provider === "aliyun") return <WanProgress operation={r} />;
   const facts = videoTaskFacts(r), plan = r.inputs.videoPlan, parameters = r.inputs.parameters ?? {}, refs = Array.isArray(parameters.imageWithRoles) ? parameters.imageWithRoles as VideoReferenceRow[] : [];
   const missing = r.results.some(result => result.kind === "video" && result.data.role === "video" && videoLastFrameMissing(result.data));
   const query = new URLSearchParams({ view: "videos", ...(facts.taskId ? { videoTaskId: facts.taskId } : {}) });
@@ -24,5 +25,16 @@ export function VideoProgress({ operation: r }: { operation: OperationDetail }) 
       {refs.length > 0 && <div className="space-y-1 text-[12px] text-ink-3"><p>角色行 {refs.length} 个，独立文件 {videoFileKeys(refs).length} 个（按以下顺序提交）</p>{refs.map((ref, index) => <p className="break-all" key={index}>{index + 1}. {videoRoleLabels[ref.role as VideoRole] ?? ref.role} · {ref.fileKey}</p>)}</div>}
       {facts.latest && <><p className="text-[12px] text-ink-3">本页最近响应实收参数；metadata 不作为本地时长验证，usage 不作为百分比进度。</p><ResearchFacts items={videoFactRows(facts.latest.data)} /></>}
     </div></details>
+  </div>;
+}
+
+function WanProgress({ operation: r }: { operation: OperationDetail }) {
+  const facts = videoTaskFacts(r), plan = r.inputs.videoPlan;
+  const steps: Record<string,string> = { "aliyun.wan.upload": "交付两份参考素材", "aliyun.wan.submit": "提交视频复刻", "aliyun.wan.poll": "等待并查询视频复刻进度", "aliyun.wan.save": "保存原任务视频" };
+  return <div className="mb-4 space-y-2 border-b border-line pb-4 text-[13px]"><p className="font-medium">阿里云万相 · {r.status === "completed" ? "已保存视频复刻结果" : steps[r.step] ?? "处理视频复刻"}</p>
+    {facts.taskId && <p className="break-all text-ink-3">供应商任务 ID：{facts.taskId}</p>}
+    <p className="text-ink-3">模式：{r.inputs.parameters?.mode === "wan-pro" ? "专业" : "标准"}。从本页恢复会继续原任务，上传或提交未知时需先核对，不自动再生成。</p>
+    {plan && <p className="text-ink-3">本轮最多查询 {plan.pollLimit} 次，原总窗口 {plan.pollDeadlineSeconds / 3600} 小时；预算等待和异常重试不会重置额度。</p>}
+    <p className="text-ink-3">停止仅停止本地后续处理，不取消云端生成。下载需开启模型与万相外发；完整本地文件可关阀登记。</p>
   </div>;
 }

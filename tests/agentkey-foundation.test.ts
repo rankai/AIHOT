@@ -307,6 +307,7 @@ test("AgentKey budget migration adds only zero seeds and preserves configured bu
   await assert.rejects(sql.begin(async (tx) => {
     const before = await tx`SELECT * FROM schema_migrations ORDER BY name`;
     const other = await tx`SELECT * FROM budgets WHERE service NOT IN ('agentkey.collect','agentkey.query') ORDER BY service`;
+    await tx`DELETE FROM budget_scopes WHERE service IN ('agentkey.collect','agentkey.query')`;
     await tx`DELETE FROM budgets WHERE service IN ('agentkey.collect','agentkey.query')`;
     const migration = readFileSync(new URL("../database/migrations/0078_agentkey_budgets.sql", import.meta.url), "utf8");
     await tx.unsafe(migration);

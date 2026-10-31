@@ -65,6 +65,7 @@ export async function operationDetail(id: number) {
     run.progress={...run.progress,saved:totals!.saved,notSaved:totals!.notSaved,transferredBytes:totals!.bytes,
       targetIndex:totals!.targets,targetsTotal:totals!.targets||run.progress.targetsTotal};
   }
+  if (run.provider === "aliyun") run.progress = { taskId: run.progress.taskId, uploadIndex: run.progress.uploadIndex, pollSequence: run.progress.pollSequence, pollAttempts: run.progress.pollAttempts, saveAttempts: run.progress.saveAttempts };
   delete run.input;
   delete run.limits;
   const page = await operationResults(id);

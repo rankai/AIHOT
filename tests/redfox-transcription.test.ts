@@ -1,4 +1,4 @@
-import { tag } from './setup.ts';
+import { tag, allowTestBudgetScope } from './setup.ts';
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import http from 'node:http';
@@ -17,15 +17,16 @@ const server=http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c)
   if(mode==='disconnect'){req.socket.destroy();return;}
   res.setHeader('content-type','application/json');
   if(mode==='invalid'){res.end('{"code":2000,//broken');return;}
-  const data=input.url?{taskId:'task-'+calls.length}:mode==='processing'?{status:'processing'}:mode==='failed'?{status:'failed',failReason:null}:mode==='wrong'?{status:'succeeded',taskId:'wrong',text:'Synthetic'}:{status:'succeeded',taskId:input.taskId,text:'Synthetic transcript',stampSents:[{textSeg:'Synthetic transcript',start:0,end:1500}],failReason:null};
+  const data=input.url?{taskId:'task-'+calls.length}:['processing','asr_processing','running'].includes(mode)?{status:mode,taskId:input.taskId}:mode==='failed'?{status:'failed',failReason:null}:mode==='wrong'?{status:'succeeded',taskId:'wrong',text:'Synthetic'}:{status:'succeeded',taskId:input.taskId,text:'Synthetic transcript',stampSents:[{textSeg:'Synthetic transcript',start:0,end:1500}],failReason:null};
   res.end(JSON.stringify({code:2000,data}));
 });});
-let budgets:any[]=[];
+let budgets:any[]=[];let restoreAdminScope:()=>Promise<void>=async()=>{};
 before(async()=>{await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));process.env.REDFOX_TEST_BASE_URL=`http://127.0.0.1:${(server.address() as {port:number}).port}`;process.env.REDFOX_API_KEY='synthetic-asr-key';process.env.REDFOX_CALLS_ENABLED='true';process.env.MODEL_CALLS_ENABLED='false';config.allowPrivateNetworkFetch=true;
  budgets=await sql`SELECT * FROM budgets WHERE service IN ('redfox.transcript','redfox.poll')`;await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('redfox.transcript','redfox.poll')`;
+ restoreAdminScope=await allowTestBudgetScope(['redfox.transcript','redfox.poll'],'admin');
 });
 const row=async(id:number)=>(await sql`SELECT * FROM operation_runs WHERE id=${id}`)[0]!;
-after(async()=>{for(const id of runs){const r=await row(id);if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'synthetic cleanup'));}for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
+after(async()=>{for(const id of runs){const r=await row(id);if(!['completed','failed'].includes(r.status))await sql.begin(tx=>abandonRun(tx,{runId:id,stepVersion:r.step_version,generation:r.generation},'synthetic cleanup'));}for(const b of budgets)await sql`UPDATE budgets SET per_minute=${b.per_minute},per_hour=${b.per_hour},per_day=${b.per_day} WHERE service=${b.service}`;await restoreAdminScope();await new Promise<void>(r=>server.close(()=>r()));await stopBoss();await closeDb();});
 async function query(){const r=await createTranscriptionQuery({platform:'douyin',taskId:tag()},'asr-test',tag());runs.push(r.id);return r;}
 async function job(id:number,due=false){const r=await row(id);if(due){await sql`UPDATE operation_runs SET next_attempt_at=now()-interval '1 second' WHERE id=${id}`;await sql`UPDATE pgboss.job SET start_after=now()-interval '1 second' WHERE id=${r.job_id}`;}await sql`UPDATE pgboss.job SET priority=2000000000 WHERE id=${r.job_id}`;const boss=await getBoss(),jobs=await boss.fetch<{runId:number;stepVersion:number}>(QUEUES.operation,{minPriority:2000000000});assert.equal(jobs.length,1);assert.equal(jobs[0]!.id,r.job_id);await executeOperationStep(id,jobs[0]!.data.stepVersion,jobs[0]!.id);await boss.complete(QUEUES.operation,jobs[0]!.id);}
 async function missingJob(id:number){const r=await row(id);await sql`UPDATE pgboss.job SET state='completed' WHERE id=${r.job_id}`;await sql`UPDATE operation_runs SET job_id=NULL WHERE id=${id}`;}
@@ -68,4 +69,40 @@ test('HTTP authentication/CSRF and frozen smaller limits use existing errors and
  const detail=await operationDetail(existing.json().runId);assert.equal(detail!.inputs.transcriptionPlan!.pollLimit,1);assert.equal(detail!.inputs.transcriptionPlan!.pollDeadlineSeconds,120);
  mode='processing';await job(existing.json().runId);const after=calls.length;await job(existing.json().runId,true);assert.equal((await row(existing.json().runId)).status,'needs_review');assert.equal(calls.length,after);
  }finally{await app.close();config.devAdmin=null;}
+});
+
+
+for(const pendingStatus of ['asr_processing','running'])test(`observed Bilibili ${pendingStatus} schedules another poll without resubmitting`,async()=>{
+ mode='success';const r=await createTranscription({platform:'bilibili',url:'Synthetic alias regression'},'asr-test',tag());runs.push(r.id);
+ const before=calls.length;await job(r.id);const taskId=(await row(r.id)).progress.taskId;
+ try{
+  mode=pendingStatus;await job(r.id,true);
+  const waiting=await row(r.id);assert.equal(waiting.status,'waiting');assert.equal(waiting.progress.taskId,taskId);assert.equal(waiting.progress.pollSequence,1);assert.ok(waiting.next_attempt_at>Date.now());
+  mode='success';await job(r.id,true);assert.equal((await row(r.id)).status,'completed');
+  assert.equal(calls.slice(before).filter(call=>call.body.url).length,1);assert.equal(calls.slice(before).filter(call=>call.body.taskId===taskId).length,2);
+  assert.equal(parseTranscriptionPoll({status:pendingStatus,taskId},taskId).status,'processing');
+  assert.throws(()=>parseTranscriptionPoll({status:pendingStatus,taskId:'wrong'},taskId));
+  assert.throws(()=>parseTranscriptionPoll({status:'unknown'},taskId));
+ }finally{mode='success';}
+});
+
+
+test('retained running response recovers offline and continues the original task without resubmitting',async()=>{
+ mode='success';const r=await createTranscription({platform:'bilibili',url:'Synthetic retained running'},'asr-test',tag());runs.push(r.id);
+ const start=calls.length;await job(r.id);const waiting=await row(r.id),taskId=waiting.progress.taskId;
+ await missingJob(r.id);
+ await sql.begin(tx=>resumeRun(tx,{runId:r.id,stepVersion:waiting.step_version,generation:waiting.generation}));
+ const initial=await row(r.id);
+ const execution=await sql.begin(tx=>claimRun(tx,{runId:r.id,stepVersion:initial.step_version,generation:initial.generation},initial.job_id));
+ mode='running';const received=await pollTranscription('bilibili',taskId,`run:${r.id}:poll:0`,receiptOptions(execution));
+ assert.equal(received.data.status,'processing');
+ await missingJob(r.id);process.env.REDFOX_CALLS_ENABLED='false';delete process.env.REDFOX_API_KEY;const before=calls.length;
+ try{
+  await recoverFixture(r.id);await job(r.id);
+  const waiting=await row(r.id);assert.equal(waiting.status,'waiting');assert.equal(waiting.progress.taskId,taskId);assert.equal(waiting.progress.pollSequence,1);
+  assert.equal(calls.length,before);assert.equal((await sql`SELECT attempts FROM receipts WHERE id=${received.receiptId}`)[0]!.attempts,1);
+ }finally{process.env.REDFOX_CALLS_ENABLED='true';process.env.REDFOX_API_KEY='synthetic-asr-key';mode='success';}
+ await job(r.id,true);assert.equal((await row(r.id)).status,'completed');
+ assert.equal(calls.slice(start).filter(call=>call.body.url).length,1);
+ assert.equal(calls.slice(start).filter(call=>call.body.taskId===taskId).length,2);
 });

@@ -10,7 +10,8 @@ import { toast } from "../../features/admin/toast";
 interface Settings {
   contact: { wechatQr: string; feishuQr: string };
   targets: Array<{ key: string; purpose: string; kind: string; enabled: boolean; enabled_at: string | null; config_ref: string | null; note: string | null; deliveries_7d: number; last_sent_at: string | null }>;
-  budgets: Array<{ service: string; per_minute: number; per_hour: number; per_day: number; note: string | null; updated_at: string; used_day: number; used_hour: number }>;
+  budgetScopes: Array<Settings["budgets"][number] & {scope:"member"|"admin"}>;
+  budgets: Array<{ scope?: "member" | "admin"; service: string; per_minute: number; per_hour: number; per_day: number; note: string | null; updated_at: string; used_day: number; used_hour: number }>;
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -60,7 +61,7 @@ function BudgetRow({ b }: { b: Settings["budgets"][number] }) {
   const changed = v.perMinute !== b.per_minute || v.perHour !== b.per_hour || v.perDay !== b.per_day;
   return (
     <tr className="border-b border-line/70 last:border-0">
-      <td className="px-3 py-2 font-mono text-[12.5px]">{b.service}</td>
+      <td className="px-3 py-2 font-mono text-[12.5px]">{b.service}<span className="ml-2 font-sans text-ink-3">{b.scope === "member" ? "会员池" : b.scope === "admin" ? "admin 测试池" : "全站总池"}</span></td>
       {(["perMinute", "perHour", "perDay"] as const).map((k) => (
         <td key={k} className="px-3 py-2">
           <Input type="number" min={0} className="!w-24 !py-1 text-right" value={v[k]} onChange={(e) => setV({ ...v, [k]: Number(e.target.value) })} />
@@ -71,12 +72,12 @@ function BudgetRow({ b }: { b: Settings["budgets"][number] }) {
         <Button size="sm" tone="primary" disabled={!changed} onClick={() => setOpen(true)}>保存</Button>
         <ReasonDialog
           open={open}
-          title={`调整 ${b.service} 的请求上限`}
-          description="上限是付费请求的熔断：超过后请求暂停并按窗口重试。填 0 表示立即停用这个服务。"
+          title={`调整 ${b.service} ${b.scope === "member" ? "会员池" : b.scope === "admin" ? "admin 测试池" : "全站总池"} 的请求上限`}
+          description="上限是付费请求的熔断：超过后请求暂停并按窗口重试。填 0 停止该池新请求。会员或 admin 调用必须同时满足对应池和全站总池，不自动借用另一池额度。"
           confirmLabel="保存"
           busy={pending === "budget"}
           onClose={() => setOpen(false)}
-          onSubmit={async (reason) => (await run("PUT", `/api/admin/budgets/${encodeURIComponent(b.service)}`, { ...v, reason }, { label: "budget", success: "上限已更新" })) !== null}
+          onSubmit={async (reason) => (await run("PUT", `/api/admin/budgets/${encodeURIComponent(b.service)}${b.scope ? `/scopes/${b.scope}` : ""}`, { ...v, reason }, { label: "budget", success: "上限已更新" })) !== null}
         />
       </td>
     </tr>
@@ -127,19 +128,19 @@ export default function SettingsAdmin({ loaderData: s }: Route.ComponentProps) {
         </Card>
       </div>
       <Card className="mt-5" title="付费请求上限" right={<span>已用：近 1 小时 / 近 24 小时</span>} pad={false}>
-        <div className="overflow-x-auto">
+        <p className="px-4 py-3 text-[12.5px] text-ink-3">次数预算与个人积分独立。会员共享会员池，管理员不扣会员积分但使用 admin 测试池；所有调用还受全站总池限制。历史未归属与系统调用仅计全站，24 小时为滚动窗口。新池默认 0，需明确确认后配置启用。</p><div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-[13px]">
             <thead>
               <tr className="border-b border-line text-left text-[12px] text-ink-3">
                 <th className="px-3 py-2 font-medium">服务</th>
                 <th className="px-3 py-2 font-medium">每分钟</th>
                 <th className="px-3 py-2 font-medium">每小时</th>
-                <th className="px-3 py-2 font-medium">每天</th>
+                <th className="px-3 py-2 font-medium">滚动 24 小时</th>
                 <th className="px-3 py-2 text-right font-medium">已用</th>
                 <th />
               </tr>
             </thead>
-            <tbody>{s.budgets.map((b) => <BudgetRow key={`${b.service}-${b.updated_at}`} b={b} />)}</tbody>
+            <tbody>{s.budgets.flatMap(total => [total,...s.budgetScopes.filter(scope => scope.service === total.service)]).map((b) => <BudgetRow key={`${b.service}-${b.scope ?? "total"}-${b.updated_at}`} b={b} />)}</tbody>
           </table>
         </div>
       </Card>
