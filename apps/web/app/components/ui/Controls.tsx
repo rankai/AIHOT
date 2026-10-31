@@ -6,7 +6,7 @@ const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-accent-contrast hover:bg-accent-ink disabled:opacity-45",
   secondary: "border border-line-strong bg-surface text-ink-2 hover:border-ink-4 hover:text-ink disabled:opacity-50",
   ghost: "text-ink-3 hover:bg-bg-sunk hover:text-ink disabled:opacity-50",
-  danger: "bg-hot text-white hover:opacity-90 disabled:opacity-45",
+  danger: "bg-hot text-white dark:text-bg hover:opacity-90 disabled:opacity-45",
 };
 
 type Size = "sm" | "md" | "lg";
@@ -14,7 +14,7 @@ const SIZES: Record<Size, string> = { sm: "h-8 px-3 text-[12.5px]", md: "h-9 px-
 
 /** The pill button's classes, for links that look like buttons. */
 export function buttonClass(variant: Variant = "secondary", size: Size = "md"): string {
-  return `inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.98] ${SIZES[size]} ${VARIANTS[variant]}`;
+  return `inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-[border-color,transform] duration-150 active:scale-[0.98] ${SIZES[size]} ${VARIANTS[variant]}`;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size }>(function Button(
