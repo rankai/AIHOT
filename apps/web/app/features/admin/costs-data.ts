@@ -11,33 +11,33 @@ const ZONED_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z
 export class CostFilterError extends Error {}
 
 export const COST_GROUP_BY = [
-  { value: "provider", label: "计费供应商" },
-  { value: "service", label: "接口服务" },
+  { value: "provider", label: "服务商" },
+  { value: "service", label: "服务类型" },
   { value: "model", label: "模型" },
-  { value: "skill", label: "Skill" },
+  { value: "skill", label: "技能" },
   { value: "user", label: "用户" },
 ] as const satisfies ReadonlyArray<{ value: CostGroupBy; label: string }>;
 
 const SKILL_SPECIAL_GROUPS = {
   __shared__: {
-    label: "多 Skill 共享步骤",
-    description: "同一模型步骤激活了多个 Skill，费用只计一次，不能拆分相加。",
-    action: "共享步骤不可拆分",
+    label: "多个技能共同使用",
+    description: "同一次调用由多个技能共同完成，费用只计一次，不能分别相加。",
+    action: "这笔费用不能拆分",
   },
   __not_activated__: {
-    label: "已确认无 Skill 激活",
-    description: "该模型步骤已记录激活集合，确认当时没有激活任何 Skill。",
-    action: "无单一 Skill 可筛选",
+    label: "已确认未使用技能",
+    description: "这次调用有完整记录，确认当时没有使用任何技能。",
+    action: "没有单独技能可筛选",
   },
   __historical_unknown__: {
-    label: "历史 Skill 归属未知",
-    description: "该历史模型步骤未记录当时的激活集合，不能反推为“无 Skill”。",
-    action: "历史归属不可筛选",
+    label: "旧记录未保存所用技能",
+    description: "历史记录没有保存当时使用的技能，不能因此推断为没有使用技能。",
+    action: "历史记录无法按技能筛选",
   },
   __not_applicable__: {
-    label: "Skill 不适用",
-    description: "该调用没有对应的助手模型步骤，Skill 归属不适用。",
-    action: "Skill 不适用",
+    label: "无需归属技能",
+    description: "这类调用不属于助手技能，不需要进行技能归属。",
+    action: "无需按技能筛选",
   },
 } as const;
 
@@ -47,8 +47,8 @@ export function skillSpecialGroupPresentation(key: string): {
   action: string;
 } {
   return SKILL_SPECIAL_GROUPS[key as keyof typeof SKILL_SPECIAL_GROUPS] ?? {
-    label: "其他 Skill 状态",
-    description: "无法识别该特殊分组状态。",
+    label: "其他技能状态",
+    description: "暂时无法识别这项技能记录。",
     action: "无法精确筛选",
   };
 }

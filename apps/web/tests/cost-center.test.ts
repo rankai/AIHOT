@@ -13,6 +13,7 @@ import type {
   CostDetailsResponse,
   CostOverviewResponse,
   CostTotals,
+  CostWarning,
 } from "@aihot/contracts/costs";
 
 const start = "2026-10-24T00:00:00+08:00";
@@ -60,6 +61,16 @@ const totals: CostTotals = {
   sharedFeeItems: 1,
 };
 
+const overviewWarnings: CostWarning[] = [
+  { code: "historical_identity_unknown", count: 2, message: "部分调用没有可证明的计费供应商或模型身份。" },
+  { code: "historical_owner_unknown", count: 1, message: "部分历史调用没有可靠的用户或执行者归属。" },
+  { code: "historical_skill_unknown", count: 3, message: "部分历史模型步骤早于 Skill 成本上下文记录，不能反推当时激活范围。" },
+  { code: "shared_skill_steps", count: 1, message: "多 Skill 共同步骤只计一次；按单个 Skill 相加会重复，因此标记为不可加总。" },
+  { code: "wan_cost_conflict", count: 1, message: "部分万相任务的终态用量或价格证据不一致，费用保持未知。" },
+  { code: "unknown_fee_evidence", count: 2, message: "部分外发调用缺少可复算的用量或价格证据，未知费用没有按零计算。" },
+  { code: "facets_truncated", count: 1, message: "候选项过多，列表只显示前 50 项；可使用精确 ID 继续筛选。" },
+];
+
 const overview: CostOverviewResponse = {
   view: "overview",
   asOf: "2026-10-31T01:00:00.000Z",
@@ -91,7 +102,7 @@ const overview: CostOverviewResponse = {
     skills: [{ value: "xhs:synthetic-module", label: "小红书 · 合成模块", count: 0 }],
     truncated: false,
   },
-  warnings: [{ code: "historical_owner_unknown", count: 1, message: "部分历史调用没有可靠的用户或执行者归属。" }],
+  warnings: overviewWarnings,
 };
 
 const details: CostDetailsResponse = {
@@ -129,7 +140,7 @@ const details: CostDetailsResponse = {
     cost: { amount: "0.002000", currency: "CNY", basis: "estimated", estimateBasis: "standard_input_without_cache_breakdown", applicable: true, reason: null },
     usage: { inputTokens: 1000, outputTokens: 20, cachedTokens: 100, estimatedCredits: null, chargedCredits: null, outputSeconds: null },
     priceSnapshot: { state: "ready", reason: null, selectedAt: "2026-10-30T16:30:00.000Z", sourceUrl: "https://example.test/pricing", verifiedOn: "2026-10-29" },
-    warnings: ["多 Skill 共享步骤"],
+    warnings: ["多个 Skill 共享此调用，不可按单个 Skill 分摊"],
   }],
   nextCursor: "detail-next",
   warnings: [{ code: "shared_skill_steps", count: 1, message: "当前页含多个 Skill 共享的调用，不可按单个 Skill 相加。" }],
@@ -152,9 +163,27 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     };
 
     const html = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: overview } }));
-    for (const text of ["成本中心", "概览", "调用明细", "已存账单", "筛选条件", "北京时间", "已登记调用", "已知估算费用", "供应商返回实扣", "费用待核对", "按计费供应商汇总", "identity_source"]) {
-      if (text === "identity_source") continue;
+    for (const text of ["成本中心", "概览", "调用明细", "已存账单", "筛选条件", "北京时间", "调用次数", "有估算费用的记录", "已有实扣的记录", "费用待确认", "按服务商汇总", "需要留意", "7 类数据需要核对", "影响："]) {
       assert(html.includes(text), text);
+    }
+    const warningCopy = [
+      ["2 笔历史调用无法确认服务商或模型", "总费用仍会计入，但按服务商或模型拆分时可能不完整。"],
+      ["1 笔历史调用无法确认调用者", "总费用仍可查看，但这些费用不能可靠分摊到具体用户。"],
+      ["3 笔旧记录没有保存所用技能", "不能推断当时没有使用技能，按技能统计时可能缺少这部分记录。"],
+      ["1 个费用项目由多个技能共同使用", "同一笔费用只计算一次；按不同技能分别相加会重复计算。"],
+      ["1 个万相任务的费用记录存在冲突", "系统不会自行选择其中一个结果，请结合回执和账单进一步核对。"],
+      ["2 笔调用缺少完整费用信息", "这些记录按“费用未知”处理，不会自动当成 0 元。"],
+      ["筛选项较多，列表只展示前 50 项", "可以直接输入准确编号继续筛选，下方费用汇总不受影响。"],
+    ] as const;
+    for (const [title, impact] of warningCopy) {
+      assert(html.includes(title), title);
+      assert(html.includes(impact), impact);
+    }
+    const withoutDetails = html.replace(/<details[\s\S]*?<\/details>/g, "");
+    for (const warning of overviewWarnings) {
+      assert(html.includes(warning.code), warning.code);
+      assert(html.includes(warning.message), warning.message);
+      assert(!withoutDetails.includes(warning.code), `${warning.code} should be folded`);
     }
     assert(html.includes("900,719,925,474,099,312,345.678901 CNY"));
     assert(html.includes("0.002"));
@@ -168,10 +197,10 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     assert(html.includes("cursor=group-next"));
 
     const specialSkillStates = [
-      ["__shared__", "多 Skill 共享步骤", "不能拆分相加", "共享步骤不可拆分"],
-      ["__not_activated__", "已确认无 Skill 激活", "确认当时没有激活任何 Skill", "无单一 Skill 可筛选"],
-      ["__historical_unknown__", "历史 Skill 归属未知", "不能反推为“无 Skill”", "历史归属不可筛选"],
-      ["__not_applicable__", "Skill 不适用", "Skill 归属不适用", "Skill 不适用"],
+      ["__shared__", "多个技能共同使用", "费用只计一次，不能分别相加", "这笔费用不能拆分"],
+      ["__not_activated__", "已确认未使用技能", "确认当时没有使用任何技能", "没有单独技能可筛选"],
+      ["__historical_unknown__", "旧记录未保存所用技能", "不能因此推断为没有使用技能", "历史记录无法按技能筛选"],
+      ["__not_applicable__", "无需归属技能", "不需要进行技能归属", "无需按技能筛选"],
     ] as const;
     for (const [key, label, description, action] of specialSkillStates) {
       const specialSkillOverview: CostOverviewResponse = {
@@ -190,8 +219,8 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
       assert(specialSkillHtml.includes(description), key);
       assert(specialSkillHtml.includes(action), key);
       assert(!specialSkillHtml.includes(">查看明细</a>"), key);
-      if (key === "__shared__") assert(specialSkillHtml.includes("部分多 Skill 步骤共享一次模型调用，不能把这些分组金额相加。"));
-      if (key === "__historical_unknown__") assert(!specialSkillHtml.includes("已确认无 Skill 激活"));
+      if (key === "__shared__") assert(specialSkillHtml.includes("同一次调用由多个技能共同完成时，费用只计算一次，不能把这些分组金额相加。"));
+      if (key === "__historical_unknown__") assert(!specialSkillHtml.includes("已确认未使用技能"));
     }
     for (const key of Object.keys({
       __shared__: true,
@@ -201,10 +230,12 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     })) {
       assert.equal(typeof data.skillSpecialGroupPresentation(key).label, "string");
     }
-    assert.equal(data.skillSpecialGroupPresentation("unexpected").label, "其他 Skill 状态");
+    assert.equal(data.skillSpecialGroupPresentation("unexpected").label, "其他技能状态");
 
     const detailHtml = render(createElement(feature.CostCenter, { page: { view: "details", range: { start, end }, costs: details } }), "/admin/costs?view=details");
-    for (const text of ["调用明细 · 1 条", "运行 #42", "0.002", "CNY", "逐笔实扣", "文档估算", "标准输入价估算，不含缓存优惠", "价格快照：已锁定", "小红书检索", "多 Skill 共享步骤", "复制回执", "下一页调用明细"]) assert(detailHtml.includes(text), text);
+    for (const text of ["调用明细 · 1 条", "左右滑动表格，可查看费用和记录依据", "运行 #42", "0.002", "CNY", "按资料估算", "标准输入价估算，不含缓存优惠", "价格已锁定", "小红书检索", "多个技能共同完成这次调用，费用不能按单个技能拆分", "复制回执", "下一页调用明细", "助手模型调用", "生成文本", "成功", "实时调用", "正式环境", "1.25 秒", "模型输入量/输出量"]) assert(detailHtml.includes(text), text);
+    assert(detailHtml.includes("技术详情"));
+    assert(detailHtml.includes("identity_source") === false);
     assert(detailHtml.includes("synthetic-model-with-a-long-name-that-must-wrap"));
     assert(detailHtml.includes("/admin/operations/42"));
 
