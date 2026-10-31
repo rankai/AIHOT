@@ -95,7 +95,7 @@ export function ReportPhoneNav({ kind, index, current, today }: { kind: ReportKi
   const presentation = usePresentation();
   const recent = index.slice(0, 3);
   const earlier = kind === "daily" ? "/daily/archive" : "#report-history";
-  const chip = "inline-flex h-9 shrink-0 items-center rounded-full border px-4 text-[13px] transition-colors";
+  const chip = "inline-flex h-9 shrink-0 items-center rounded-full border px-4 text-[13px]";
   return (
     <div className="pt-3 lg:hidden">
       <PillTabs fill layoutId="report-kind-phone" label="切换日报、周报、月报" active={kind} items={KINDS.map((k) => ({ key: k, label: k === "daily" ? navigationLabel(presentation, "daily", KIND_LABEL[k]) : KIND_LABEL[k], to: KIND_PATH[k] }))} />

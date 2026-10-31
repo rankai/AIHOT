@@ -136,7 +136,7 @@ type ButtonTone = "primary" | "secondary" | "danger" | "ghost";
 const BTN: Record<ButtonTone, string> = {
   primary: "bg-ink text-bg hover:opacity-85",
   secondary: "bg-surface text-ink ring-1 ring-line-strong hover:bg-bg-sunk",
-  danger: "bg-hot text-white hover:opacity-90",
+  danger: "bg-hot text-white dark:text-bg hover:opacity-90",
   ghost: "text-ink-2 hover:bg-bg-sunk",
 };
 
@@ -167,7 +167,7 @@ export function ButtonLink({ to, children, tone = "secondary", size = "md" }: { 
   return (
     <Link
       to={to}
-      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[opacity,background-color] ${
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-opacity ${
         size === "sm" ? "h-7 px-2.5 text-[12.5px]" : "h-9 px-3.5 text-[13.5px]"
       } ${BTN[tone]}`}
     >
@@ -222,7 +222,7 @@ export function FilterChips({ param, options }: { param: string; options: Array<
             key={o.value || "all"}
             to={`?${next}`}
             preventScrollReset
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors ${active ? "bg-ink text-bg" : "bg-surface text-ink-2 ring-1 ring-line hover:bg-bg-sunk"}`}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] ${active ? "bg-ink text-bg" : "bg-surface text-ink-2 ring-1 ring-line hover:bg-bg-sunk"}`}
           >
             {o.label}
             {o.count !== undefined && <span className={`num text-[11.5px] ${active ? "text-bg/70" : "text-ink-4"}`}>{o.count}</span>}
