@@ -11,6 +11,7 @@
   "dependencies": {
     "@aihot/contracts": "*",
     "@aihot/industry": "*",
+    "@assistant-ui/react": "0.15.32",
     "@react-router/node": "8.4.0",
     "isbot": "5.2.2",
     "motion": "13.4.4",

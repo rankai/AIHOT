@@ -261,8 +261,9 @@ test("private upload options expose actual input limits and MOV permits an eight
   config.devAdmin={displayName:"Asset test"};
   const response=await app.inject({method:"GET",url:"/api/admin/assets/options"});
   assert.equal(response.statusCode,200);const options=response.json();
-  assert.deepEqual(options.limits,{imageBytes:10_000_000,audioBytes:20_000_000,videoBytes:50_000_000,imagePixels:16_000_000});
+  assert.deepEqual(options.limits,{imageBytes:10_000_000,audioBytes:20_000_000,videoBytes:50_000_000,imagePixels:16_000_000,textBytes:2*1024*1024});
   assert.equal(options.formats.some((f:{format:string})=>f.format==="m4a"),false);
+  assert.deepEqual(options.formats.filter((f:{kind:string})=>f.kind==="text").map((f:{format:string})=>f.format),["txt","md"]);
   assert.deepEqual(options.imageValidation.bmp.dibHeaders,[12,40,108,124]);
   assert.equal(options.imageValidation.gif.totalFramePixels,16_000_000);
   const fixtures=JSON.parse(await readFile(new URL("./fixtures/operation-media.json",import.meta.url),"utf8"));

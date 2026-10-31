@@ -52,9 +52,14 @@ function objectsCost(objects: number) {
   return { amount: objects * 0.0002, currency: "USD", basis: "estimated" as const };
 }
 
+/** Only the documented API origin proves that SocialData is the billing provider. */
+export function socialDataBillingProvider(base: string): "socialdata" | null {
+  return base.replace(/\/+$/, "") === "https://api.socialdata.tools" ? "socialdata" : null;
+}
+
 /** The API root; tests point it at a local stub. */
 function apiBase(): string {
-  return (credential("collectors", "SOCIALDATA_BASE_URL") ?? "https://api.socialdata.tools").replace(/\/$/, "");
+  return (credential("collectors", "SOCIALDATA_BASE_URL") ?? "https://api.socialdata.tools").replace(/\/+$/, "");
 }
 
 /**
@@ -63,14 +68,22 @@ function apiBase(): string {
  */
 export async function searchTweets(query: string, opts: { purpose: string; subject: string; window: string; type?: "Latest" | "Top"; cursor?: string | null; paid?: PaidRequestOptions }): Promise<SearchResult> {
   const key = credential("collectors", "SOCIALDATA_API_KEY");
+  const base = apiBase();
   const type = opts.type ?? "Latest";
   const receipt = await paidRequest(
-    { service: "socialdata", purpose: opts.purpose, subject: opts.subject, identity: { query, type, cursor: opts.cursor ?? null, window: opts.window }, requestSummary: { query, type } },
+    {
+      service: "socialdata",
+      purpose: opts.purpose,
+      subject: opts.subject,
+      identity: { query, type, cursor: opts.cursor ?? null, window: opts.window },
+      requestSummary: { query, type },
+      costIdentity: { billingProvider: socialDataBillingProvider(base), operation: "twitter.search", model: null },
+    },
     async () => {
       if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
       const sp = new URLSearchParams({ query, type });
       if (opts.cursor) sp.set("cursor", opts.cursor);
-      const res = await guardedFetch(`${apiBase()}/twitter/search?${sp}`, {
+      const res = await guardedFetch(`${base}/twitter/search?${sp}`, {
         headers: { authorization: `Bearer ${key}`, accept: "application/json" },
         // Deeper pages of a search over two dozen accounts can take well over 20 seconds.
         timeoutMs: 60_000,
@@ -130,10 +143,18 @@ export interface SdArticle {
 export async function getArticle(tweetId: string, opts: { purpose: string; subject: string }): Promise<SdArticle | null> {
   const key = credential("collectors", "SOCIALDATA_API_KEY");
   if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
+  const base = apiBase();
   const receipt = await paidRequest(
-    { service: "socialdata", purpose: opts.purpose, subject: opts.subject, identity: { article: tweetId }, requestSummary: { article: tweetId } },
+    {
+      service: "socialdata",
+      purpose: opts.purpose,
+      subject: opts.subject,
+      identity: { article: tweetId },
+      requestSummary: { article: tweetId },
+      costIdentity: { billingProvider: socialDataBillingProvider(base), operation: "twitter.article", model: null },
+    },
     async () => {
-      const res = await guardedFetch(`${apiBase()}/twitter/article/${encodeURIComponent(tweetId)}`, {
+      const res = await guardedFetch(`${base}/twitter/article/${encodeURIComponent(tweetId)}`, {
         headers: { authorization: `Bearer ${key}`, accept: "application/json" },
         timeoutMs: 30_000,
         maxBytes: 4 * 1024 * 1024,
@@ -158,10 +179,18 @@ export async function getArticle(tweetId: string, opts: { purpose: string; subje
 export async function getTweet(id: string, opts: { purpose: string; subject: string }): Promise<SdTweet | null> {
   const key = credential("collectors", "SOCIALDATA_API_KEY");
   if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
+  const base = apiBase();
   const receipt = await paidRequest(
-    { service: "socialdata", purpose: opts.purpose, subject: opts.subject, identity: { tweet: id }, requestSummary: { tweet: id } },
+    {
+      service: "socialdata",
+      purpose: opts.purpose,
+      subject: opts.subject,
+      identity: { tweet: id },
+      requestSummary: { tweet: id },
+      costIdentity: { billingProvider: socialDataBillingProvider(base), operation: "twitter.tweets", model: null },
+    },
     async () => {
-      const res = await guardedFetch(`${apiBase()}/twitter/tweets/${encodeURIComponent(id)}`, {
+      const res = await guardedFetch(`${base}/twitter/tweets/${encodeURIComponent(id)}`, {
         headers: { authorization: `Bearer ${key}`, accept: "application/json" },
         timeoutMs: 30_000,
         maxBytes: 4 * 1024 * 1024,

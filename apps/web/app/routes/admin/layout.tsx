@@ -43,6 +43,7 @@ const NAV: Array<{ group: string; items: Array<{ to: string; label: string; coun
       { to: "/admin/operations", label: "执行记录" },
       { to: "/admin/runs", label: "运行", count: "runs", tone: "bad" },
       { to: "/admin/models", label: "模型与评测" },
+      { to: "/admin/costs", label: "成本中心" },
       { to: "/admin/selectbench", label: "SelectBench" },
       { to: "/admin/settings", label: "设置" },
       { to: "/admin/audit", label: "审计记录" },

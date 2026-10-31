@@ -1,5 +1,5 @@
 /** Integer trial credits. No monetary exchange rate is implied. */
-export type ToolCreditKind = "query" | "x-account" | "x-tweet" | "images" | "videos" | "ai-search" | "transcriptions" | "xhs-comments" | "media-upload"
+export type ToolCreditKind = "assistant-turn" | "query" | "x-account" | "x-tweet" | "images" | "videos" | "ai-search" | "transcriptions" | "xhs-comments" | "media-upload"
   | "images/query" | "videos/query" | "ai-search/query" | "transcriptions/query" | "xhs-comments/query";
 
 /** Constructed from validated tool input by the server, never accepted as a client price. */

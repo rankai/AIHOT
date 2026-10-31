@@ -59,8 +59,8 @@ export async function applyApprovedMemberPrices(actor: string): Promise<{ applie
   const [existing] = await tx`SELECT version FROM member_price_applications WHERE version=${catalog.version}`;
   if (existing) return {applied:false,version:catalog.version};
   const before = await tx`SELECT * FROM member_tool_prices WHERE enabled`;
-  // Retire broad/custom legacy member rules before applying the approved complete catalog.
-  await tx`UPDATE member_tool_prices SET enabled=false,version=version+1,updated_at=now() WHERE enabled`;
+  // Retire legacy tool rules; assistant turns retain their separately configured prices.
+  await tx`UPDATE member_tool_prices SET enabled=false,version=version+1,updated_at=now() WHERE enabled AND NOT (kind='assistant-turn' AND provider='assistant')`;
   for (const offer of catalog.offers) {
    const match = offer.kind === 'images' ? {n:1} : offer.kind === 'videos' && offer.provider === 'redfox' ? {duration:8,generateAudio:true} : {};
    const second = offer.unit === '输入秒' ? offer.credits : 0, base = second ? 0 : offer.credits;

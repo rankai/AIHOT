@@ -1,3 +1,4 @@
+import { modelBillingProvider } from "./llm.ts";
 // Text embeddings through receipts, used only for the event grouping's candidate recall. Any
 // OpenAI-compatible /embeddings endpoint (EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL);
 // with a DashScope key and nothing else set, Aliyun text-embedding-v4 at 1024 dimensions. Without
@@ -5,7 +6,7 @@
 import { config, credential } from "../config.ts";
 import { sql } from "../db.ts";
 import { sha256 } from "../lib/ids.ts";
-import { paidRequest, ProviderRejectedError } from "./receipts.ts";
+import { paidRequest, estimatedCatalogCost, ProviderRejectedError } from "./receipts.ts";
 
 const own = !!credential("models", "EMBEDDING_API_KEY");
 export const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || (own ? "text-embedding-3-small" : "text-embedding-v4");
@@ -37,8 +38,8 @@ async function embedBatch(texts: string[], subject: string): Promise<number[][]>
   const key = own ? credential("models", "EMBEDDING_API_KEY") : credential("models", "DASHSCOPE_API_KEY");
   if (!key) throw new Error("EMBEDDING_API_KEY (or DASHSCOPE_API_KEY) missing");
   const receipt = await paidRequest(
-    { service: SERVICE, model: EMBEDDING_MODEL, purpose: "embedding", subject, identity: { model: EMBEDDING_MODEL, dims: EMBEDDING_DIMS, texts: texts.map((t) => sha256(t)) }, requestSummary: { count: texts.length } },
-    async () => {
+    { service: SERVICE, model: EMBEDDING_MODEL, costIdentity: { billingProvider: modelBillingProvider(base), operation: "embeddings", model: EMBEDDING_MODEL }, purpose: "embedding", subject, identity: { model: EMBEDDING_MODEL, dims: EMBEDDING_DIMS, texts: texts.map((t) => sha256(t)) }, requestSummary: { count: texts.length } },
+    async ({ priceSnapshot }) => {
       const res = await fetch(`${base.replace(/\/$/, "")}/embeddings`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
@@ -48,7 +49,7 @@ async function embedBatch(texts: string[], subject: string): Promise<number[][]>
       const text = await res.text();
       if (!res.ok) throw new ProviderRejectedError(`embeddings HTTP ${res.status}: ${text.slice(0, 200)}`, res.status, res.status === 429 || res.status >= 500);
       const json = JSON.parse(text) as { data: Array<{ embedding: number[]; index: number }>; usage?: Record<string, unknown> };
-      return { response: json, usage: json.usage ?? null, cost: null };
+      return { response: json, usage: json.usage ?? null, cost: estimatedCatalogCost(priceSnapshot, json.usage) };
     },
   );
   const data = (receipt.response as { data: Array<{ embedding: number[]; index: number }> }).data;

@@ -48,7 +48,7 @@ import { queryDouyin } from "./douyin.ts";
 import { WechatOperationId,wechatOperations } from "./wechat-contract.ts";
 import { queryWechat } from "./wechat.ts";
 import { z } from "zod";
-import { sql } from "../../db.ts";
+import { sql, type Tx } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
 import { createRun, lockMemberAdmission, StaleOperationError, requireExecution, receiptOptions, saveResult, advanceRun, type RunRow, type Execution } from "../operations/store.ts";
 import { queueOperationStep } from "../operations/queue.ts";
@@ -106,10 +106,13 @@ export function parseSynchronousQuery(raw: unknown) {
   return { request, parameters, selected };
 }
 export async function createSynchronousQuery(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){
+  return sql.begin(tx=>createSynchronousQueryTx(tx,raw,actor,key,authorization));
+}
+export async function createSynchronousQueryTx(tx:Tx,raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const { request, parameters, selected } = parseSynchronousQuery(raw);
   const intent={operationId:request.operationId,parameters,...(request.sourceResultId!==undefined?{sourceResultId:request.sourceResultId}:{})};
-  return sql.begin(async tx=>{
+  {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
@@ -119,7 +122,7 @@ export async function createSynchronousQuery(raw:unknown,actor:string,key:unknow
     // One command snapshot: retries reuse it; a new explicit query may request fresh provider data.
     const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:"redfox.sync.query",contractVersion:1,stepKey:"redfox.sync.query",input:{...(origin?{origin}:{}),commandIntent:intent,operationId:request.operationId,parameters,window:`query:${actor}:${commandKey}`,mode:"query",platform:selected.platform},limits:{steps:1,retries:3}});
     await queueOperationStep(tx,run.id);return run;
-  });
+  }
 }
 export async function executeSynchronousQuery(execution:Execution,run:RunRow){
   const selected=selectQuery(run.input.operationId,run.input.origin);

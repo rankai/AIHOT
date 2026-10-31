@@ -63,6 +63,7 @@ export async function submitUserTool(userId: number, kind: unknown, raw: unknown
     case "xhs-comments/query": result = await createXhsCommentQuery(body, actor, commandKey, authorization); break;
     case "media-upload": result = await createMediaUpload(body, actor, commandKey, authorization); break;
   }
+  if (!result) throw new AccountError(400, "invalid_request", "Unsupported tool kind");
   return { runId: result.id, status: result.status };
 }
 

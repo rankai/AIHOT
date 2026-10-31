@@ -60,6 +60,7 @@ export function sidebarGroups(presentation: SitePresentation = DEFAULT_PRESENTAT
 export function mobileTabs(presentation: SitePresentation = DEFAULT_PRESENTATION): NavItem[] {
   return [
     ...visibleNavigation(presentation).filter(({ id }) => id === "selected" || id === "all" || id === "daily").map((entry) => navigationItem(entry, "mobile")),
+    { to: "/assistant", label: "助手", icon: IconMessage },
     { to: "/more", label: "更多", icon: IconApps, changelog: true },
   ];
 }

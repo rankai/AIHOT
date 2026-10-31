@@ -1,6 +1,6 @@
-import type { AssetUploadOptions } from "./asset-types.ts";
+import type { AssetUploadOptions, AssetUploadFormat } from "./asset-types.ts";
 import type { PrivateAsset } from "./image-types.ts";
-export interface MediaUploadOptions extends AssetUploadOptions { operationId: string; service: string; transportVerified: boolean }
+export interface MediaUploadOptions extends AssetUploadOptions { formats: (Omit<AssetUploadFormat, "kind"> & { kind: "image" | "audio" | "video" })[]; operationId: string; service: string; transportVerified: boolean }
 export function mediaUploadIssue(asset: PrivateAsset, options: MediaUploadOptions): string | null {
   if (asset.status !== "available") return "素材当前不可用，不能上传到供应商。";
   const format = options.formats.find(format => format.mime === asset.content_type);

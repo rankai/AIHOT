@@ -4,7 +4,7 @@ import type { Route } from "./+types/settings";
 import { adminGet } from "../../lib/admin.server";
 import { useAdminAction } from "../../features/admin/action";
 import { bj, num } from "../../features/admin/format";
-import { AdminPage, Badge, Button, Card, DataTable, Input, ReasonDialog } from "../../features/admin/ui";
+import { AdminPage, Badge, Button, ButtonLink, Card, DataTable, Input, ReasonDialog } from "../../features/admin/ui";
 import { toast } from "../../features/admin/toast";
 
 interface Settings {
@@ -127,7 +127,7 @@ export default function SettingsAdmin({ loaderData: s }: Route.ComponentProps) {
           />
         </Card>
       </div>
-      <Card className="mt-5" title="付费请求上限" right={<span>已用：近 1 小时 / 近 24 小时</span>} pad={false}>
+      <Card className="mt-5" title="付费请求上限" right={<div className="flex flex-wrap items-center justify-end gap-2"><span>已用：近 1 小时 / 近 24 小时</span><ButtonLink size="sm" to="/admin/costs?view=overview">查看成本中心</ButtonLink></div>} pad={false}>
         <p className="px-4 py-3 text-[12.5px] text-ink-3">次数预算与个人积分独立。会员共享会员池，管理员不扣会员积分但使用 admin 测试池；所有调用还受全站总池限制。历史未归属与系统调用仅计全站，24 小时为滚动窗口。新池默认 0，需明确确认后配置启用。</p><div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-[13px]">
             <thead>

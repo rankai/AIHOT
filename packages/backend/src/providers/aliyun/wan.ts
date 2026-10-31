@@ -21,7 +21,7 @@ export async function createWanGeneration(raw: unknown, actor: string, key: unkn
     await lockAssetInputs(tx, fileKeys);
     const media = await wanMedia(parameters, actor, tx);
     if (authorization && (authorization.intent.videoSeconds !== media.videoSeconds || stableJson(authorization.intent.input) !== stableJson({ ...parameters, media: { facts: media.facts, portraitHash: media.portraitHash, videoHash: media.videoHash } }))) throw new StaleOperationError("素材事实已变化，请重新报价");
-    const run = await createRun(tx, { actor, commandKey, authorization, provider: "aliyun", operationKey: WAN_GENERATE, contractVersion: 1, input: { mode: "video", commandIntent, parameters, fileKeys, media, configIdentity: wanConfig(), priceSnapshot: { perSecondCny: parameters.mode === "wan-std" ? "0.6" : "0.9", currency: "CNY", basis: "documented-estimate", date: "2026-10-29" }, startedAt: new Date().toISOString() }, stepKey: "aliyun.wan.upload", limits: WAN_LIMITS });
+    const run = await createRun(tx, { actor, commandKey, authorization, provider: "aliyun", operationKey: WAN_GENERATE, contractVersion: 1, input: { mode: "video", commandIntent, parameters, fileKeys, media, configIdentity: wanConfig(), priceSnapshot: { unit: "second", perSecondCny: parameters.mode === "wan-std" ? "0.6" : "0.9", currency: "CNY", basis: "documented-estimate", ruleVersion: "wan2.2-animate-mix-2026-10-29", date: "2026-10-29", sourceUrl: "https://help.aliyun.com/zh/model-studio/wan2-2-animate-mix" }, startedAt: new Date().toISOString() }, stepKey: "aliyun.wan.upload", limits: WAN_LIMITS });
     await tx`UPDATE operation_runs SET progress=${tx.json({ uploadIndex: 0, objects: [], pollSequence: 0 })} WHERE id=${run.id}`;
     await queueOperationStep(tx, run.id); return run;
   });

@@ -5,6 +5,11 @@ import { credential } from "../config.ts";
 import { guardedFetch } from "../lib/http-fetch.ts";
 import { paidRequest, ProviderRejectedError, type CallOutcome, type PaidRequestOptions } from "./receipts.ts";
 
+/** Only the documented Dajiala origin proves that Dajiala is the billing provider. */
+export function dajialaBillingProvider(base: string): "dajiala" | null {
+  return base.replace(/\/+$/, "") === "https://www.dajiala.com" ? "dajiala" : null;
+}
+
 export interface MpPost {
   position: number;
   url: string;
@@ -36,7 +41,7 @@ export interface MpArticle {
 
 function base(): { url: string; key: string | null } {
   const key = credential("collectors", "DAJIALA_KEY");
-  return { url: (credential("collectors", "DAJIALA_BASE_URL") ?? "https://www.dajiala.com").replace(/\/$/, ""), key };
+  return { url: (credential("collectors", "DAJIALA_BASE_URL") ?? "https://www.dajiala.com").replace(/\/+$/, ""), key };
 }
 
 /** Provider codes: -1 rate limit (retry later); 20001 balance; 101/104/107 account gone; others rejected. */
@@ -51,7 +56,14 @@ function outcomeOf(json: { code?: number; msg?: string; cost_money?: number }, l
 export async function mpHistory(ghid: string, opts: { subject: string; window: string; paid?: PaidRequestOptions }): Promise<MpHistory> {
   const { url, key } = base();
   const receipt = await paidRequest(
-    { service: "dajiala", purpose: "mp_history", subject: opts.subject, identity: { ghid, window: opts.window }, requestSummary: { ghid } },
+    {
+      service: "dajiala",
+      purpose: "mp_history",
+      subject: opts.subject,
+      identity: { ghid, window: opts.window },
+      requestSummary: { ghid },
+      costIdentity: { billingProvider: dajialaBillingProvider(url), operation: "post_history", model: null },
+    },
     async () => {
       if (!key) throw new Error("DAJIALA_KEY is not configured");
       const res = await guardedFetch(`${url}/fbmain/monitor/v3/post_history`, {
@@ -82,7 +94,14 @@ export async function mpHistory(ghid: string, opts: { subject: string; window: s
 export async function mpArticle(articleUrl: string, opts: { subject: string; identity: string; paid?: PaidRequestOptions }): Promise<MpArticle> {
   const { url, key } = base();
   const receipt = await paidRequest(
-    { service: "dajiala", purpose: "mp_article", subject: opts.subject, identity: { article: opts.identity }, requestSummary: { url: articleUrl } },
+    {
+      service: "dajiala",
+      purpose: "mp_article",
+      subject: opts.subject,
+      identity: { article: opts.identity },
+      requestSummary: { url: articleUrl },
+      costIdentity: { billingProvider: dajialaBillingProvider(url), operation: "article_detail", model: null },
+    },
     async () => {
       if (!key) throw new Error("DAJIALA_KEY is not configured");
       const res = await guardedFetch(`${url}/fbmain/monitor/v3/article_detail?${new URLSearchParams({ url: articleUrl, key, mode: "1", verifycode: "" })}`, {

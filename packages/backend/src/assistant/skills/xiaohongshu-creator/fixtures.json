@@ -1,0 +1,86 @@
+{
+  "M1/success": {
+    "moduleId": "M1",
+    "case": "success",
+    "input": "用户确认产品重100克",
+    "expected": "xhs-note",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "**Step 3：引导用户上传个人风格参考（必问）**",
+      "### 4.3 输出格式（严格）",
+      "基于 50 条数据深度分析："
+    ]
+  },
+  "M1/missing-input": {
+    "moduleId": "M1",
+    "case": "missing-input",
+    "input": "",
+    "expected": "ask_question",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "**Step 3：引导用户上传个人风格参考（必问）**",
+      "### 4.3 输出格式（严格）",
+      "基于 50 条数据深度分析："
+    ]
+  },
+  "M1/delivery": {
+    "moduleId": "M1",
+    "case": "delivery",
+    "input": "用户确认产品重100克",
+    "expected": "xhs-note",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "**Step 3：引导用户上传个人风格参考（必问）**",
+      "### 4.3 输出格式（严格）",
+      "基于 50 条数据深度分析："
+    ]
+  },
+  "M2/success": {
+    "moduleId": "M2",
+    "case": "success",
+    "input": "用户确认产品重100克",
+    "expected": "xhs-note",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "至少使用5个不重复的emoji表情符号",
+      "转换前后文案段落结构保持一致。",
+      "标题和每个段落都必须包含emoji表情符号"
+    ]
+  },
+  "M2/missing-input": {
+    "moduleId": "M2",
+    "case": "missing-input",
+    "input": "",
+    "expected": "ask_question",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "至少使用5个不重复的emoji表情符号",
+      "转换前后文案段落结构保持一致。",
+      "标题和每个段落都必须包含emoji表情符号"
+    ]
+  },
+  "M2/delivery": {
+    "moduleId": "M2",
+    "case": "delivery",
+    "input": "用户确认产品重100克",
+    "expected": "xhs-note",
+    "requiredEntryText": [
+      "### 3.2 用词规范（强制）",
+      "### 3.3 关键词类型判断（M1/M3 共用）",
+      "### 3.4 数据时间规则",
+      "至少使用5个不重复的emoji表情符号",
+      "转换前后文案段落结构保持一致。",
+      "标题和每个段落都必须包含emoji表情符号"
+    ]
+  }
+}

@@ -32,7 +32,7 @@ export async function receiveAssetUpload(req: FastifyRequest, reply: FastifyRepl
       let received: { filename: string; mime: string; bytes: number; sha256: string } | undefined;
       for await (const part of req.parts()) {
         if (part.type !== "file" || part.fieldname !== "file" || received) throw new AssetError(400, "Exactly one file field named file is required.");
-        const limit=uploadLimitForMime(part.mimetype);
+        const limit=uploadLimitForMime(part.mimetype,part.filename);
         const content = await writeUpload(part.file, temp.file, controller.signal,limit);
         if (part.file.truncated) throw new AssetError(413, "Media must be at most 50 MB.");
         received = { ...content, filename: part.filename, mime: part.mimetype };

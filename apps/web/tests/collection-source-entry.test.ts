@@ -143,16 +143,17 @@ test("source collection entry, legacy redirect, query draft and task return use 
       const query = render(createElement((await import(pathToFileURL(join(directory,"redfox.mjs")).href)).default,{loaderData:{operations:[operation],initialView:"platforms"}}),"/admin/data-tools?view=platforms");
       assert(query.includes("带入新采集订阅"));assert(query.includes("带入信源页的采集订阅草稿"));assert(!query.includes('aria-label="采集订阅配置"'));assert(query.includes('href="/admin/sources?view=collections"'));
     });
-    await t.test("data tools workspace follows URL while all eight workspaces remain mounted", () => {
+    await t.test("data tools workspace follows URL while all seven query and creation workspaces remain mounted", () => {
       const html = render(createElement(redfox.default, { loaderData: { operations: [operation], initialView: "x" } }), "/admin/data-tools?view=platforms");
       assert(html.includes("进度与结果")); assert(html.includes("辅助工具"));
       assert.match(html, /aria-pressed="true"[^>]*>平台查询<\/button>/);
-      assert.equal((html.match(/aria-pressed=/g) ?? []).length, 8);
+      assert.equal((html.match(/aria-pressed=/g) ?? []).length, 7);
       assert(html.includes("X 账号查询")); assert(html.includes("X 推文详情查询")); assert(html.includes("带入新采集订阅"));
       assert(html.includes("本地素材上传后在私有素材库查看"));
+      assert(!html.includes("费用与账单"));
       const nav = html.slice(0, html.indexOf('aria-label="数据工具工作区"'));
       assert(nav.includes('href="/admin/operations"')); assert(!nav.includes('href="/admin/settings"')); assert(!nav.includes('href="/admin/runs"'));
-      assert(html.includes('href="/admin/settings"')); assert(html.includes('href="/admin/runs"'));
+      assert(!html.includes('href="/admin/settings"')); assert(!html.includes('href="/admin/runs"'));
     });
     await t.test("legacy Redfox URL redirects to data tools without reading APIs",async()=>{
       globalThis.fetch = async()=>{throw new Error("redirect must not read APIs");};

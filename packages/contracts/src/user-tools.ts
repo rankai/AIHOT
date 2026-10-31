@@ -28,6 +28,8 @@ export type ToolRunStatus = "active" | "waiting" | "needs_review" | "stopped" | 
 export type ToolRunAction = "stop" | "resume" | "abandon";
 export type ToolRunCategory = "query" | "ai-search" | "images" | "videos" | "transcriptions" | "xhs-comments" | "media-upload";
 export interface ToolRunRow {
+  /** Owned canonical assistant conversation, when this run belongs to one. */
+  assistantSessionId?: string;
   id: number;
   provider: string;
   operationKey: string;

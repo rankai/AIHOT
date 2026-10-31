@@ -18,7 +18,7 @@ export function assetUploadFormat(filename: string, options: AssetUploadOptions)
 export function assetUploadIssue(file: Pick<File, "name" | "size">, options: AssetUploadOptions): string | null {
   const format = assetUploadFormat(file.name, options);
   if (!format) return "此扩展名不在本地上传支持列表中；文件已保留，请重新选择受支持的格式。";
-  const limit = options.limits[`${format.kind}Bytes`];
+  const limit = options.limits[`${format.kind}Bytes`] ?? 2 * 1024 * 1024;
   if (file.size > limit) return `${assetKindLabels[format.kind]}不能超过 ${limit / 1_000_000} MB（${limit} 字节）；文件已保留。`;
   if (file.size === 0) return "不能上传空文件；请重新选择。";
   return null;

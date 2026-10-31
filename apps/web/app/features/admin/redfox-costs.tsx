@@ -4,7 +4,7 @@ import { billParameterText, billRecordPage, redfoxCostBasis, redfoxCostEnvironme
 import type { RedfoxCostInput, RedfoxCostInterval, RedfoxCostsData, RedfoxSelectedBill } from "./redfox-cost-types";
 import { Button, Card, DataTable, Empty, Field, Input, Json, KV, Select, Time } from "./ui";
 const services: Record<string, string> = { "redfox.collect": "Redfox 采集", "redfox.query": "Redfox 单次查询", "redfox.account": "Redfox 账户查询", "redfox.media": "Redfox 媒体处理 / 上传", "redfox.image": "Redfox 图片创作", "redfox.video": "Redfox 视频创作", "redfox.poll": "Redfox 任务查询", "redfox.transcript": "Redfox 语音转写", "redfox.ai_search": "Redfox AI 搜索", "agentkey.collect": "AgentKey 采集", "agentkey.query": "AgentKey 单次查询" };
-export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostInterval }) {
+export function RedfoxCosts({ initialInterval, mode = "full" }: { initialInterval: RedfoxCostInterval; mode?: "full" | "billing" }) {
   const [input, setInput] = useState<RedfoxCostInput>(() => ({ ...initialInterval, billRunId: "" }));
   const [snapshot, setSnapshot] = useState<{ key: string; data: RedfoxCostsData } | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null);
   const request = useRef<{ sequence: number; controller?: AbortController }>({ sequence: 0 });
@@ -12,9 +12,9 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
   const change = (patch: Partial<RedfoxCostInput>) => { request.current.controller?.abort(); request.current.sequence += 1; setLoading(false); setError(null); setInput(previous => ({ ...previous, ...patch })); };
   const current = snapshot?.key === redfoxCostInputKey(input);
   return <div className="min-w-0 space-y-5">
-    <Card title="费用与账单（已存数据）">
-      <p className="mb-4 text-[13px] text-ink-3">读取本地已存数据不触发 Redfox 或 AgentKey。要更新 Redfox 上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/data-tools?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询账单；本页不发起供应商请求。</p>
-      <form aria-label="已存费用查询条件" className="space-y-4" onSubmit={async event => {
+    <Card title={mode === "billing" ? "Redfox 已存账单页" : "费用与账单（已存数据）"}>
+      <p className="mb-4 text-[13px] leading-relaxed text-ink-3">只读取本地已存响应，不触发 Redfox 或 AgentKey。要更新上游账单，请到<Link className="text-accent" target="_blank" rel="noreferrer" to="/admin/data-tools?view=platforms">平台查询 ↗</Link>选择 Redfox 账户并显式查询；成本中心的供应商、模型、Skill 与用户筛选不作用于账单。</p>
+      <form aria-label="已存账单查询条件" className="space-y-4" onSubmit={async event => {
         event.preventDefault(); if (loading) return;
         let url: string;
         try { url = redfoxCostQuery(input); setError(null); } catch (error) { setError((error as Error).message); return; }
@@ -29,15 +29,22 @@ export function RedfoxCosts({ initialInterval }: { initialInterval: RedfoxCostIn
         } catch (error) { if (!controller.signal.aborted && sequence === request.current.sequence) setError((error as Error).message); }
         finally { if (sequence === request.current.sequence) setLoading(false); }
       }}>
-        <div className="grid min-w-0 gap-4 sm:grid-cols-2"><Field label="开始时间（ISO，含时区）" hint="范围按外发尝试开始时间：含开始，不含结束。"><Input aria-label="开始时间（ISO，含时区）" required value={input.start} onChange={event => change({ start: event.target.value })} /></Field><Field label="结束时间（ISO，含时区）" hint="例如 2026-10-21T00:00:00Z 或 +08:00 偏移。"><Input aria-label="结束时间（ISO，含时区）" required value={input.end} onChange={event => change({ end: event.target.value })} /></Field></div>
-        {snapshot && <Field label="已存账单页" hint="最近已存清单最多 50 个任务，不是该时段全部账单；同 receipt 表示同一响应。"><Select aria-label="已存账单页" value={input.billRunId} onChange={event => change({ billRunId: event.target.value })}><option value="">只读取本地费用分组</option>{snapshot.data.billPages.map(page => <option key={page.runId} value={page.runId}>任务 #{page.runId} · 回执 #{page.receiptId} · pageNum {billParameterText(page.parameters, "pageNum")} · pageSize {billParameterText(page.parameters, "pageSize")}</option>)}</Select></Field>}
+        {mode === "billing" ? <p className="break-all rounded-control bg-bg-sunk/60 p-3 text-[12px] leading-relaxed text-ink-3">账单页按供应商原始时间另行核对；这里的调用时段条件不筛选账单，也不把未知时区的 gmtCreate 换算成本地时间。</p> : <div className="grid min-w-0 gap-4 sm:grid-cols-2"><Field label="开始时间（ISO，含时区）" hint="范围按外发尝试开始时间：含开始，不含结束。"><Input aria-label="开始时间（ISO，含时区）" required value={input.start} onChange={event => change({ start: event.target.value })} /></Field><Field label="结束时间（ISO，含时区）" hint="例如 2026-10-21T00:00:00Z 或 +08:00 偏移。"><Input aria-label="结束时间（ISO，含时区）" required value={input.end} onChange={event => change({ end: event.target.value })} /></Field></div>}
+        {snapshot && <Field label="已存账单页" hint="最近已存清单最多 50 个任务，不是该时段全部账单；同 receipt 表示同一响应。"><Select aria-label="已存账单页" value={input.billRunId} onChange={event => change({ billRunId: event.target.value })}><option value="">{mode === "billing" ? "先从已存清单选择账单页" : "只读取本地费用分组"}</option>{snapshot.data.billPages.map(page => <option key={page.runId} value={page.runId}>任务 #{page.runId} · 回执 #{page.receiptId} · pageNum {billParameterText(page.parameters, "pageNum")} · pageSize {billParameterText(page.parameters, "pageSize")}</option>)}</Select></Field>}
         {input.billRunId && snapshot && (() => { const page = snapshot.data.billPages.find(page => String(page.runId) === input.billRunId); return page ? <div className="text-[12px] text-ink-3"><p className="break-all">{page.responseIdentity} · 同回执表示同一供应商响应</p><p className="whitespace-pre-wrap break-all">pageNum：{billParameterText(page.parameters, "pageNum")} · pageSize：{billParameterText(page.parameters, "pageSize")}</p><p>查询任务创建：<Time at={page.queriedAt} /> · 收到：<Time at={page.receivedAt} /></p></div> : null; })()}
-        <Button type="submit" tone="primary" busy={loading} disabled={loading}>读取已存费用数据</Button>
+        <Button type="submit" tone="primary" busy={loading} disabled={loading}>{mode === "billing" ? "读取已存账单" : "读取已存费用数据"}</Button>
         {error && <p role="alert" className="break-words text-[13px] text-hot">{error}</p>}
       </form>
     </Card>
     {snapshot && !current && <p className="text-[13px] text-ink-3">条件已更改，旧结果已收起。请显式读取新条件；输入与已存清单保持。</p>}
-    {snapshot && current && <RedfoxCostReport data={snapshot.data} />}
+    {snapshot && current && (mode === "billing" ? <RedfoxBillReport data={snapshot.data} /> : <RedfoxCostReport data={snapshot.data} />)}
+  </div>;
+}
+
+export function RedfoxBillReport({ data }: { data: RedfoxCostsData }) {
+  return <div className="min-w-0 space-y-5">
+    {data.selectedBill ? <BillPage key={`${data.selectedBill.runId}:${data.selectedBill.receiptId}`} bill={data.selectedBill} /> : <Card title="上游已存账单页"><Empty>可从已存清单单选一页，再点“读取已存账单”；不会自动查询上游。</Empty></Card>}
+    <Card title="核对边界"><p className="text-[13px] leading-relaxed text-ink-3">当前不能逐笔匹配或计算精确差额：账单无唯一请求标识、gmtCreate 未声明时区、动态分页未证明完整覆盖时段，且本地尝试不证明已送达。账单积分面值不是现金成本，不判断漏扣、多扣或退款。</p><Json value={data.comparison} label="不可直接比较的依据" /></Card>
   </div>;
 }
 

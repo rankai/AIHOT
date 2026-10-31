@@ -1,22 +1,30 @@
 import { useRef, useState } from "react";
 import { safeAccountReturn } from "../account/data";
+import { limitCommandKeys, scopedCommandKeys } from "./command-keys";
+import { prepareAdminBody } from "../admin/action-body";
 
 /** Keep a failed command's identity so a network retry cannot duplicate paid work. */
-export function useToolCommand(csrf: string) {
+export function useToolCommand(csrf: string, commandScope?: string) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const busy = useRef(false);
+  const failure = useRef<{ status: number | null; code: string | null; message: string } | null>(null);
   const commands = useRef(new Map<string, string>());
-  async function run<T>(path: string, body: unknown, method: "POST" | "DELETE" = "POST"): Promise<T | null> {
+  async function run<T>(path: string, body: unknown, method: "POST" | "DELETE" = "POST", identityInput?: unknown): Promise<T | null> {
     if (busy.current) return null;
     const multipart = body instanceof FormData;
-    const input = body && typeof body === "object" && "quoteId" in body && "input" in body ? body.input : body;
-    const fingerprint = method + path + (multipart ? JSON.stringify([...body.entries()].map(([key, value]) => [key, value instanceof File ? [value.name, value.size, value.lastModified] : value])) : JSON.stringify(input));
-    const key = commands.current.get(fingerprint) ?? crypto.randomUUID();
-    commands.current.set(fingerprint, key);
+    const input = identityInput ?? (body && typeof body === "object" && "quoteId" in body && "input" in body ? body.input : body);
+    const fingerprint = method + path + (multipart ? prepareAdminBody(body).fingerprint : JSON.stringify(input));
+    const commandKeys = commandScope ? scopedCommandKeys(csrf, commandScope) : commands.current;
+    const key = commandKeys.get(fingerprint) ?? crypto.randomUUID();
+    commandKeys.set(fingerprint, key);
+    if (commandScope) limitCommandKeys(commandKeys);
     busy.current = true;
     setPending(true);
     setError(null);
+    setErrorStatus(null);
+    failure.current = null;
     try {
       const response = await fetch(path, {
         method, credentials: "same-origin",
@@ -28,10 +36,11 @@ export function useToolCommand(csrf: string) {
         return null;
       }
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(response.status === 403 ? "权限或登录校验已过期，请刷新页面后重试。" : data?.detail ?? `操作未完成（${response.status}）`);
-      commands.current.delete(fingerprint);
+      if (!response.ok) { setErrorStatus(response.status); const message = response.status === 403 ? "权限或登录校验已过期，请刷新页面后重试。" : data?.detail ?? `操作未完成（${response.status}）`; failure.current = { status: response.status, code: data?.code ?? data?.error ?? null, message }; throw new Error(message); }
+      commandKeys.delete(fingerprint);
       return data as T;
     } catch (error) {
+      if (!failure.current) failure.current = { status: null, code: null, message: error instanceof Error ? error.message : "连接中断" };
       setError(error instanceof Error && error.name !== "TypeError" && error.name !== "TimeoutError" ? error.message : "连接中断或超时。可先查看执行记录；使用相同输入重试不会重复创建任务。");
       return null;
     } finally {
@@ -39,7 +48,7 @@ export function useToolCommand(csrf: string) {
       setPending(false);
     }
   }
-  return { run, pending, error };
+  return { run, pending, error, errorStatus, failure };
 }
 
 export async function toolGet<T>(path: string, signal?: AbortSignal): Promise<T> {

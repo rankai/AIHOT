@@ -8,7 +8,7 @@ import { readCreditCharge } from "./credits-read.ts";
 
 type Outcome = "completed" | "failed" | "needs_review" | "stopped";
 interface DeliveryFacts {
-  images: number; videos: number; answers: number; transcriptions: number; commentCompletions: number; uploads: number; genericResults: number;
+  assistantDeliveries: number; images: number; videos: number; answers: number; transcriptions: number; commentCompletions: number; uploads: number; genericResults: number;
   successTasks: number; failedTasks: number; incompleteVideo: boolean; pendingReceipts: number; unknownReceipts: number; receivedReceipts: number;
   otherExecutableRuns: number;
 }
@@ -16,6 +16,7 @@ interface DeliveryFacts {
 /** Only persisted normalized result metadata is inspected, never provider raw responses. */
 async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): Promise<DeliveryFacts> {
   const [facts] = await tx`SELECT
+      count(*) FILTER (WHERE r.kind = 'assistant_delivery' AND EXISTS (SELECT 1 FROM assistant_artifact_versions a WHERE a.turn_id::text = r.data->>'turnId' AND a.artifact_id::text = r.data->>'artifactId' AND a.version = (r.data->>'version')::integer)) AS assistant_deliveries,
       count(DISTINCT r.file_key) FILTER (WHERE r.kind = 'image' AND f.status = 'available' AND f.content_type LIKE 'image/%') AS images,
       count(DISTINCT r.file_key) FILTER (WHERE r.kind = 'video' AND f.status = 'available' AND f.content_type LIKE 'video/%') AS videos,
       count(*) FILTER (WHERE r.kind = 'ai_search_answer') AS answers,
@@ -36,7 +37,7 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): P
       count(*) FILTER (WHERE status IN ('received','completed')) AS received FROM receipts WHERE id IN (SELECT id FROM ids)`;
   const [other] = await tx`SELECT count(*) AS n FROM member_credit_run_links l JOIN operation_runs r ON r.id = l.run_id
     WHERE l.charge_id = ${charge.id} AND l.run_id <> ${currentRunId} AND r.status IN ('active','waiting')`;
-  return { images: Number(facts!.images), videos: Number(facts!.videos), answers: Number(facts!.answers), transcriptions: Number(facts!.transcriptions),
+  return { assistantDeliveries: Number(facts!.assistant_deliveries), images: Number(facts!.images), videos: Number(facts!.videos), answers: Number(facts!.answers), transcriptions: Number(facts!.transcriptions),
     commentCompletions: Number(facts!.comment_completions), uploads: Number(facts!.uploads), genericResults: Number(facts!.generic_results),
     successTasks: Number(facts!.success_tasks), failedTasks: Number(facts!.failed_tasks), incompleteVideo: facts!.incomplete_video,
     pendingReceipts: Number(receipts!.pending), unknownReceipts: Number(receipts!.unknown), receivedReceipts: Number(receipts!.received), otherExecutableRuns: Number(other!.n) };
@@ -44,6 +45,7 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): P
 
 function delivered(charge: ChargeRow, facts: DeliveryFacts): boolean {
   switch (charge.pricing_snapshot.kind) {
+    case "assistant-turn": return facts.assistantDeliveries >= 1;
     case "images": return facts.images >= Math.max(1, charge.pricing_snapshot.imageCount);
     case "videos": return facts.videos >= 1 && !facts.incompleteVideo;
     case "ai-search": return facts.answers >= 1;

@@ -28,7 +28,7 @@ import { open } from "node:fs/promises";
 import { credential, isProduction } from "../../config.ts";
 import { sql } from "../../db.ts";
 import { guardedFetch } from "../../lib/http-fetch.ts";
-import { paidRequest, type PaidRequestOptions } from "../receipts.ts";
+import { paidRequest, estimatedCatalogCost, type PaidRequestOptions } from "../receipts.ts";
 
 import { douyinOperations } from "./douyin-contract.ts";
 import { wechatOperations } from "./wechat-contract.ts";
@@ -80,10 +80,9 @@ export function parseRedfoxJson(text: string): unknown {
 }
 export async function redfoxRequest(operation: Operation, input: Record<string, unknown>, window: string, purpose: "video" | "query" | "collect" | "image" | "poll" | "media" | "account" | "transcript" | "ai_search", options: PaidRequestOptions, upload?: {file: string; format: InputMediaFormat|"jpeg"; mime?:string}) {
   const base = redfoxBaseUrl(), service = `redfox.${purpose}`;
-  const [price] = await sql`SELECT per_request, currency FROM service_prices WHERE service = ${service} AND model = ${operation}`;
   let uploadBody: FormData | undefined;
-  const receipt = await paidRequest({ service, model: operation, purpose: `redfox.${operation}`, identity: { base, operation, input, window },
-    requestSummary: { base, operation, input, window } }, async () => {
+  const receipt = await paidRequest({ service, model: operation, purpose: `redfox.${operation}`, costIdentity: { billingProvider: "redfox", operation, model: Object.entries(imagePairs).find(([, pair]) => pair.submit === operation || pair.poll === operation)?.[0] ?? null }, identity: { base, operation, input, window },
+    requestSummary: { base, operation, input, window } }, async ({ priceSnapshot }) => {
     const key = credential("collectors", "REDFOX_API_KEY")!;
     const encodedKey=new URLSearchParams({apiKey:key}).toString().slice("apiKey=".length);
     const redact = (text: string | null) => text === null ? null : [key,encodeURIComponent(key),encodedKey].reduce((value,secret)=>value.split(secret).join("[REDACTED]"),text);
@@ -114,7 +113,7 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
       timeoutMs: 30_000, maxBytes: 4 * 1024 * 1024, headers, body }); }
     catch { throw new Error("Redfox transport did not return a complete response"); }
     return { response: { status: response.status, headers: { contentType: redact(response.headers.get("content-type")), retryAfter: redact(response.headers.get("retry-after")) }, body: redact(response.text()) },
-      cost: operation==="5AM3X4HZ" || price?.per_request == null ? null : { amount: Number(price.per_request), currency: price.currency, basis: "estimated" as const } };
+      cost: operation==="5AM3X4HZ" ? null : estimatedCatalogCost(priceSnapshot, null) };
   }, { ...options, onReceipt: async (tx, id, info) => {
     if (info.kind === "call") {
       const [previous]=await tx`SELECT response,finished_at FROM receipt_attempts WHERE receipt_id=${id} AND status='failed'

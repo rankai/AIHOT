@@ -58,7 +58,13 @@ test('concurrent distinct receipts serialize renewal and reject duplicate cross-
 });
 test('approved price action is idempotent and catalog uses live price rules',async()=>{
  const before=await memberPriceCatalog(true);assert.equal(before.offers.filter(offer=>offer.kind==='query').length,127);assert.ok(before.offers.every(offer=>offer.provider!=='agentkey'));
+ const model=`independent-assistant-${tag()}`;
+ const independent=await saveToolPrice({kind:'assistant-turn',provider:'assistant',model,baseCredits:7,enabled:true,reason:'Synthetic independent assistant price'},actor);
+ const unrelated=await saveToolPrice({kind:'query',provider:'redfox',model,baseCredits:9,enabled:true,reason:'Synthetic legacy tool price'},actor);
  const a=await applyApprovedMemberPrices(actor),b=await applyApprovedMemberPrices(actor);assert.equal(b.applied,false);assert.equal(a.version,b.version);
+ const pricesAfter=(await listToolPrices()).prices;
+ assert.deepEqual(pricesAfter.find(price=>price.id===independent.id),independent);
+ if(a.applied) assert.equal(pricesAfter.find(price=>price.id===unrelated.id)!.enabled,false);
  const catalog=await memberPriceCatalog();const offer=catalog.offers.find(row=>row.kind==='images')!;
  const price=offer.prices!.find(price=>price.parameterMatch.n===1)!;assert.ok(price);
  const {updatedAt,version,...input}=price;

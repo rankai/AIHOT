@@ -22,10 +22,10 @@ const historySummaryFields = [
 export type MemberRunRow = {
   id: number; actor: string; provider: string; operation_key: string; status: ToolRunRow["status"];
   created_at: Date; step_version: number; generation: number; step_key: string; receipt_status: string | null;
-  category: ToolRunCategory; title: string; summary: string; origin_run_id: number | null; continuation_run_id: number | null;
+  assistant_session_id: string | null; category: ToolRunCategory; title: string; summary: string; origin_run_id: number | null; continuation_run_id: number | null;
 };
 export const memberRunDto = (row: MemberRunRow): ToolRunRow => ({ id: row.id, provider: row.provider, operationKey: row.operation_key,
-  category: row.category, title: row.title, summary: row.summary, status: row.status, createdAt: row.created_at.toISOString(), stepVersion: row.step_version, generation: row.generation });
+  ...(row.assistant_session_id ? { assistantSessionId: row.assistant_session_id } : {}), category: row.category, title: row.title, summary: row.summary, status: row.status, createdAt: row.created_at.toISOString(), stepVersion: row.step_version, generation: row.generation });
 
 // Recovery links require the persisted shared charge, matching actors and matching operation family.
 // A user-controlled reference in input alone cannot expose another task or its input.
@@ -52,6 +52,9 @@ export async function memberRunPresentation() {
   const engineLabels = Object.fromEntries(Object.entries(aiSearchEngines).map(([key, value]) => [key, value.label]));
   return { query: sql`SELECT r.id,r.actor,r.provider,r.operation_key,r.status,r.created_at,r.step_version,r.generation,r.step_key,
     receipt.status AS receipt_status,origin.id AS origin_run_id,child.id AS continuation_run_id,
+    (SELECT s.id FROM assistant_sessions s JOIN assistant_turns t ON t.session_id=s.id
+      WHERE ('user:' || s.owner_user_id::text)=r.actor AND s.deleted_at IS NULL AND
+      (t.parent_operation_run_id=r.id OR EXISTS(SELECT 1 FROM assistant_tool_calls ac WHERE ac.turn_id=t.id AND ac.child_run_id=r.id)) LIMIT 1) AS assistant_session_id,
     CASE WHEN r.operation_key IN ('redfox.image.generate','redfox.image.query') THEN 'images'
       WHEN r.operation_key IN ('redfox.video.generate','redfox.video.query','aliyun.wan.animate-mix.generate','aliyun.wan.animate-mix.query') THEN 'videos'
       WHEN r.operation_key IN ('redfox.ai_search.submit','redfox.ai_search.query') THEN 'ai-search'
@@ -59,7 +62,7 @@ export async function memberRunPresentation() {
       WHEN r.operation_key IN ('redfox.xhs_comments.submit','redfox.xhs_comments.query') THEN 'xhs-comments'
       WHEN r.operation_key='redfox.media.upload' THEN 'media-upload' ELSE 'query' END AS category,
     COALESCE(${sql.json(labels)}::jsonb->>(effective.input->>'operationId'),
-      CASE WHEN r.operation_key='redfox.x.account' THEN 'X 账号查询' WHEN r.operation_key='redfox.x.detail' THEN 'X 帖子详情'
+      CASE WHEN r.operation_key='assistant.turn' THEN '助手创作回合' WHEN r.operation_key='redfox.x.account' THEN 'X 账号查询' WHEN r.operation_key='redfox.x.detail' THEN 'X 帖子详情'
         WHEN r.operation_key IN ('redfox.image.generate','redfox.image.query') THEN COALESCE(${sql.json(modelLabels)}::jsonb->>(p->>'model'),'Redfox GPT-Image-2') || ' 图片创作'
         WHEN r.operation_key IN ('aliyun.wan.animate-mix.generate','aliyun.wan.animate-mix.query') THEN '万相 视频复刻'
         WHEN r.operation_key IN ('redfox.video.generate','redfox.video.query') THEN 'Seedance 视频创作'

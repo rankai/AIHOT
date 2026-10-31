@@ -34,14 +34,14 @@ test("presentation feeds navigation surfaces, hidden-filter recovery and admin s
       const router = createMemoryRouter([{ id: "root", path: "*", element, loader: () => ({ presentation, changelogVersion: null }) }], { initialEntries: [path], hydrationData: { loaderData: { root: { presentation, changelogVersion: null } } } });
       try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); }
     };
-    assert.deepEqual(nav.mobileTabs(defaults).map((item: { to: string }) => item.to), ["/", "/all", "/daily", "/more"]);
+    assert.deepEqual(nav.mobileTabs(defaults).map((item: { to: string }) => item.to), ["/", "/all", "/daily", "/assistant", "/more"]);
     assert.deepEqual(nav.moreGroups(defaults).map((group: { title: string }) => group.title), ["内容", "偏好", "关于"]);
     assert.deepEqual(nav.sidebarGroups(draft).map((group: { title: string }) => group.title), ["内容", "模型", "更多"]);
     assert.equal(nav.navigationUnavailable("leaderboard", { leaderboard: false, codexResetMonitor: true }), "行业配置已关闭模型榜");
     assert.equal(nav.navigationUnavailable("codexReset", { leaderboard: true, codexResetMonitor: false }), "行业配置已关闭重置监控");
     const onlySelected = { ...draft, navigation: draft.navigation.map((item) => ({ ...item, visible: false })) };
     assert.deepEqual(nav.sidebarGroups(onlySelected).map((group: { title: string }) => group.title), ["内容"]);
-    assert.deepEqual(nav.mobileTabs(onlySelected).map((item: { to: string }) => item.to), ["/", "/more"]);
+    assert.deepEqual(nav.mobileTabs(onlySelected).map((item: { to: string }) => item.to), ["/", "/assistant", "/more"]);
     const tabs = nav.mobileTabs(draft);
     for (const path of ["/all", "/daily/2026-10-24", "/weekly/2026-10-19", "/monthly/2026-10", "/videos", "/privacy"]) assert(nav.tabIsActive(tabs.at(-1), path, tabs), path);
     const originalTabs = nav.mobileTabs(defaults);
@@ -50,10 +50,12 @@ test("presentation feeds navigation surfaces, hidden-filter recovery and admin s
       assert(!nav.tabIsActive(originalTabs.at(-1), path, originalTabs));
     }
     const mobile = render(createElement(MobileTabBar, { presentation: draft, changelogVersion: null }), "/all");
-    assert(mobile.includes("repeat(2, minmax(0, 1fr))"));
+    assert(mobile.includes("repeat(3, minmax(0, 1fr))"));
     assert.match(mobile, /<a(?=[^>]*href="\/more")(?=[^>]*aria-current="page")[^>]*>/);
     assert(!mobile.includes('href="/all"'));
     const sidebar = render(createElement(Sidebar, { presentation: draft, changelogVersion: null }));
+    assert(sidebar.includes('href="/assistant"'));
+    assert(mobile.includes('href="/assistant"'));
     assert(sidebar.includes('href="/videos"')); assert(!sidebar.includes('href="/all"'));
     const more = render(createElement(MorePage));
     assert(more.includes("外观")); assert(more.includes("使用规则")); assert(more.includes("隐私说明"));

@@ -1,6 +1,6 @@
 import { ToolSubmit } from '../features/tools/tool-submit';
 import { useEffect, useState } from "react";
-import { Link, useLoaderData, useNavigate, useRevalidator, useSearchParams, type LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useNavigate, useRevalidator, useSearchParams, redirect, type LoaderFunctionArgs } from "react-router";
 import type { AccountMe } from "@aihot/contracts/account";
 import type { ToolQuote } from "@aihot/contracts/credits";
 import type { ToolRunDetail } from "@aihot/contracts/user-tools";
@@ -19,6 +19,7 @@ import { parseRunFilters, runHistoryHref, runDetailHref } from "../features/tool
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const [me, run] = await Promise.all([accountGet<AccountMe>(request, "/api/account/me"), accountGet<ToolRunDetail>(request, `/api/tools/runs/${encodeURIComponent(params.id ?? "")}`)]);
+  if (run.assistantSessionId) throw redirect(`/assistant/sessions/${encodeURIComponent(run.assistantSessionId)}`, { headers: ACCOUNT_HEADERS });
   return { me, run };
 }
 export const headers = () => ACCOUNT_HEADERS;

@@ -36,7 +36,8 @@ export function runHistoryHref(filters: RunFilters): string {
 }
 
 /** The return context contains filters, never an arbitrary destination URL. */
-export function runDetailHref(id: number, filters: RunFilters): string {
+export function runDetailHref(id: number, filters: RunFilters, assistantSessionId?: string): string {
+  if (assistantSessionId) return `/assistant/sessions/${encodeURIComponent(assistantSessionId)}`;
   const history = runFiltersQuery(filters).toString();
   return `/tools/runs/${id}${history ? `?${new URLSearchParams({ history })}` : ""}`;
 }

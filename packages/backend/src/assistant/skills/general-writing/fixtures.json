@@ -1,0 +1,20 @@
+{
+  "write/success": {
+    "moduleId": "write",
+    "case": "success",
+    "input": "用户确认产品重100克",
+    "expected": "text-draft"
+  },
+  "write/missing-input": {
+    "moduleId": "write",
+    "case": "missing-input",
+    "input": "",
+    "expected": "ask_question"
+  },
+  "write/delivery": {
+    "moduleId": "write",
+    "case": "delivery",
+    "input": "请只用这些已确认事实写水杯文案：重100克、容量300毫升、售价59元、可回收不锈钢、两种颜色。只要一个标题和正文；素材少可以短些，不要虚构品牌已做的事情、承诺、认证或产品说明记载，不添加保温密封免责声明、备选标题或创作说明。内部事实核对放在scope元数据。",
+    "expected": "text-draft"
+  }
+}

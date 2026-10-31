@@ -1,3 +1,4 @@
+import { registerUserAssistant } from "./routes/user-assistant.ts";
 import { FEATURES } from "@aihot/industry/features";
 import Fastify, { type FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
@@ -7,6 +8,7 @@ import { registerSite } from "./routes/site.ts";
 import { registerLeaderboard } from "./routes/leaderboard.ts";
 import { registerOg } from "./routes/og.ts";
 import { registerAdminOperationDetails } from "./routes/admin-operation-details.ts";
+import { registerAdminCosts } from "./routes/admin-costs.ts";
 import { registerAdminRedfoxCosts } from "./routes/admin-redfox-costs.ts";
 import { registerAdminAuth } from "./routes/admin-auth.ts";
 import { registerAccount } from "./routes/account.ts";
@@ -79,9 +81,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerAccount(app);
   registerAdminUsers(app);
   registerUserTools(app);
+  registerUserAssistant(app);
   registerUserCredits(app);
   registerAdminCredits(app);
   registerAdminRedfoxCosts(app);
+  registerAdminCosts(app);
   registerAdminOperationDetails(app);
   registerAdmin(app);
   registerAdminOperationResults(app);

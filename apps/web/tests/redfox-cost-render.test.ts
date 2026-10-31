@@ -16,11 +16,11 @@ test("real cost view starts without reading data and report keeps dimensions, pr
   const bundle = await rolldown({ input: new URL("../app/features/admin/redfox-costs.tsx", import.meta.url).pathname, plugins: [{ name: "existing-react-runtime", resolveId(id) { if (["react", "react/jsx-runtime", "react-router", "motion/react"].includes(id)) return { id: require.resolve(id), external: true }; } }] });
   try {
     const output = join(directory, "costs.mjs"); await bundle.write({ file: output, format: "esm" });
-    const { RedfoxCosts, RedfoxCostReport } = await import(pathToFileURL(output).href);
-    const render = (element: ReactElement) => { const router = createMemoryRouter([{ path: "/admin/data-tools", element }], { initialEntries: ["/admin/data-tools?view=costs"] }); try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); } };
+    const { RedfoxBillReport, RedfoxCosts, RedfoxCostReport } = await import(pathToFileURL(output).href);
+    const render = (element: ReactElement) => { const router = createMemoryRouter([{ path: "/admin/costs", element }], { initialEntries: ["/admin/costs?view=billing"] }); try { return renderToStaticMarkup(createElement(RouterProvider, { router })); } finally { router.dispose(); } };
     const interval = { start: "2026-10-20T00:00:00.000Z", end: "2026-10-21T00:00:00.000Z" };
-    const initial = render(createElement(RedfoxCosts, { initialInterval: interval }));
-    assert(initial.includes(interval.start)); assert(initial.includes(interval.end)); assert(initial.includes("读取已存费用数据")); assert(!initial.includes("本地登记的外发尝试"));
+    const initial = render(createElement(RedfoxCosts, { initialInterval: interval, mode: "billing" }));
+    assert(initial.includes("Redfox 已存账单页")); assert(initial.includes("读取已存账单")); assert(!initial.includes("本地登记的外发尝试")); assert(!initial.includes(interval.start));
     assert(initial.includes('href="/admin/data-tools?view=platforms"')); assert(initial.includes('target="_blank"'));
     const precise = "900719925474099312345.67890123456789";
     const group = { service: "redfox.query", model: "model", origin: "live", base: "http://local-synthetic.test", environment: "other" as const, currency: "USD", costBasis: "estimated" as const, attempts: 2, knownCost: precise, unknownCostCount: 0, estimatedCredits: null, chargedCredits: null, unknownEstimatedCreditsCount: 2, unknownChargedCreditsCount: 2, statusCounts: { pending: 0, received: 1, failed: 0, unknown: 1 } };
@@ -34,5 +34,8 @@ test("real cost view starts without reading data and report keeps dimensions, pr
     assert(html.includes("积分面值折算（非实际扣款）")); assert(html.includes(bill.summary.nominalCny.amount)); assert(html.includes("当前不能逐笔匹配或计算精确差额"));
     assert.equal((html.match(/duplicate preserved/g) ?? []).length, 2); assert.equal((html.match(/ raw same-second /g) ?? []).length, 2);
     assert(html.includes(" 1 ")); assert(html.includes("900719925474099312345")); assert(html.includes("省略") === false); assert(!html.includes("已退款"));
+    const bills = render(createElement(RedfoxBillReport, { data }));
+    assert(bills.includes("所选上游账单页")); assert(bills.includes("当前不能逐笔匹配或计算精确差额"));
+    assert(!bills.includes("本地登记的外发尝试")); assert(!bills.includes("万相视频复刻")); assert(!bills.includes("agentkey.collect"));
   } finally { await bundle.close(); await rm(directory, { recursive: true, force: true }); }
 });

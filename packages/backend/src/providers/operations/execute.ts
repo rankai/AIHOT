@@ -1,3 +1,4 @@
+import { executeAssistantStep } from "../../assistant/execution.ts";
 import { executeWanStep } from "../aliyun/wan-execution.ts";
 import { executeSubscriptionVideoStep } from "./subscription-video.ts";
 import { executeAgentKeyStep } from "../agentkey/execution.ts";
@@ -17,6 +18,7 @@ export async function executeOperationStep(runId: number, stepVersion: number, j
   }); } catch(error) {if(error instanceof StaleOperationError)return {skipped:true};throw error;}
   const [run] = await sql`SELECT provider FROM operation_runs WHERE id = ${runId}`;
   if (!run) return {skipped:true};
+  if (run.provider === "assistant") return executeAssistantStep(runId,stepVersion,jobId);
   if (run.provider === "aliyun") return executeWanStep(runId,stepVersion,jobId);
   if (run.provider === "local") return executeSubscriptionVideoStep(runId,stepVersion,jobId);
   if (run.provider === "agentkey") return executeAgentKeyStep(runId,stepVersion,jobId);

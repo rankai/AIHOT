@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
 import path from "node:path";
 import { describeVideoMedia, inputMediaOptions, inspectAsset, declaredMediaLimit, MediaValidationError, INPUT_IMAGE_BYTES, INPUT_AUDIO_BYTES, INPUT_VIDEO_BYTES } from "./asset-media.ts";
-import {inspectTextAttachment,attachmentTextTypes,type AttachmentTextFormat} from "./attachment-text.ts";
+import {inspectTextAttachment,attachmentTextTypes,inputTextFormat,ATTACHMENT_TEXT_BYTES,type AttachmentTextFormat} from "./attachment-text.ts";
 import { audit } from "../admin/auth.ts";
 import { config } from "../config.ts";
 import { sql, type Tx } from "../db.ts";
@@ -22,7 +22,10 @@ export const UPLOAD_TIMEOUT_MS = 60_000;
 export const IMAGE_PIXELS = 16_000_000;
 export const MEMBER_STORAGE_BYTES = 1024 * 1024 * 1024;
 export const MEMBER_STORAGE_FILES = 200;
-export function assetUploadOptions(){return inputMediaOptions(IMAGE_PIXELS);}
+export function assetUploadOptions(){
+  const media=inputMediaOptions(IMAGE_PIXELS);
+  return {...media,formats:[...media.formats,...(['txt','md'] as const).map(format=>({format,kind:'text' as const,extensions:[format],mime:attachmentTextTypes[format]}))],limits:{...media.limits,textBytes:ATTACHMENT_TEXT_BYTES}};
+}
 let uploads = 0;
 const activeTemps = new Set<string>();
 export class AssetError extends Error {
@@ -30,7 +33,8 @@ export class AssetError extends Error {
   code?: string;
   constructor(status: number, message: string) { super(message); this.statusCode = status; if(status===409)this.code="conflict"; }
 }
-export function uploadLimitForMime(mime:string){
+export function uploadLimitForMime(mime:string,filename=""){
+  if(inputTextFormat(filename,mime))return ATTACHMENT_TEXT_BYTES;
   try{return declaredMediaLimit(mime);}catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);throw error;}
 }
 export function uploadKey(actor: string, key: unknown): string {
@@ -85,11 +89,13 @@ export async function publishUpload(input: { actor: string; key: string; file: s
   let inspected: Awaited<ReturnType<typeof inspectAsset>> | Awaited<ReturnType<typeof inspectTextAttachment>>;
   try {
     const ext=path.extname(input.filename).slice(1) as AttachmentTextFormat;
-    if(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,ext)){
+    if(input.purpose!=="operation-output"&&inputTextFormat(input.filename,input.mime)){
+      inspected=await inspectTextAttachment(input.file,inputTextFormat(input.filename,input.mime)!);
+    }else if(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,ext)){
       if(input.mime!==attachmentTextTypes[ext])throw new AssetError(422,"Text format and MIME differ");
       inspected=await inspectTextAttachment(input.file,ext);
     }else inspected=await inspectAsset(input.file,input.filename,input.mime,input.purpose==="operation-output",input.purpose==="operation-output"?OUTPUT_IMAGE_PIXELS:IMAGE_PIXELS,OUTPUT_IMAGE_BYTES); }
-  catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);if(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,path.extname(input.filename).slice(1)))throw new AssetError(input.bytes>2*1024*1024?413:422,error instanceof Error?error.message:"Invalid text attachment");throw error;}
+  catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);if(inputTextFormat(input.filename,input.mime)||(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,path.extname(input.filename).slice(1))))throw new AssetError(input.bytes>2*1024*1024?413:422,error instanceof Error?error.message:"Invalid text attachment");throw error;}
   if(inspected.bytes!==input.bytes)throw new AssetError(422,"File size changed before publication.");
   if(input.origin && (input.purpose!=="operation-output" || inspected.metadata.kind!=="video"))throw new AssetError(422,"Subscription video publication requires a validated video output");
   const mime=inspected.mime;
@@ -172,7 +178,10 @@ async function hasActiveInput(tx: Tx, key: string): Promise<boolean> {
   const [row] = await tx`SELECT 1 FROM operation_runs WHERE status IN ('active','waiting','needs_review','stopped')
     AND (input->'fileKeys' @> ${tx.json([key])} OR (step_key IN ('redfox.image.save','redfox.video.save','aliyun.wan.save','subscription.video.save') AND progress->>'expectedFileKey'=${key}))
     AND NOT (operation_key='subscription.video.download' AND EXISTS (SELECT 1 FROM stored_files f WHERE f.key=${key} AND f.metadata->>'origin'='subscription-video' AND f.expires_at<=now())) LIMIT 1`;
-  return !!row;
+  if(row)return true;
+  const [assistant]=await tx`SELECT 1 FROM assistant_session_inputs i JOIN assistant_sessions s ON s.id=i.session_id
+    WHERE i.source->>'assetKey'=${key} AND s.deleted_at IS NULL LIMIT 1`;
+  return !!assistant;
 }
 export async function deleteAsset(key: string, actor = "system:asset-retention"): Promise<AssetRow> {
   assetPath(key);

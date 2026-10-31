@@ -4,6 +4,11 @@ import { credential } from "../config.ts";
 import { guardedFetch } from "../lib/http-fetch.ts";
 import { paidRequest, ProviderRejectedError } from "./receipts.ts";
 
+/** Only the documented Jina Reader origin proves that Jina is the billing provider. */
+export function jinaBillingProvider(base: string): "jina" | null {
+  return base.replace(/\/+$/, "") === "https://r.jina.ai" ? "jina" : null;
+}
+
 export interface JinaPage {
   title: string | null;
   url: string | null;
@@ -29,13 +34,21 @@ export async function jinaRead(
 ): Promise<JinaPage & { receiptId: number; raw: string }> {
   const key = credential("collectors", "JINA_API_KEY");
   if (!key) throw new Error("JINA_API_KEY is not configured");
-  const base = (credential("collectors", "JINA_BASE_URL") ?? "https://r.jina.ai").replace(/\/$/, "");
+  const base = (credential("collectors", "JINA_BASE_URL") ?? "https://r.jina.ai").replace(/\/+$/, "");
   // A listing whose freshness matters (xAI news) caps how old Jina's cached rendering may be.
   const tolerance: Record<string, string> = Number.isInteger(opts.cacheToleranceSeconds) && opts.cacheToleranceSeconds! >= 0 ? { "x-cache-tolerance": String(opts.cacheToleranceSeconds) } : {};
   const now = new Date().toISOString();
   const day = opts.perRead ? now : now.slice(0, 10);
   const receipt = await paidRequest(
-    { service: "jina", model: null, purpose: opts.purpose, subject: opts.subject, identity: { url: targetUrl, day, format: opts.format ?? "markdown" }, requestSummary: { url: targetUrl } },
+    {
+      service: "jina",
+      model: null,
+      purpose: opts.purpose,
+      subject: opts.subject,
+      identity: { url: targetUrl, day, format: opts.format ?? "markdown" },
+      requestSummary: { url: targetUrl },
+      costIdentity: { billingProvider: jinaBillingProvider(base), operation: "reader.read", model: null },
+    },
     async () => {
       const res = await guardedFetch(`${base}/${targetUrl}`, {
         headers: { authorization: `Bearer ${key}`, "x-return-format": opts.format ?? "markdown", accept: "text/plain", ...tolerance },

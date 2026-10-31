@@ -26,7 +26,7 @@ export async function uploadWanObject(config: WanConfig, runId: number, role: "p
   if (!extension) throw new Error("Unsupported Wan input type");
   // Preserve a format-bearing URL for Wan instead of exposing a bare hash.
   const objectKey = `${legacyKey}.${extension}`;
-  const result = await paidRequest({ service: "aliyun.wan.media", model: "oss", purpose: "wan.media", identity: { config, runId, role, fileKey, hash }, requestSummary: { base: config.ossBase, runId, role, fileKey, hash, objectKey } }, async () => {
+  const result = await paidRequest({ service: "aliyun.wan.media", model: "oss", costIdentity: { billingProvider: "aliyun", operation: "wan.media", model: null }, purpose: "wan.media", identity: { config, runId, role, fileKey, hash }, requestSummary: { base: config.ossBase, runId, role, fileKey, hash, objectKey } }, async () => {
     assertWanOutbound(); assertWanConfig(config);
     const headers = { "Content-Type": String(file.content_type), "x-oss-object-acl": "private", "x-oss-meta-sha256": hash };
     const url = await client(config).signatureUrlV4("PUT", 300, { headers }, objectKey);

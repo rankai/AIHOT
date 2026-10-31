@@ -4,8 +4,22 @@
 import type { z } from "zod";
 import { config, credential } from "../config.ts";
 import { sha256 } from "../lib/ids.ts";
-import { completeReceipt, paidRequest, ProviderRejectedError, rejectReceivedResponse } from "./receipts.ts";
+import { completeReceipt, paidRequest, estimatedCatalogCost, ProviderRejectedError, rejectReceivedResponse } from "./receipts.ts";
+import { resolveDeepSeekPriceSnapshot } from "./deepseek-pricing.ts";
 import { sql } from "../db.ts";
+
+/** Exact known API bases from the supported configuration examples; custom gateways stay unknown. */
+export function modelBillingProvider(baseURL: string): string | null {
+  const known: Record<string, string> = {
+    "https://api.deepseek.com": "deepseek",
+    "https://api.deepseek.com/v1": "deepseek",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1": "aliyun",
+    "https://open.bigmodel.cn/api/paas/v4": "zhipu",
+    "https://api.xiaomimimo.com/v1": "mimo",
+    "https://api.openai.com/v1": "openai",
+  };
+  return known[baseURL.replace(/\/+$/, "")] ?? null;
+}
 
 export interface ModelSpec {
   key: string;
@@ -187,13 +201,14 @@ export async function chatJson<S extends z.ZodType>(opts: ChatJsonOptions<S>): P
     {
       service: spec.service,
       model: spec.model,
+      costIdentity: { billingProvider: modelBillingProvider(baseUrl), operation: "chat.completions", model: spec.model },
       purpose: opts.purpose,
       subject: opts.subject,
       identity: { endpoint, response_format: body.response_format ?? null, model: spec.model, promptVersion: opts.promptVersion, system: sha256(opts.system), user: sha256(userText), temperature, maxTokens, extra: spec.extra ?? null },
       requestSummary: { promptVersion: opts.promptVersion, systemHash: sha256(opts.system), userHash: sha256(userText), userChars: userText.length, temperature, maxTokens },
       attemptTag: opts.attemptTag,
     },
-    async () => {
+    async ({ priceSnapshot }) => {
       const started = Date.now();
       let res: Response;
       try {
@@ -223,9 +238,10 @@ export async function chatJson<S extends z.ZodType>(opts: ChatJsonOptions<S>): P
         response: { ...json, _latencyMs: Date.now() - started },
         requestId: (json.id as string | undefined) ?? res.headers.get("x-request-id"),
         usage,
-        cost: null,
+        cost: estimatedCatalogCost(priceSnapshot, usage),
       };
     },
+    { resolvePriceSnapshot: resolveDeepSeekPriceSnapshot },
   );
 
   const response = receipt.response as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: Record<string, unknown> };

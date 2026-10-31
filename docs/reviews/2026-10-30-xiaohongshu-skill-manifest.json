@@ -1,0 +1,119 @@
+{
+  "sourcePage": "https://redfox.hk/skills/no/gwE5gmpt",
+  "repository": "redfox-data/redfox-community",
+  "commit": "d2e24f02340a440a73a96aa6ad6a65f681fba89f",
+  "retrievedDate": "2026-10-30",
+  "upstreamPath": "skills/xiaohongshu-creator",
+  "fileCount": 14,
+  "files": [
+    {
+      "path": "README.md",
+      "gitBlobSha": "749545c62e8b958225a16db5637b71c16791b20f",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/README.md",
+      "bytes": 3745,
+      "sha256": "71791382a91538cb26ded187ca6a5faf2225912518f78df969f56a251825ae31"
+    },
+    {
+      "path": "README.en.md",
+      "gitBlobSha": "299b9f6fea0c4b94f20f1152eb73598f891bd954",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/README.en.md",
+      "bytes": 4003,
+      "sha256": "968f598930516439d30c27e5c0f58b94671f1edd11a522c6b551ce817994775e"
+    },
+    {
+      "path": "SKILL.md",
+      "gitBlobSha": "0ce4237eaee28ad6f0d69ac0fd224d16f8d5f16b",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/SKILL.md",
+      "bytes": 21738,
+      "sha256": "3ff2f1f0e91f2fcbc2ae6cda08aa1ff2a3581cf195d7a8939c3f11d1fb518a48"
+    },
+    {
+      "path": "assets/platform-rules.md",
+      "gitBlobSha": "d21935130f1d8bfb894e91f4c0431efdf5f6de89",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/assets/platform-rules.md",
+      "bytes": 2886,
+      "sha256": "db88ca7f08d151568bb25050bce697b9aa8564c2c6edbcfcbc7d18356015a02e"
+    },
+    {
+      "path": "references/core_workflow.md",
+      "gitBlobSha": "ac8215ea338939ae6b3c84486b670c5b65bc0c61",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/references/core_workflow.md",
+      "bytes": 12038,
+      "sha256": "d4cdcd94640c46680ac032de7d9d96f7ffe8a33939d4bcf2c40e190db08b93e4"
+    },
+    {
+      "path": "references/prohibited_word_core_workflow.md",
+      "gitBlobSha": "bdec4a9406cbe56868814e0423f62d0406f5f8c9",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/references/prohibited_word_core_workflow.md",
+      "bytes": 16739,
+      "sha256": "cd11c743e56e34912c3bc76e4af8c48aaae5da0f1af3e1db906872f9f223b16c"
+    },
+    {
+      "path": "references/title_score_guide.md",
+      "gitBlobSha": "f473d10c5cf53d7a437f101bf4002dffed51aed0",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/references/title_score_guide.md",
+      "bytes": 8890,
+      "sha256": "386756a827e3a142380a8b31e103659d9f8d3726dd3227b0f6b7c1710f84555b"
+    },
+    {
+      "path": "references/xhs_hot_article_format.md",
+      "gitBlobSha": "11c64a396d1abb1b6c0146ab20c2af3e073787b0",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/references/xhs_hot_article_format.md",
+      "bytes": 5791,
+      "sha256": "cd946e0efa3930f505a3ee7ed2a0eb99ec09820f3cebc7bd5ec8c2a6731bd1ee"
+    },
+    {
+      "path": "references/xhs_trend_data_format.md",
+      "gitBlobSha": "99a0159cef1c74e399c6355d29b94efb1cf084e5",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/references/xhs_trend_data_format.md",
+      "bytes": 8500,
+      "sha256": "7a1ab74a92f3e36323c8c2960541725e29dca6927314ff541ac676b55984bd1d"
+    },
+    {
+      "path": "scripts/check_sensitive_words.py",
+      "gitBlobSha": "87cd219d778f2f515d2c196b19b247bfa0dc293e",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/scripts/check_sensitive_words.py",
+      "bytes": 13710,
+      "sha256": "9ac35dd99eabe068fe6a9a3022bd4ce43e3d7b24eb1b9923d6a5dbdfa73e79a9"
+    },
+    {
+      "path": "scripts/fetch_explosive_covers.py",
+      "gitBlobSha": "c6167168eeb1f52d80682530e443a606e303c32e",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/scripts/fetch_explosive_covers.py",
+      "bytes": 22707,
+      "sha256": "560208e783dc6f570131db944b9c44bedf23afdfae8fbb7f9a2ba3e803ea97b9"
+    },
+    {
+      "path": "scripts/fetch_xhs_hot_articles.py",
+      "gitBlobSha": "1431ac4e69223379ec100d371cba32c84055d910",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/scripts/fetch_xhs_hot_articles.py",
+      "bytes": 22879,
+      "sha256": "26c33ddb7afba971b5a3804738967a1a61270545b27fab08d1a0ad918dd30297"
+    },
+    {
+      "path": "scripts/fetch_xhs_trends.py",
+      "gitBlobSha": "d71cb26362b01ac9eec4d9906660c0af5784ad0d",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/scripts/fetch_xhs_trends.py",
+      "bytes": 16065,
+      "sha256": "3ee7b40ecbba43af3de2e1c2be74494975924b53ff5c86cf4d258cc9a1672124"
+    },
+    {
+      "path": "scripts/rewrite_record.py",
+      "gitBlobSha": "952f0ebbc6a2cf28271910545f65d3f98a7d350f",
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator/scripts/rewrite_record.py",
+      "bytes": 7086,
+      "sha256": "d4b2c5366a15334a78d07d6ce3c651b586b0d7f112be1292dbb2070f10504c7b"
+    }
+  ],
+  "licenseEvidence": {
+    "githubLicense": null,
+    "rootOrSkillLicenseFileFound": false
+  },
+  "execution": "static-read-only; scripts not executed; packages not installed",
+  "totalBytes": 166777,
+  "archive": {
+    "filename": "xiaohongshu-creator-d2e24f0.zip",
+    "bytes": 60262,
+    "sha256": "5f5b01cd7bd5f6f7c06a7d996cc4e07acc939f8fc323c2e3f3bd964492511b65"
+  }
+}

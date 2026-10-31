@@ -4,6 +4,7 @@ import type { ToolAsset, ToolAssetPage } from "@aihot/contracts/user-tools";
 import type { AssetUploadOptions } from "../admin/asset-types";
 import { Button } from "../admin/ui";
 import { toolGet, useToolCommand } from "./client";
+import { assetUploadAccept, assetUploadFile } from "../admin/asset-data";
 
 export function ToolAssetLibrary({ page, items, options, csrf, onChange, submit }: { page: ToolAssetPage; items: ToolAsset[]; options: AssetUploadOptions; csrf: string; onChange: (update: (assets: ToolAsset[]) => ToolAsset[]) => void; submit: (kind: string, body: unknown) => Promise<void> }) {
   const [cursor, setCursor] = useState(page.nextCursor);
@@ -17,13 +18,13 @@ export function ToolAssetLibrary({ page, items, options, csrf, onChange, submit 
   return <div className="space-y-5">
     <form className="space-y-3 rounded-panel border border-dashed border-line-strong p-4" onSubmit={async event => {
       event.preventDefault(); const file = fileInput.current?.files?.[0]; if (!file) return; setError(null); setNotice(null);
-      const limit = file.type.startsWith("image/") ? options.limits.imageBytes : file.type.startsWith("audio/") ? options.limits.audioBytes : options.limits.videoBytes;
-      if (file.size > limit) { setError(`文件超过 ${Math.floor(limit / 1_000_000)} MB 限制。`); return; }
-      const data = new FormData(); data.set("file", file);
+      let declared: File;
+      try { declared = assetUploadFile(file, options); } catch (cause) { setError((cause as Error).message); return; }
+      const data = new FormData(); data.set("file", declared);
       const result = await upload.run<ToolAsset>("/api/tools/assets", data);
       if (result) { update(previous => [result, ...previous.filter(row => row.key !== result.key)]); if (fileInput.current) fileInput.current.value = ""; setNotice("素材已上传，可以在图片和视频创作中选择使用。"); }
     }}>
-      <label className="block text-[13px] font-medium text-ink-2">上传私有素材<input ref={fileInput} type="file" name="file" required accept={options.formats.map(row => row.mime).join(",")} className="mt-2 block w-full text-[13px]" /></label>
+      <label className="block text-[13px] font-medium text-ink-2">上传私有素材<input ref={fileInput} type="file" name="file" required accept={assetUploadAccept(options)} className="mt-2 block w-full text-[13px]" /></label>
       <p className="text-[12px] text-ink-3">本地上传不消耗积分。图片最多 {options.limits.imageBytes / 1_000_000} MB，音频 {options.limits.audioBytes / 1_000_000} MB，视频 {options.limits.videoBytes / 1_000_000} MB。</p>
       <ToolSubmit selection={{kind:"media-upload",free:true}} type="submit" tone="primary" disabled={upload.pending} busy={upload.pending}>上传素材</ToolSubmit>
     </form>

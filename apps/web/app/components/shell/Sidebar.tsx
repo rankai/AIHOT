@@ -7,7 +7,7 @@ import { sidebarGroups, tabIsActive, type NavItem } from "./nav";
 import type { SitePresentation } from "@aihot/contracts/presentation";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { AccountLink } from "./AccountLink";
-import { IconApps } from "../icons";
+import { IconApps, IconMessage } from "../icons";
 
 /** True while the changelog has an entry newer than the one this reader last opened. */
 export function useChangelogDot(latestVersion: string | null): boolean {
@@ -61,6 +61,7 @@ export function Sidebar({ changelogVersion, presentation }: { changelogVersion: 
         ))}
         <div>
           <div className="px-2.5 pb-1 pt-3.5 text-[11px] text-ink-4">工具</div>
+          <SideLink item={{ to: "/assistant", label: "助手", icon: IconMessage }} dot={false} />
           <SideLink item={{ to: "/tools", label: "数据工具", icon: IconApps }} dot={false} />
         </div>
       </nav>

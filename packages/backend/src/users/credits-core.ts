@@ -6,7 +6,7 @@ import { AccountError, UserId } from "./accounts.ts";
 
 export const MAX_BALANCE = 1_000_000_000_000;
 export const MAX_CREDITS = 1_000_000_000;
-export const ToolKinds = ["query", "x-account", "x-tweet", "images", "videos", "ai-search", "transcriptions", "xhs-comments", "media-upload", "images/query", "videos/query", "ai-search/query", "transcriptions/query", "xhs-comments/query"] as const;
+export const ToolKinds = ["assistant-turn", "query", "x-account", "x-tweet", "images", "videos", "ai-search", "transcriptions", "xhs-comments", "media-upload", "images/query", "videos/query", "ai-search/query", "transcriptions/query", "xhs-comments/query"] as const;
 export const Kind = z.enum(ToolKinds);
 export const Credits = z.number().int().safe().min(0).max(MAX_CREDITS);
 export const Reason = z.string().trim().min(2, "请填写操作理由").max(500, "理由最多 500 字");

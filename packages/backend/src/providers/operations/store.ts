@@ -1,3 +1,4 @@
+import { normalizedEnvironment, type BudgetContext } from "../receipts.ts";
 import { assertKnownNonVideoCost, isAdminToolActor } from '../tool-cost-policy.ts';
 import { lockAssetInputs } from "../../operations/assets.ts";
 import type { Tx } from "../../db.ts";
@@ -136,6 +137,22 @@ export async function lockRun(tx: Tx, id: number): Promise<{ run: RunRow; eligib
 }
 
 export async function requireExecution(tx: Tx, execution: Execution): Promise<RunRow> {
+  const [owner] = await tx`SELECT provider,actor,input FROM operation_runs WHERE id=${execution.runId}`;
+  if (owner?.provider === "assistant" || owner?.input.assistantParentTurnId) {
+    const member = await lockMemberAdmission(tx, owner.actor);
+    if (member?.status !== "active") throw new StaleOperationError("Assistant member is no longer active");
+    const turnId = owner.input.assistantParentTurnId ?? owner.input.turnId;
+    const [turn] = await tx`SELECT session_id,parent_operation_run_id FROM assistant_turns WHERE id=${turnId}`;
+    if (!turn) throw new StaleOperationError("Assistant turn missing");
+    const [session] = await tx`SELECT deleted_at FROM assistant_sessions WHERE id=${turn.session_id} FOR UPDATE`;
+    if (!session || session.deleted_at) throw new StaleOperationError("Assistant session unavailable");
+    if (owner.input.assistantParentTurnId) {
+      const [parent] = await tx`SELECT status FROM operation_runs WHERE id=${turn.parent_operation_run_id} FOR UPDATE`;
+      if (!parent || !["active","waiting"].includes(parent.status)) throw new StaleOperationError("Assistant parent stopped");
+      await assertRunCredit(tx,turn.parent_operation_run_id);
+    }
+  }
+
   const { run, eligible } = await lockRun(tx, execution.runId);
   if (!run || run.status !== "active" || run.step_version !== execution.stepVersion || run.generation !== execution.generation) throw new StaleOperationError("Operation execution is stale");
   if ((run.input.members.length || run.operation_key === SUBSCRIPTION_VIDEO_DOWNLOAD) && !eligible.length) throw new StaleOperationError("No eligible subscription members");
@@ -150,10 +167,20 @@ export async function claimRun(tx: Tx, expected: Execution, jobId: string): Prom
   return { ...expected, generation: expected.generation + 1 };
 }
 
+/** Only actors with a known creation path are attributed to the system. */
+export function costOwnerForActor(actor: string): BudgetContext {
+  const member = /^user:([1-9][0-9]*)$/.exec(actor);
+  if (member && Number.isSafeInteger(Number(member[1])))
+    return { budgetScope: "member", ownerKind: "member", ownerUserId: Number(member[1]) };
+  if (/^(admin|dev):.+$/.test(actor)) return { budgetScope: "admin", ownerKind: "admin", ownerUserId: null };
+  // sources/native-scheduling.ts and sources/subscription-video.ts create these internal runs.
+  return { budgetScope: null, ownerKind: ["scheduler", "subscription-video"].includes(actor) ? "system" : "unassigned", ownerUserId: null };
+}
+
 /** Runs in paidRequest's placeholder/reuse transaction, before any external request. */
 export function receiptOptions(execution: Execution): PaidRequestOptions {
   return { beforeClaim: async (tx) => { const run = await requireExecution(tx, execution);
-    return { budgetScope: /^user:[1-9][0-9]*$/.test(run.actor) ? "member" as const : /^(admin|dev):.+$/.test(run.actor) ? "admin" as const : null };
+    return { ...costOwnerForActor(run.actor), operationRunId: run.id, environment: normalizedEnvironment(undefined) };
   }, onReceipt: async (tx, receiptId, info) => {
     // beforeClaim owns the business locks in this same transaction.
     const [run] = await tx<RunRow[]>`SELECT * FROM operation_runs WHERE id = ${execution.runId}`;
@@ -162,6 +189,7 @@ export function receiptOptions(execution: Execution): PaidRequestOptions {
       if (run.operation_key === "redfox.image.generate" && ["redfox.image.upload","redfox.image.submit"].includes(run.step_key)) assertKnownNonVideoCost("images",run.input.parameters as Record<string,unknown>);
       if (run.operation_key === "redfox.xhs_comments.submit" && run.step_key === "redfox.xhs_comments.submit") assertKnownNonVideoCost("xhs-comments",run.input.parameters as Record<string,unknown>);
     }
+    if (run.input.assistantParentTurnId && info.kind === "call") { const [parent] = await tx`UPDATE assistant_turns SET child_calls=child_calls+1 WHERE id=${String(run.input.assistantParentTurnId)} AND child_calls<20 RETURNING id`; if (!parent) throw new StaleOperationError("Assistant child request limit exhausted"); }
     if (run.current_receipt_id !== null && run.current_receipt_id !== receiptId) throw new Error("Consume or retain current receipt before replacing it");
     await tx`UPDATE operation_runs SET current_receipt_id = ${receiptId}, updated_at = now() WHERE id = ${run.id}`;
   } };

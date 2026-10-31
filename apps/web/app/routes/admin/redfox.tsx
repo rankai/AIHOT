@@ -1,8 +1,6 @@
 import type { MemberPriceCatalog } from '@aihot/contracts/membership';
 import { ToolPricingProvider, ToolSubmit } from '../../features/tools/tool-submit';
 import { collectionSubscriptionsHref } from "../../features/admin/collection-subscription-data";
-import { RedfoxCosts } from "../../features/admin/redfox-costs";
-import { redfoxCostDefaults } from "../../features/admin/redfox-cost-data";
 import { XhsCommentForm } from "../../features/admin/xhs-comment-form";
 import type { XhsCommentOptions } from "../../features/admin/xhs-comment-types";
 import { VideoForm } from "../../features/admin/video-form";
@@ -31,8 +29,8 @@ import { AdminPage, Button, ButtonLink, Card, Field, Input, Select } from "../..
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   if (url.pathname === "/admin/redfox") return redirect(`/admin/data-tools${url.search}`, 308);
+  if (url.searchParams.get("view") === "costs") return redirect("/admin/costs?view=billing", 308);
   if (url.searchParams.get("view") === "subscriptions") return redirect(collectionSubscriptionsHref(Number(url.searchParams.get("subscription")) || null));
-  const costInterval = redfoxCostDefaults(new Date());
   const after = url.searchParams.get("after");
   const key = url.searchParams.get("reference");
   const [options, assets, reference, operations, transcriptionOptions, assetUploadOptions, aiSearchOptions, supplierUploadOptions, videoOptions, xhsCommentOptions, pricing] = await Promise.all([
@@ -49,13 +47,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     adminGet<MemberPriceCatalog>(request, "/api/admin/member-pricing"),
   ]);
   const approvedImages={...options,resolutions:["1k"],maxImages:1,models:options.models.map(model=>({...model,generationAvailable:model.model === "gptImage2",...(model.model === "gptImage2" ? {resolutions:["1k"]} : {})}))};
-  return { pricing, costInterval, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options:approvedImages, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "costs" ? "costs" : url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
+  return { pricing, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options:approvedImages, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
 }
 export const meta: Route.MetaFunction = () => [{ title: `数据工具 · ${SITE.name} 后台` }];
 export default function Redfox({ loaderData }: Route.ComponentProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedView = searchParams.get("view");
-  const view = selectedView && ["x", "platforms", "ai-search", "images", "videos", "tools", "assets", "costs"].includes(selectedView) ? selectedView : loaderData.initialView;
+  const view = selectedView && ["x", "platforms", "ai-search", "images", "videos", "tools", "assets"].includes(selectedView) ? selectedView : loaderData.initialView;
   const setView = (next: string) => setSearchParams(previous => { const params = new URLSearchParams(previous); params.set("view", next); return params; }, { preventScrollReset: true });
   const [assetUpdates, setAssetUpdates] = useState<PrivateAsset[]>([]);
   const onAssetChange = useCallback((asset: PrivateAsset) => setAssetUpdates(previous => mergeAssetRows(previous, [asset])), []);
@@ -65,8 +63,7 @@ export default function Redfox({ loaderData }: Route.ComponentProps) {
   const [account, setAccount] = useState("");
   const [tweetId, setTweetId] = useState("");
   return <ToolPricingProvider catalog={loaderData.pricing} admin><AdminPage title="数据工具" subtitle="查询与创作提交后会自动进入对应执行记录，查看进度与结果；本地素材上传后在私有素材库查看。管理员不扣会员积分，但使用独立 admin 测试池并同时受全站总预算限制。定时采集在采集订阅中配置，已有信源的主订阅与公开权限仍在信源详情管理。" actions={<><ButtonLink tone="primary" to="/admin/operations">进度与结果</ButtonLink><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink></>}>
-    <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区">{[["x", "X 查询"], ["platforms", "平台查询"], ["ai-search", "AI 搜索"], ["images", "图片创作"], ["videos", "视频创作"], ["tools", "辅助工具"], ["assets", "私有素材"], ["costs", "费用与账单"]].map(([key, label]) => <Button key={key} tone={view === key ? "primary" : "secondary"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
-    <div hidden={view !== "costs"}><div className="mb-4 flex flex-wrap gap-2"><ButtonLink to="/admin/settings">预算设置</ButtonLink><ButtonLink to="/admin/runs">运行与回执</ButtonLink></div><RedfoxCosts initialInterval={loaderData.costInterval} /></div>
+    <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区">{[["x", "X 查询"], ["platforms", "平台查询"], ["ai-search", "AI 搜索"], ["images", "图片创作"], ["videos", "视频创作"], ["tools", "辅助工具"], ["assets", "私有素材"]].map(([key, label]) => <Button key={key} tone={view === key ? "primary" : "secondary"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
     <div hidden={view !== "ai-search"}><AiSearchForm options={loaderData.aiSearchOptions} initialFamily={loaderData.aiSearchFamily} initialTaskId={loaderData.aiSearchTaskId} /></div>
     <div hidden={view !== "assets"}><AssetLibrary supplierUploadOptions={loaderData.supplierUploadOptions} initialPage={loaderData.assets} uploadOptions={loaderData.assetUploadOptions} imageOptions={loaderData.options} updates={assetUpdates} onAssetChange={onAssetChange} /></div>
     <div hidden={view !== "tools"}><div className="grid gap-5 xl:grid-cols-2"><div className="min-w-0"><TranscriptionForm options={loaderData.transcriptionOptions} initialTaskId={loaderData.transcriptionTaskId} initialPlatform={loaderData.transcriptionPlatform} /></div><div className="min-w-0"><MediaToolForm operations={loaderData.operations} /></div><div className="min-w-0 xl:col-span-2"><XhsCommentForm options={loaderData.xhsCommentOptions} initialTaskId={loaderData.xhsCommentTaskId} /></div></div></div>

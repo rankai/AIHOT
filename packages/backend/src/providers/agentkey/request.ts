@@ -41,6 +41,7 @@ export async function requestAgentKey(execution:Execution,run:RunRow,route:Agent
   const transport = agentKeyTransport(options); // Configuration guard before claiming a paid attempt.
   let receipt: ReceiptResult;
   try { receipt = await paidRequest({ service: ["collection","preview"].includes(String(run.input.mode)) ? "agentkey.collect" : "agentkey.query", purpose: route.operationKey, model:route.tool,
+    costIdentity: { billingProvider: "agentkey", upstreamProvider: route.upstream, operation: route.tool, model: null },
     subject: `operation:${execution.runId}`,
     identity: { runId: execution.runId, stepVersion: execution.stepVersion, endpoint: transport.endpoint,
       contractVersion: route.contractVersion, tool: route.tool, params },

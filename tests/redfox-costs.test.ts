@@ -47,6 +47,7 @@ test('AgentKey credit estimates and reported charges share the existing attempt 
  await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,cost,currency,cost_basis,started_at,usage) VALUES (${r!.id},1,'agentkey.collect','TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post','live','received',NULL,NULL,NULL,${interval.start},${sql.json({estimatedCredits:0.2,chargedCredits:0.2})})`;
  await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,cost,currency,cost_basis,started_at,usage) VALUES (${r!.id},2,'agentkey.collect','TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post','live','unknown',NULL,NULL,NULL,${interval.start},${sql.json({estimatedCredits:0.3})})`;
  const result=await redfoxCosts(interval),group=result.local.groups.find(g=>g.service==='agentkey.collect')!;
+ assert.equal(group.model,'TikHub/fetch_video_search_v4_api_v1_douyin_search_fetch_video_search_v4_post');
  assert.deepEqual({attempts:group.attempts,estimatedCredits:group.estimatedCredits,chargedCredits:group.chargedCredits,unknownEstimatedCreditsCount:group.unknownEstimatedCreditsCount,unknownChargedCreditsCount:group.unknownChargedCreditsCount},{attempts:2,estimatedCredits:'0.5',chargedCredits:'0.2',unknownEstimatedCreditsCount:0,unknownChargedCreditsCount:1});
 });
 test('one complete bill snapshot keeps duplicate rows and raw times, blocks unrelated or incomplete results',async()=>{

@@ -1,0 +1,61 @@
+{
+  "formatVersion": 1,
+  "skillId": "general-writing",
+  "version": "2",
+  "name": "general-writing",
+  "description": "自有首版写作规程",
+  "source": {
+    "kind": "owned",
+    "license": "MIT",
+    "maintainer": "AIHOT",
+    "review": "docs/reviews/2026-10-30-xiaohongshu-agent-plan-review.md"
+  },
+  "modules": [
+    {
+      "moduleId": "write",
+      "version": "2",
+      "description": "通用提纲、起草与改写",
+      "inputSchema": "writing-input@1",
+      "entryResource": "write",
+      "resources": [
+        "write"
+      ],
+      "tools": [
+        "save_draft"
+      ],
+      "outputKinds": [
+        "text-draft"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#write/success",
+        "fixtures#write/missing-input",
+        "fixtures#write/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "writing-delivery@1",
+      "hash": "125d7d05afba51b86ccb9e7a5c90694d1044ae91e50eaa78db13fa79b63fbdd2"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "write",
+      "path": "rules.md",
+      "type": "text/markdown",
+      "bytes": 1568,
+      "sha256": "34ba615d8de93ada342094d0fc76d33deee0eae3c711e0f7f92e9ad66364de77"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 770,
+      "sha256": "60b567e57a538823c251224985e326f3e08772b90c48a647a2bfd6c69f634529"
+    }
+  ],
+  "manifestHash": "13fb8e2f86e793b1623059af077832e484e670f48fccb630eb7f7c5ae8ee0111",
+  "packageHash": "f69362d3f8dc11e9c7c928707c21c17e50bcc4ee4b7f66d1a7650b5d9e5cadab"
+}

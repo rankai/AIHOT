@@ -1,23 +1,21 @@
 import { wanTaskCosts } from "../providers/aliyun/wan-costs.ts";
 import { z } from 'zod';
-import { sql } from '../db.ts';
+import { type Db } from '../db.ts';
 import { stableJson } from '../lib/ids.ts';
 import { parseRedfoxJson } from '../providers/redfox/client.ts';
 import { parseRedfoxAccount } from '../providers/redfox/redfox-account.ts';
 import { redfoxAccountOperations } from '../providers/redfox/redfox-account-contract.ts';
+import { legacyAttemptCostGroups, withCostRead } from './costs.ts';
 
 const operation = 'API_1792043329817';
 export const RedfoxCostsQuery = z.object({
   start: z.iso.datetime({ offset: true }), end: z.iso.datetime({ offset: true }),
   billRunId: z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(z.number().int().safe().positive()).optional(),
-}).strict().refine(v => Date.parse(v.start) < Date.parse(v.end), { message: 'start must precede end' });
-interface CostGroup {
-  service: string; model: string | null; origin: string; base: string | null; currency: string | null;
-  costBasis: 'actual' | 'estimated' | null; attempts: number; knownCost: string | null; unknownCostCount: number;
-  estimatedCredits: string | null; chargedCredits: string | null;
-  unknownEstimatedCreditsCount: number; unknownChargedCreditsCount: number;
-  statusCounts: { pending: number; received: number; failed: number; unknown: number };
-}
+}).strict().superRefine((v, ctx) => {
+  const span = Date.parse(v.end) - Date.parse(v.start);
+  if (!(span > 0)) ctx.addIssue({ code: 'custom', path: ['end'], message: 'start must precede end' });
+  if (span > 92 * 86400_000) ctx.addIssue({ code: 'custom', path: ['end'], message: 'query range must not exceed 92 days' });
+});
 const environmentOf = (base: string | null): 'production' | 'other' | 'unknown' => base === 'https://redfox.hk' ? 'production' : base ? 'other' : 'unknown';
 const invalidPage = () => Object.assign(new Error('Selected run does not contain a complete, matching received bill page'), { statusCode: 400 });
 
@@ -50,8 +48,8 @@ export function summarizeBillRecords(records: { points: string | number; reason:
       pointsPerCny: '10', evidence: 'docs/redfox-integration-plan.md#52-回执身份与费用', actualCost: false } } };
 }
 
-async function selectedBill(runId: number) {
-  const pages = await sql`SELECT r.id AS run_id,r.input,r.created_at AS queried_at,p.id AS receipt_id,p.request,p.response,p.received_at,
+async function selectedBill(db: Db, runId: number) {
+  const pages = await db`SELECT r.id AS run_id,r.input,r.created_at AS queried_at,p.id AS receipt_id,p.request,p.response,p.received_at,
       s.step_version,s.created_at AS saved_at
     FROM operation_runs r JOIN operation_results s ON s.run_id=r.id
     JOIN receipts p ON p.id=s.receipt_id
@@ -67,7 +65,7 @@ async function selectedBill(runId: number) {
     if (p.request?.operation !== operation || stableJson(p.request.input) !== stableJson(parameters) || p.response?.status !== 200) throw invalidPage();
     const envelope = z.object({ code: z.literal(2000), data: z.unknown() }).parse(parseRedfoxJson(p.response.body));
     const expected = parseRedfoxAccount(operation, envelope.data);
-    const saved = await sql`SELECT item_key,kind,data,receipt_id FROM operation_results WHERE run_id=${runId} AND step_version=${p.step_version}`;
+    const saved = await db`SELECT item_key,kind,data,receipt_id FROM operation_results WHERE run_id=${runId} AND step_version=${p.step_version}`;
     if (saved.length !== expected.length || expected.some(e => !saved.some(s => s.item_key === e.itemKey && s.kind === e.kind && String(s.receipt_id) === String(p.receipt_id) && stableJson(s.data) === stableJson(e.data)))) throw invalidPage();
     // Preserve decimal lexemes from the retained response, without rounding through binary Number.
     const precise = JSON.parse(p.response.body, (key, value, context?: { source?: string }) => key === 'points' && typeof value === 'number' ? render(decimal(context!.source!)) : value);
@@ -85,28 +83,19 @@ async function selectedBill(runId: number) {
 
 export async function redfoxCosts(input: z.input<typeof RedfoxCostsQuery>) {
   const query = RedfoxCostsQuery.parse(input);
-  const groups = await sql<CostGroup[]>`SELECT a.service,a.model,a.origin,r.request->>'base' AS base,a.currency,a.cost_basis AS "costBasis",
-      count(*)::int AS attempts, sum(a.cost)::text AS "knownCost",count(*) FILTER (WHERE a.cost IS NULL)::int AS "unknownCostCount",
-      sum(CASE WHEN jsonb_typeof(a.usage->'estimatedCredits')='number' THEN (a.usage->>'estimatedCredits')::numeric END)::text AS "estimatedCredits",
-      sum(CASE WHEN jsonb_typeof(a.usage->'chargedCredits')='number' THEN (a.usage->>'chargedCredits')::numeric END)::text AS "chargedCredits",
-      count(*) FILTER (WHERE jsonb_typeof(a.usage->'estimatedCredits') IS DISTINCT FROM 'number')::int AS "unknownEstimatedCreditsCount",
-      count(*) FILTER (WHERE jsonb_typeof(a.usage->'chargedCredits') IS DISTINCT FROM 'number')::int AS "unknownChargedCreditsCount",
-      jsonb_build_object('pending',count(*) FILTER (WHERE a.status='pending'),'received',count(*) FILTER (WHERE a.status='received'),
-        'failed',count(*) FILTER (WHERE a.status='failed'),'unknown',count(*) FILTER (WHERE a.status='unknown')) AS "statusCounts"
-    FROM receipt_attempts a JOIN receipts r ON r.id=a.receipt_id
-    WHERE (a.service LIKE 'redfox.%' OR a.service LIKE 'agentkey.%' OR a.service LIKE 'aliyun.wan.%') AND a.started_at>=${new Date(query.start)} AND a.started_at<${new Date(query.end)}
-    GROUP BY a.service,a.model,a.origin,r.request->>'base',a.currency,a.cost_basis
-    ORDER BY a.service,a.model,a.origin,base,a.currency,a.cost_basis`;
-  const recent = await sql`SELECT r.id AS "runId",p.id AS "receiptId",r.created_at AS "queriedAt",p.received_at AS "receivedAt",r.input->'parameters' AS parameters
-    FROM operation_runs r JOIN operation_results s ON s.run_id=r.id JOIN receipts p ON p.id=s.receipt_id
-    WHERE r.provider='redfox' AND r.operation_key='redfox.sync.query' AND r.input->>'platform'='redfox-account'
-      AND r.input->>'operationId'=${operation} AND s.kind='query_summary' AND s.item_key='page'
-      AND s.data->>'platform'='redfox' AND s.data->>'operationId'=${operation}
-      AND p.service='redfox.account' AND p.model=${operation} AND p.status IN ('received','completed')
-    ORDER BY r.created_at DESC,r.id DESC LIMIT 50`;
-  return { wan: await wanTaskCosts(query.start, query.end), local: { interval: { start: query.start, end: query.end, timeBasis: 'attempt_started_at' },
-      groups: groups.map(g => ({ ...g, environment: environmentOf(g.base) })) },
-    billPages: recent.map(r => ({ ...r, runId: Number(r.runId), receiptId: Number(r.receiptId), responseIdentity: `receipt:${r.receiptId}` })),
-    selectedBill: query.billRunId ? await selectedBill(query.billRunId) : null,
-    comparison: { comparable: false, reasonCodes: ['NO_UNIQUE_REQUEST_ID', 'BILL_TIMEZONE_UNSPECIFIED', 'DYNAMIC_PAGINATION_NOT_COMPLETE_INTERVAL', 'ATTEMPTS_NOT_CONFIRMED_DELIVERY'] } };
+  return withCostRead(async db => {
+    const groups = await legacyAttemptCostGroups(db, query.start, query.end);
+    const recent = await db`SELECT r.id AS "runId",p.id AS "receiptId",r.created_at AS "queriedAt",p.received_at AS "receivedAt",r.input->'parameters' AS parameters
+      FROM operation_runs r JOIN operation_results s ON s.run_id=r.id JOIN receipts p ON p.id=s.receipt_id
+      WHERE r.provider='redfox' AND r.operation_key='redfox.sync.query' AND r.input->>'platform'='redfox-account'
+        AND r.input->>'operationId'=${operation} AND s.kind='query_summary' AND s.item_key='page'
+        AND s.data->>'platform'='redfox' AND s.data->>'operationId'=${operation}
+        AND p.service='redfox.account' AND p.model=${operation} AND p.status IN ('received','completed')
+      ORDER BY r.created_at DESC,r.id DESC LIMIT 50`;
+    return { wan: await wanTaskCosts(query.start, query.end, db), local: { interval: { start: query.start, end: query.end, timeBasis: 'attempt_started_at' },
+        groups },
+      billPages: recent.map(r => ({ ...r, runId: Number(r.runId), receiptId: Number(r.receiptId), responseIdentity: `receipt:${r.receiptId}` })),
+      selectedBill: query.billRunId ? await selectedBill(db, query.billRunId) : null,
+      comparison: { comparable: false, reasonCodes: ['NO_UNIQUE_REQUEST_ID', 'BILL_TIMEZONE_UNSPECIFIED', 'DYNAMIC_PAGINATION_NOT_COMPLETE_INTERVAL', 'ATTEMPTS_NOT_CONFIRMED_DELIVERY'] } };
+  });
 }

@@ -1,6 +1,7 @@
 import type { ToolCreditKind } from "@aihot/contracts/credits";
 
 export const TOOL_PRICE_KINDS: Array<{ kind: ToolCreditKind; label: string }> = [
+  { kind: "assistant-turn", label: "助手创作回合" },
   { kind: "query", label: "平台查询 / 辅助工具" }, { kind: "x-account", label: "X 账号查询" }, { kind: "x-tweet", label: "X 推文查询" },
   { kind: "images", label: "图片创作" }, { kind: "videos", label: "视频创作" }, { kind: "ai-search", label: "AI 搜索" },
   { kind: "transcriptions", label: "视频转写" }, { kind: "xhs-comments", label: "小红书评论" }, { kind: "media-upload", label: "上传至供应商" },

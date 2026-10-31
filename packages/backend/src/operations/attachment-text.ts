@@ -1,14 +1,14 @@
 import {readFile,stat} from 'node:fs/promises';
 import sanitizeHtml from 'sanitize-html';
 export const ATTACHMENT_TEXT_BYTES=2*1024*1024;
-export const attachmentTextTypes={txt:'text/plain',srt:'application/x-subrip',vtt:'text/vtt',json:'application/json',json3:'application/json'} as const;
+export const attachmentTextTypes={txt:'text/plain',md:'text/markdown',srt:'application/x-subrip',vtt:'text/vtt',json:'application/json',json3:'application/json'} as const;
 export type AttachmentTextFormat=keyof typeof attachmentTextTypes;
 export function parseAttachmentText(bytes:Uint8Array,format:AttachmentTextFormat){
  if(bytes.byteLength>ATTACHMENT_TEXT_BYTES)throw new Error('Text attachment exceeds 2 MiB');
  const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
  if(!text.trim()||text.includes('\0'))throw new Error('Text attachment must contain nonempty UTF-8 text');
  if(format==='json'||format==='json3'){JSON.parse(text);return {text,bodyText:null};}
- if(format==='txt')return {text,bodyText:text};
+ if(format==='txt'||format==='md')return {text,bodyText:text};
  const normalized=text.replace(/\r\n?/g,'\n').replace(/^\uFEFF/,'');
  if(format==='vtt'&&!/^WEBVTT(?:[ \t].*)?\n/.test(normalized))throw new Error('Invalid WebVTT header');
  const blocks=(format==='vtt'?normalized.replace(/^WEBVTT[^\n]*\n/,''):normalized).trim().split(/\n[ \t]*\n/);
@@ -28,4 +28,12 @@ export async function inspectTextAttachment(file:string,format:AttachmentTextFor
  const info=await stat(file);if(info.size>ATTACHMENT_TEXT_BYTES)throw new Error('Text attachment exceeds 2 MiB');
  parseAttachmentText(await readFile(file),format);
  return {bytes:info.size,mime:attachmentTextTypes[format],metadata:{kind:'text' as const,format,validation:'utf8-and-format'}};
+}
+
+/** Browser MIME fallback is accepted only with one of the two explicit text extensions. */
+export function inputTextFormat(filename:string,mime:string):'txt'|'md'|null {
+ const ext=filename.split('.').pop()?.toLowerCase();
+ if(ext!=='txt'&&ext!=='md')return null;
+ const accepted=ext==='txt'?['text/plain','application/octet-stream']:['text/markdown','text/x-markdown','text/plain','application/octet-stream'];
+ return accepted.includes(mime.toLowerCase())?ext:null;
 }

@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import type { Route } from "./+types/models";
 import { adminGet } from "../../lib/admin.server";
 import { useAdminAction } from "../../features/admin/action";
-import { bj, money, num } from "../../features/admin/format";
+import { bj, num } from "../../features/admin/format";
 import { AdminPage, Badge, Button, Card, DataTable, Empty, Field, FilterChips, ReasonDialog, Select } from "../../features/admin/ui";
 
 interface Usage {
@@ -19,9 +19,6 @@ interface Usage {
   p95: number | null;
   tokensIn: number;
   tokensOut: number;
-  actualCost: number | null;
-  currency: string | null;
-  estimate: { amount: number; currency: string } | null;
 }
 
 interface Models {
@@ -41,6 +38,11 @@ export const meta: Route.MetaFunction = () => [{ title: `模型与评测 · ${SI
 
 const SOURCE_LABEL = { admin: "后台切换", env: "环境变量", default: "代码默认" } as const;
 const secs = (ms: number | null) => (ms == null ? "—" : ms >= 10_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 1000).toFixed(1)} s`);
+function costHref(model: string | null, days: number) {
+  const params = new URLSearchParams({ view: "details", range: days === 1 ? "24h" : days === 30 ? "30d" : "7d" });
+  if (model) params.set("model", model);
+  return `/admin/costs?${params}`;
+}
 
 export default function ModelsAdmin({ loaderData: m }: Route.ComponentProps) {
   const { run, pending } = useAdminAction();
@@ -51,7 +53,7 @@ export default function ModelsAdmin({ loaderData: m }: Route.ComponentProps) {
   return (
     <AdminPage
       title="模型与评测"
-      subtitle="每项能力当前用哪个模型、来自哪里（后台切换 > 环境变量 > 代码默认），以及近期的成功率、耗时与费用。切换只影响之后的新任务，已有结果不重算；换精选模型前先看 SelectBench 同批对比。"
+      subtitle="每项能力当前用哪个模型、来自哪里（后台切换 > 环境变量 > 代码默认），以及近期的成功率、耗时与 tokens。费用统一在成本中心查看，不按当前价重算历史。切换只影响之后的新任务；换精选模型前先看 SelectBench 同批对比。"
       actions={<FilterChips param="days" options={[{ value: "1", label: "24 小时" }, { value: "", label: "7 天" }, { value: "30", label: "30 天" }]} />}
     >
       <div className="grid gap-5">
@@ -103,16 +105,9 @@ export default function ModelsAdmin({ loaderData: m }: Route.ComponentProps) {
                     { key: "t", label: "输入 / 输出 token", align: "right", render: (u) => <span className="whitespace-nowrap">{`${num(u.tokensIn)} / ${num(u.tokensOut)}`}</span> },
                     {
                       key: "$",
-                      label: "费用",
+                      label: "成本",
                       align: "right",
-                      render: (u) =>
-                        u.actualCost !== null ? (
-                          `${money(u.actualCost)}${u.currency && u.currency !== "CNY" ? ` ${u.currency}` : ""}`
-                        ) : u.estimate ? (
-                          <span title="按用量 × 单价推算">≈ {money(u.estimate.amount)}{u.estimate.currency !== "CNY" ? ` ${u.estimate.currency}` : ""}</span>
-                        ) : (
-                          <span className="whitespace-nowrap text-ink-4" title="服务商没有返回费用，按 token 数和你的模型单价自己估算">未定价</span>
-                        ),
+                      render: (u) => <Link className="whitespace-nowrap text-accent" to={costHref(u.model, m.days)}>按模型查看</Link>,
                     },
                   ]}
                 />

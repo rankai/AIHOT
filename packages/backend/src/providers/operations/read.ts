@@ -1,3 +1,4 @@
+import { controlAssistantOperation } from "../../assistant/controls.ts";
 import {inheritedSourceMembers} from "../../sources/subscriptions.ts";
 import { z } from "zod";
 import { sql } from "../../db.ts";
@@ -41,6 +42,10 @@ export async function operationDetail(id: number) {
   const { members:ownMembers, mode, window, parameters, fileKeys, recoveryUnavailable, operationId, platform, family } = run.input;
   const draft = mode === "preview" && run.input.commandIntent?.kind !== "saved-preview";
   const {tool,upstream}=run.input;
+  const [assistant] = run.provider === "assistant" || run.input.assistantParentTurnId
+    ? await sql`SELECT t.parent_operation_run_id AS "parentRunId",t.phase FROM assistant_turns t
+        WHERE t.parent_operation_run_id=${id} OR EXISTS(SELECT 1 FROM assistant_tool_calls c WHERE c.turn_id=t.id AND c.child_run_id=${id})`
+    : [];
   const members=(await inheritedSourceMembers(sql,run.input,run.provider,id))?.members??ownMembers;
   const frozenSourceIds = [...new Set((members ?? []).flatMap((member: {sourceId: string | null}) => member.sourceId ? [member.sourceId] : []))] as string[];
   const sources = run.input.sources ?? (run.input.source ? [run.input.source] : frozenSourceIds.length ? await sql`SELECT id,name FROM sources WHERE id IN ${sql(frozenSourceIds)} ORDER BY id` : undefined);
@@ -80,12 +85,15 @@ export async function operationDetail(id: number) {
     FROM receipt_attempts a JOIN receipts p ON p.id=a.receipt_id WHERE a.receipt_id = ${run.receiptId} ORDER BY a.attempt` : [];
   const [receipt] = run.receiptId ? await sql`SELECT status, attempts, model FROM receipts WHERE id = ${run.receiptId}` : [];
   const [job] = await sql`SELECT j.state FROM operation_runs r JOIN pgboss.job j ON j.id = r.job_id WHERE r.id = ${id}`;
-  const nextAction = run.status === "completed" || run.status === "failed" ? "view-results"
+  const nextAction = assistant && assistant.parentRunId !== id ? "assistant-parent"
+    : run.status === "completed" || run.status === "failed" ? "view-results"
     : receipt?.status === "unknown" ? "review-unknown"
+    : assistant && ["stopped", "needs_review"].includes(run.status) ? "assistant-review-or-resume"
+    : assistant && run.status === "waiting" && ["waiting_question", "waiting_approval", "waiting_child"].includes(assistant.phase) ? `assistant-${assistant.phase}`
     : run.status === "stopped" || run.status === "needs_review" ? "review-or-resume"
     : ["received","completed"].includes(receipt?.status) ? "local-recovery"
     : job && ["created","retry","active"].includes(job.state) ? "wait-for-job" : "wait-for-recovery";
-  return { ...run, progress:run.progress, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { members, videoDownload, tool, upstream, mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
+  return { ...run, progress:run.progress, currentReceiptId, receipt: receipt ?? null, jobState: job?.state ?? null, nextAction, nextResultCursor: page.nextCursor, inputs: { members, assistant, videoDownload, tool, upstream, mode, draft, window, sources, parameters, fileKeys, recoveryUnavailable, operationId, platform, family, ...(["ai-search","ai-search-query"].includes(mode)?{aiSearchPlan:{submissionLimit:mode==="ai-search"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["transcript","transcript-query"].includes(mode)?{transcriptionPlan:{submissionLimit:mode==="transcript"?1:0,pollLimit,pollDeadlineSeconds}}:{}), ...(["xhs-comments","xhs-comments-query"].includes(mode)?{xhsCommentPlan:{submissionLimit:mode==="xhs-comments"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["video","video-query"].includes(mode)?{videoPlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="video"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}), ...(["image","image-query"].includes(mode)?{imagePlan:{referenceUploadLimit:fileKeys?.length??0,submissionLimit:mode==="image"?1:0,pollLimit,pollDeadlineSeconds,submissionCost:null}}:{}) }, results, attempts };
 }
 export async function operationResults(id: number, cursor = 0, limit = 100) {
   z.number().int().nonnegative().parse(cursor);
@@ -103,7 +111,12 @@ export async function operationResults(id: number, cursor = 0, limit = 100) {
 const Command = z.object({ stepVersion: z.number().int().positive(), generation: z.number().int().nonnegative(), reason: z.string().min(1).max(500) }).strict();
 export async function controlOperation(id: number, action: "resume" | "stop" | "abandon", raw: unknown, actor: string) {
   const input = Command.parse(raw), expected = { runId: id, stepVersion: input.stepVersion, generation: input.generation };
-  await sql.begin(async (tx) => {
+  const assistantControlled = await sql.begin(async (tx) => {
+    const [owner] = await tx`SELECT provider,input FROM operation_runs WHERE id=${id}`;
+    if (owner?.provider === "assistant" || owner?.input.assistantParentTurnId) {
+      await controlAssistantOperation(tx, expected, action, actor, input.reason);
+      return true;
+    }
     if (action === "resume") await lockRunAdmission(tx, [id]);
     const { run } = await lockRun(tx, id);
     if (run.step_version !== expected.stepVersion || run.generation !== expected.generation) throw new StaleOperationError("Operation changed; refresh first");
@@ -116,6 +129,6 @@ export async function controlOperation(id: number, action: "resume" | "stop" | "
       await tx`UPDATE operation_runs SET status = 'stopped', generation = generation + 1, wait_reason = ${input.reason}, next_attempt_at = NULL WHERE id = ${id}`;
     }
   });
-  await audit(actor, `operation.${action}`, `operation:${id}`, input.reason, null, null);
+  if (!assistantControlled) await audit(actor, `operation.${action}`, `operation:${id}`, input.reason, null, null);
   return operationDetail(id);
 }
