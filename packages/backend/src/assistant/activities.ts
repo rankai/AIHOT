@@ -15,6 +15,7 @@ const publicTools = new Set<AssistantActivity["kind"]>([
   "read_skill_reference",
   "ask_question",
   "search_xhs_notes",
+  "analyze_xhs_research",
   "save_draft",
 ]);
 function interrupted(status: string): State | null {

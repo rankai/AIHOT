@@ -1,3 +1,4 @@
+import { enqueueMessage, approveQueuedMessage, cancelQueuedMessage, resumeMessageQueue, refreshQueuedQuote } from "@aihot/backend/assistant/message-queue";
 import { feeSettings, setFeeAuthorization } from "@aihot/backend/assistant/fees";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -37,6 +38,20 @@ const params = (raw: unknown) =>
     })
     .parse(raw);
 export function registerUserAssistant(app: FastifyInstance) {
+  app.post("/api/assistant/sessions/:id/queue", userHandler(async (req, reply, u) => reply.code(202).send(await enqueueMessage(u.user.id, params(req.params).id, req.body, req.headers["idempotency-key"]))));
+  app.post("/api/assistant/sessions/:id/queue/resume", userHandler(async (req, _reply, u) => resumeMessageQueue(u.user.id, params(req.params).id)));
+  app.post("/api/assistant/sessions/:id/queue/:entryId/approve", userHandler(async (req, _reply, u) => {
+    const p = z.object({ id: z.string().uuid(), entryId: z.string().uuid() }).parse(req.params);
+    return approveQueuedMessage(u.user.id, p.id, p.entryId, req.body);
+  }));
+  app.post("/api/assistant/sessions/:id/queue/:entryId/quote", userHandler(async (req, _reply, u) => {
+    const p = z.object({ id: z.string().uuid(), entryId: z.string().uuid() }).parse(req.params);
+    return refreshQueuedQuote(u.user.id, p.id, p.entryId);
+  }));
+  app.post("/api/assistant/sessions/:id/queue/:entryId/cancel", userHandler(async (req, _reply, u) => {
+    const p = z.object({ id: z.string().uuid(), entryId: z.string().uuid() }).parse(req.params);
+    return cancelQueuedMessage(u.user.id, p.id, p.entryId);
+  }));
   app.get("/api/assistant/sessions/:id/fee-authorization",userHandler(async(req,_reply,u)=>feeSettings(u.user.id,params(req.params).id)));
   app.post("/api/assistant/sessions/:id/fee-authorization",userHandler(async(req,_reply,u)=>setFeeAuthorization(u.user.id,params(req.params).id,req.body)));
   app.post("/api/assistant/sessions/:id/inputs",userHandler(async(req,_reply,u)=>attachInput(u.user.id,params(req.params).id,req.body,req.headers["idempotency-key"])));

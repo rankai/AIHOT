@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 import type { ToolQuote } from "@aihot/contracts/credits";
 import { Button } from "../admin/ui";
@@ -7,6 +7,8 @@ export function TurnQuoteDialog({
   quote,
   message,
   pending,
+  requiresRequote = false,
+  requote,
   error,
   close,
   confirm,
@@ -14,12 +16,13 @@ export function TurnQuoteDialog({
   quote: ToolQuote;
   message: string;
   pending: boolean;
+  requiresRequote?: boolean;
+  requote?: () => void;
   error: string | null;
   close: () => void;
   confirm: () => void;
 }) {
-  const card = useRef<HTMLElement>(null);
-  useEffect(() => { card.current?.focus(); }, []);
+  const titleId = useId();
   const [expired, setExpired] = useState(false);
   useEffect(() => {
     const check = () => setExpired(Date.parse(quote.expiresAt) <= Date.now());
@@ -29,16 +32,14 @@ export function TurnQuoteDialog({
   }, [quote.expiresAt]);
   return (
     <section
-      ref={card}
-      tabIndex={-1}
-      aria-labelledby="assistant-turn-quote-title"
+      aria-labelledby={titleId}
       className="assistant-quote-card"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2
-            id="assistant-turn-quote-title"
-            className="text-[14px] font-semibold text-ink"
+            id={titleId}
+            className="text-[13px] font-medium text-ink"
           >
             本次 {quote.amount.toLocaleString()} 积分
           </h2>
@@ -74,7 +75,8 @@ export function TurnQuoteDialog({
           {error}
         </p>
       )}
-      <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(expired || requiresRequote) && requote && <Button size="sm" disabled={pending} onClick={requote}>重新获取报价</Button>}
         <Button size="sm" disabled={pending} onClick={close}>
           取消
         </Button>
@@ -82,10 +84,10 @@ export function TurnQuoteDialog({
           size="sm"
           tone="primary"
           busy={pending}
-          disabled={expired || !quote.affordable || pending}
+          disabled={requiresRequote || expired || !quote.affordable || pending}
           onClick={confirm}
         >
-          开始
+          确认继续
         </Button>
       </div>
     </section>

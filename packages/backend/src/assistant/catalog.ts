@@ -27,7 +27,7 @@ const Module = z
     deliveryContract: z.literal("writing-delivery@1"),
     entryResource: Id,
     resources: z.array(Id),
-    tools: z.array(z.enum(["save_draft", "search_xhs_notes"])),
+    tools: z.array(z.enum(["save_draft", "search_xhs_notes", "analyze_xhs_research"])),
     outputKinds: z.array(z.enum(["text-draft", "xhs-note"])),
     modelCapabilities: z.array(z.literal("text-tools")),
     fixtures: z.array(z.string()).min(3),
@@ -130,7 +130,7 @@ const root = fileURLToPath(new URL("./skills/", import.meta.url));
 let cache: Promise<LoadedSkill[]> | undefined;
 export function catalog(): Promise<LoadedSkill[]> {
   return (cache ??= Promise.all(
-    ["general-writing", "xiaohongshu-creator"].map(async (id) =>
+    ["general-writing", "xiaohongshu-creator", "xiaohongshu-creator-v2"].map(async (id) =>
       validatePackage(resolve(root, id), JSON.parse(await readFile(resolve(root, id, "manifest.json"), "utf8"))),
     ),
   ));
@@ -143,16 +143,16 @@ export const profiles = {
     welcome: "提供材料，起草、列提纲或改写；也可选择小红书创作。",
     skills: ["general-writing", "xiaohongshu-creator"],
     modules: { "general-writing": ["write"], "xiaohongshu-creator": ["M1", "M2"] },
-    tools: ["save_draft", "search_xhs_notes"],
+    tools: ["save_draft", "search_xhs_notes", "analyze_xhs_research"],
   },
   xiaohongshu: {
     id: "xiaohongshu",
     version: "1",
     name: "小红书助手",
-    welcome: "根据你的材料写笔记或改写原稿。首版不包含完整联网研究。",
+    welcome: "根据你的材料写笔记或改写原稿。创作先检索真实笔记并分析规律；改写使用原稿。",
     skills: ["xiaohongshu-creator"],
     modules: { "xiaohongshu-creator": ["M1", "M2"] },
-    tools: ["save_draft", "search_xhs_notes"],
+    tools: ["save_draft", "search_xhs_notes", "analyze_xhs_research"],
   },
 } as const;
 export function profile(id: unknown) {
@@ -175,6 +175,7 @@ export async function candidates(id: AssistantId, selection?: AssistantTaskHint 
   const bindings: Record<string, [string, string]> = { "general-writing": ["general-writing", "write"], "xiaohongshu-write": ["xiaohongshu-creator", "M1"], "xiaohongshu-rewrite": ["xiaohongshu-creator", "M2"] };
   return (await catalog())
     .filter((s) => (p.skills as readonly string[]).includes(s.manifest.skillId))
+    .filter((s) => s.manifest.skillId !== "xiaohongshu-creator" || s.manifest.version === "3")
     .flatMap(({ manifest: s }) =>
       s.modules
         .filter((m) => ((p.modules as Record<string, readonly string[]>)[s.skillId] ?? []).includes(m.moduleId))

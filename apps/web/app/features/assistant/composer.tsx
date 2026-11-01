@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { IconArrowUp } from "../../components/icons";
+import { sendsOnEnter } from "./composer-keyboard";
 import { Textarea } from "../admin/ui";
 export function AssistantComposer({
   text,
@@ -7,7 +8,10 @@ export function AssistantComposer({
   onSend,
   disabled,
   busy,
+  stopBusy = false,
   answerMode = false,
+  onStop,
+  running = false,
   maxLength,
   children,
   hint,
@@ -21,7 +25,10 @@ export function AssistantComposer({
   onSend: () => void;
   disabled: boolean;
   busy: boolean;
+  stopBusy?: boolean;
   answerMode?: boolean;
+  onStop?: () => void;
+  running?: boolean;
   maxLength: number;
   children?: ReactNode;
   hint?: string;
@@ -31,6 +38,7 @@ export function AssistantComposer({
   confirmation?: ReactNode;
 }) {
   const composing = useRef(false);
+  const stopping = running && !text.trim() && !!onStop;
   const form = useRef<HTMLFormElement>(null);
   const wasConfirming = useRef(false);
   useEffect(() => {
@@ -70,13 +78,7 @@ export function AssistantComposer({
             composing.current = false;
           }}
           onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !composing.current &&
-              !event.nativeEvent.isComposing &&
-              event.keyCode !== 229
-            ) {
+            if (sendsOnEnter({ key: event.key, shiftKey: event.shiftKey, keyCode: event.keyCode, isComposing: event.nativeEvent.isComposing }, composing.current, window.matchMedia("(pointer: coarse)").matches)) {
               event.preventDefault();
               if (!disabled && !busy && text.trim()) onSend();
             }
@@ -86,13 +88,14 @@ export function AssistantComposer({
           {!answerMode && controls}
           {answerMode && <span className="text-[12px] text-ink-3">补充回答</span>}
           <button
-            type="submit"
+            type={stopping ? "button" : "submit"}
             className="assistant-send"
-            disabled={disabled || busy || !text.trim()}
-            aria-label={answerMode ? "提交回答并继续" : "发送需求"}
+            disabled={stopping ? stopBusy : disabled || busy || !text.trim()}
+            onClick={stopping ? onStop : undefined}
+            aria-label={stopping ? "停止当前任务" : answerMode ? "提交回答并继续" : "发送需求"}
           >
-            <span>{busy ? "处理中" : answerMode ? "回答" : "发送"}</span>
-            <IconArrowUp size={17} />
+            <span>{stopping ? "处理中" : answerMode ? "回答" : "发送"}</span>
+            {stopping ? <span aria-hidden="true">■</span> : <IconArrowUp size={17} />}
           </button>
         </div>
         <div className="mt-2">

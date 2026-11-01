@@ -220,7 +220,8 @@ test("assistant paid turn preserves local activation, artifacts, ownership and h
       (e: any) => e.statusCode === 410,
     );
     const packages = await catalog();
-    assert.equal(packages.length, 2);
+    assert.equal(packages.length, 3);
+    assert.deepEqual(packages.filter(p => p.manifest.skillId === "xiaohongshu-creator").map(p => p.manifest.version).sort(), ["2", "3"]);
   } finally {
     await supplier.close();
     await stopBoss();

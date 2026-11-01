@@ -108,7 +108,7 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  const candidate=(await candidates("xiaohongshu")).find(c=>c.moduleId==="M1")!;
  await sql`INSERT INTO assistant_activations(id,turn_id,model_step_id,identity_hash,candidate) VALUES (${activationId},${searchRun.turnId},${stepId},'synthetic',${sql.json(candidate as never)})`;
  const newCall=async(ordinal:number)=>{
- const call={id:randomUUID(),turn_id:searchRun.turnId,proposal_revision:1,input:{activationId,keyword:"预算回归",startDate:"2026-01-01",endDate:"2026-01-01"}};
+ const call={id:randomUUID(),turn_id:searchRun.turnId,proposal_revision:1,input:{activationId,keyword:"预算回归",startDate:searchTurn!.snapshot.researchClock.defaultStartDate,endDate:searchTurn!.snapshot.researchClock.latestDate}};
  const proposal=await prepareSearch(searchTurn!,call);
  await sql`INSERT INTO assistant_tool_calls(id,turn_id,model_step_id,ordinal,upstream_id,name,input,state,quote,result) VALUES (${call.id},${searchRun.turnId},${stepId},${ordinal},${`synthetic-${ordinal}`},'search_xhs_notes',${sql.json(call.input)},'proposed',${sql.json(proposal.quote as never)},${sql.json({normalized:proposal.normalized} as never)})`;
  return {call,proposal};

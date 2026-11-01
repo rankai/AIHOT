@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { PendingTurn } from "./data";
+import type { PendingTurn, TurnInput } from "./data";
+import { readRecoveries, subscribeRecovery, type QueueAttempt, type SavedQuote } from "./recovery-store.ts";
 import type { DraftAttachment } from "./materials-data";
 export interface ArtifactReference {
   artifactId: string;
@@ -14,6 +15,9 @@ export interface AssistantDraft {
   inputIds?: string[];
   answer?: { questionId: string; text: string };
   pendingTurn?: PendingTurn;
+  pendingQueue?: QueueAttempt;
+  pendingQuote?: SavedQuote;
+  recoveryCount?: number;
   pendingCreate?: { text: string; actionId: string | null; attachments?: DraftAttachment[]; configureFees?: boolean };
   configureFees?: boolean;
   autoQuote?: boolean;
@@ -27,18 +31,25 @@ export const draftKey = (identity: string, scope: string) =>
 export function rememberDraft(key: string, draft: AssistantDraft) {
   if (typeof window !== "undefined") {
     drafts.set(key, draft);
-    listeners.get(key)?.forEach((listener) => listener(draft));
+    listeners.get(key)?.forEach((listener) => listener(readDraft(key)));
   }
 }
 export function readDraft(key: string): AssistantDraft {
-  return drafts.get(key) ?? emptyDraft();
+  const current = drafts.get(key) ?? emptyDraft();
+  const records = readRecoveries(key);
+  return { ...current, pendingTurn: records.find(r => r.kind === "turn")?.value as PendingTurn | undefined,
+    pendingQueue: records.find(r => r.kind === "queue")?.value as QueueAttempt | undefined,
+    pendingQuote: records.find(r => r.kind === "quote")?.value as SavedQuote | undefined, recoveryCount: records.length };
+}
+export function hasComposerDraft(draft: AssistantDraft): boolean {
+  return !!(draft.text.trim() || draft.attachments?.length || draft.references?.length || draft.inputIds?.length);
 }
 /** Clear only the frozen submission. A later draft is a separate piece of user input. */
 export function settledDraft(
   draft: AssistantDraft,
   attempt: PendingTurn,
 ): AssistantDraft {
-  return draft.pendingTurn === attempt
+  return draft.pendingTurn?.commandKey === attempt.commandKey
     ? { ...draft, pendingTurn: undefined }
     : draft;
 }
@@ -58,7 +69,7 @@ export function freezeTurn(
 
 /** Preserve uncertainty for this exact frozen attempt, including across remounts. */
 export function failedTurn(draft: AssistantDraft, attempt: PendingTurn, status: number | null): AssistantDraft {
-  if (draft.pendingTurn !== attempt || attempt.hasUnknownResult || (status !== null && status < 500)) return draft;
+  if (draft.pendingTurn?.commandKey !== attempt.commandKey || attempt.hasUnknownResult || (status !== null && status < 500)) return draft;
   return { ...draft, pendingTurn: { ...attempt, hasUnknownResult: true } };
 }
 export function canRejectTurn(attempt: PendingTurn | undefined, status: number | null): boolean {
@@ -71,7 +82,7 @@ export function rejectedDraft(
   title: (id: string) => string,
 ): AssistantDraft {
   if (!draft.pendingTurn || draft.pendingTurn.hasUnknownResult) return draft;
-  if (draft.text.trim() || draft.attachments?.length || draft.references?.length || draft.inputIds?.length) return { ...draft, pendingTurn: undefined };
+  if (hasComposerDraft(draft)) return { ...draft, pendingTurn: undefined };
   const input = draft.pendingTurn.input;
   return {
     ...draft,
@@ -94,12 +105,14 @@ export function useAssistantDraft(key: string) {
   useEffect(() => {
     alive.current = true;
     setDraft(readDraft(key));
+    const unsubscribe = subscribeRecovery(key, () => setDraft(readDraft(key)));
     setReady(true);
     const subscribers = listeners.get(key) ?? new Set();
     subscribers.add(setDraft);
     listeners.set(key, subscribers);
     return () => {
       alive.current = false;
+      unsubscribe();
       subscribers.delete(setDraft);
       if (!subscribers.size) listeners.delete(key);
     };
@@ -109,7 +122,7 @@ export function useAssistantDraft(key: string) {
   ) {
     const value = typeof next === "function" ? next(readDraft(key)) : next;
     rememberDraft(key, value);
-    if (alive.current) setDraft(value);
+    if (alive.current) setDraft(readDraft(key));
   }
   return [draft, update, ready] as const;
 }

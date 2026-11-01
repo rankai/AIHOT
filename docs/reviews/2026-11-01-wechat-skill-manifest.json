@@ -1,0 +1,59 @@
+{
+  "sourcePage": "https://redfox.hk/skills/no/ecrh6uQj",
+  "repository": "redfox-data/redfox-community",
+  "commit": "d2e24f02340a440a73a96aa6ad6a65f681fba89f",
+  "retrievedDate": "2026-11-01",
+  "upstreamPath": "skills/wechat-write",
+  "fileCount": 6,
+  "totalBytes": 49596,
+  "files": [
+    {
+      "path": "README.en.md",
+      "gitBlobSha": "58c94403c67df49f973b0aa02767b4a7ce8ddc6b",
+      "bytes": 6426,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/README.en.md",
+      "sha256": "d1d4f6a5115d8dbf6b2cf5d777bdc672dd7b5b53c39a5b5fe9b721dfb3888696"
+    },
+    {
+      "path": "README.md",
+      "gitBlobSha": "8401fc4f21c26cb819152159e122618318cbda4f",
+      "bytes": 5232,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/README.md",
+      "sha256": "97cbca77a0294c272875d4035e6b8ef30d09c70b516af4ef21cce050570b46d5"
+    },
+    {
+      "path": "SKILL.md",
+      "gitBlobSha": "b7443a831600d28e6a26044a56c32f18ecf0426d",
+      "bytes": 11478,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/SKILL.md",
+      "sha256": "88519cbfcf6c0dedd4f464ca6fb4397ab0df741b5ff21081259e73100d607bbf"
+    },
+    {
+      "path": "references/alipay-recharge.md",
+      "gitBlobSha": "e90d8796a98e0d71477fc05d934fdfee78a6d449",
+      "bytes": 6399,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/references/alipay-recharge.md",
+      "sha256": "ba54e839ce3ce9a458196fd15b827a839ddd68276d03c470a7d26cee1998c694"
+    },
+    {
+      "path": "references/gzh_trend_data_format.md",
+      "gitBlobSha": "346626906e8675b7b3f8f948e1f95025b8e35940",
+      "bytes": 6040,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/references/gzh_trend_data_format.md",
+      "sha256": "579ef2eeee09c85b0fa479704e405b05fe0b5ac71b9efcedecce4ec449db0ac0"
+    },
+    {
+      "path": "scripts/fetch_gzh_trends.py",
+      "gitBlobSha": "e843d5ead23696e0020dce40e424454ad80459ce",
+      "bytes": 14021,
+      "source": "https://github.com/redfox-data/redfox-community/blob/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write/scripts/fetch_gzh_trends.py",
+      "sha256": "8aedf6e3f9828ecb1151e34196694fd5b2afe5ed533eed129357748dbff993fc"
+    }
+  ],
+  "execution": "static-read-only; scripts and payment instructions not executed",
+  "licenseEvidence": {
+    "status": "NOASSERTION",
+    "basis": "source review and user-directed integration planning; no new distribution authorization inferred"
+  },
+  "validation": "All six downloaded files match upstream Git blob SHA and byte count."
+}

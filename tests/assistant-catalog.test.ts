@@ -7,7 +7,7 @@ import { catalog, candidates, resolveCandidate, validatePackage, taskHint } from
 import { sha256, stableJson } from "@aihot/backend/lib/ids";
 test("assistant catalogs bind package namespace, contracts, fixtures and profile scope", async () => {
   const packages = await catalog();
-  assert.equal(packages.length, 2);
+  assert.equal(packages.length, 3);
   for (const p of packages)
     for (const m of p.manifest.modules)
       for (const ref of m.fixtures) {
@@ -22,7 +22,7 @@ test("assistant catalogs bind package namespace, contracts, fixtures and profile
         );
       }
   const redfox = packages.find((p) => p.manifest.skillId === "xiaohongshu-creator")!;
-  assert.equal(redfox.manifest.version, "2");
+  assert.equal(redfox.manifest.version, "3");
   assert.equal(redfox.manifest.source.kind, "external");
   if (redfox.manifest.source.kind === "external") {
     assert.equal(redfox.manifest.source.license, "NOASSERTION");
@@ -45,7 +45,7 @@ test("assistant catalogs bind package namespace, contracts, fixtures and profile
     assert(loadedEntry.includes(globalRules));
     assert(loadedEntry.includes(originalSkill.slice(originalSkill.indexOf(start!), originalSkill.indexOf(end!))));
     assert(loadedEntry.includes(redfox.texts.get(reference!)!), `${id} inlines its complete upstream reference`);
-    assert(loadedEntry.includes(redfox.texts.get("adaptation")!));
+    if (id === "M1") assert(loadedEntry.includes(redfox.texts.get("adaptation")!));
     assert(!resolved.module.resources.includes("upstream-skill"), "archived full skill does not expose M3–M5");
     assert(!loadedEntry.includes(id === "M1" ? "## 5. M2 文案改写" : "## 4. M1 笔记生成"));
   }

@@ -1,3 +1,4 @@
+import { AssistantMessageQueue } from "./message-queue";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
@@ -20,8 +21,8 @@ import { toolGet, useToolCommand } from "../tools/client";
 import { AssistantArtifactPanel } from "./artifacts";
 import {
   draftKey,
+  hasComposerDraft,
   freezeTurn,
-  failedTurn,
   canRejectTurn,
   readDraft,
   settledDraft,
@@ -29,6 +30,7 @@ import {
   useAssistantDraft,
   type AssistantDraft,
 } from "./drafts";
+import { beginRecoveryAttempt, updateRecoveryFailure, recoveryWriteVersion, replaceRecoveryQuote, clearRecovery, saveRecovery, type Recovery, type SavedQuote } from "./recovery-store";
 import { useAssistantSnapshot } from "./use-snapshot";
 import { AssistantMessageStream } from "./message-stream";
 import { AssistantWorkspace } from "./workspace";
@@ -80,12 +82,36 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     data.me.csrf,
     `assistant:session:${data.session.sessionId}`,
   );
-  const key = draftKey(`${data.me.user.id}:${data.me.csrf}`, session.sessionId);
+  const stopCommand = useToolCommand(data.me.csrf, `assistant:stop:${session.sessionId}`);
+  const key = draftKey(String(data.me.user.id), session.sessionId);
   const [draft, updateDraft, ready] = useAssistantDraft(key);
-  const [quoted, setQuoted] = useState<{
-    input: TurnInput;
-    quote: ToolQuote;
-  } | null>(null);
+  const quoted = draft.pendingQuote ?? null;
+  function persist(record: Recovery) {
+    try { saveRecovery(key, record); return true; }
+    catch (error) { setNotice(error instanceof Error ? error.message : "无法保存恢复记录，请核对浏览器存储后重试。"); return false; }
+  }
+  function beginAttempt(record: Exclude<Recovery, { kind: "quote" }>) {
+    try { return beginRecoveryAttempt(key, record); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "无法保存恢复记录，请核对浏览器存储后重试。"); return null; }
+  }
+  function setQuoted(value: SavedQuote | null) {
+    if (value) return persist({ kind: "quote", value });
+    if (quoted) clearRecovery(key, { kind: "quote", value: quoted });
+    return true;
+  }
+  function restoreInput(input: TurnInput) {
+    updateDraft(previous => hasComposerDraft(previous) ? previous : { ...previous, text: input.message, actionId: input.skillSelection?.actionId ?? null, attachments: [], inputIds: input.inputIds, references: input.artifactVersions.map(ref => ({ ...ref, title: "已选稿件" })) });
+  }
+  async function requoteSaved() {
+    if (!quoted || command.pending || active || draft.pendingTurn) return;
+    const original = quoted, writeVersion = recoveryWriteVersion(key, { kind: "quote", value: quoted }), input = { ...quoted.input, expectedRevision: session.revision };
+    const quote = await command.run<ToolQuote>(`${sessionApi(session.sessionId)}/quote`, input);
+    if (quote) {
+      try { replaceRecoveryQuote(key, original, writeVersion, { commandKey: crypto.randomUUID(), input, quote }); }
+      catch (error) { setNotice(error instanceof Error ? error.message : "新报价未保存，请保留原需求后重试。"); }
+    }
+    await refresh();
+  }
   const [quoteReading, setQuoteReading] = useState(false);
   const [feeOpen, setFeeOpen] = useState(false);
   const [feeAuthorization, setFeeAuthorization] = useState<AssistantFeeAuthorization | null>(session.feeAuthorization ?? null);
@@ -93,13 +119,14 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const [feeModeUncertain, setFeeModeUncertain] = useState(false);
   const [manualFallback, setManualFallback] = useState(false);
   const inputCommand = useToolCommand(data.me.csrf, `assistant:inputs:${session.sessionId}`);
-  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: data.options.inputCapabilities, update: updateDraft, invalidate: () => setQuoted(null) });
+  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: data.options.inputCapabilities, update: updateDraft, invalidate: () => {} });
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<"chat" | "artifacts">("chat");
   const [artifactOpen, setArtifactOpen] = useState(true);
   const [newArtifacts, setNewArtifacts] = useState(false);
   const alive = useRef(true);
   const submitting = useRef(false);
+  const stopAttempt = useRef<{ turnId: string; generation: number } | null>(null);
   const quoting = useRef(false);
   const lifecyclePending = useRef(false);
   const latest = useRef(draft);
@@ -109,19 +136,20 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     (row) => row.id === session.assistantId,
   );
   const active = turnActive(session);
+  const waitingEntries = session.queue?.entries.filter(entry => ["pending", "quoted"].includes(entry.state)) ?? [];
   const question =
     session.turn?.phase === "waiting_question" ? session.turn.question : null;
   const sendDisabled =
     !ready ||
-    active ||
     session.archived ||
     !profile?.available ||
     command.pending ||
     feeModeCommand.pending || feeModeUncertain ||
     !!draft.pendingTurn ||
+    !!draft.pendingQueue ||
     !!draft.pendingLifecycle ||
     !attachmentsReady(draft.attachments) ||
-    quoteReading;
+    quoteReading || !!quoted;
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -134,16 +162,8 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     if (draft.inputIds === undefined) updateDraft((previous) => ({ ...previous, inputIds: !session.messages.length ? session.inputs.filter((input) => typeof input.source.sourceSessionId === "string").map((input) => input.id) : [] }));
     if (draft.configureFees) { updateDraft((previous) => ({ ...previous, configureFees: false })); setFeeOpen(true); }
   }, [ready, draft.configureFees]);
-  useEffect(() => {
-    setQuoted((previous) =>
-      previous && previous.input.expectedRevision !== session.revision
-        ? null
-        : previous,
-    );
-  }, [session.revision]);
   async function useManualFees() {
     if (!feeAuthorization?.enabled || feeModeCommand.pending || feeModeUncertain) return;
-    setQuoted(null);
     const result = await feeModeCommand.run<{ authorization: AssistantFeeAuthorization | null }>(`${sessionApi(session.sessionId)}/fee-authorization`, { enabled: false, expectedVersion: feeAuthorization.version });
     if (!alive.current) return;
     if (result) { setFeeAuthorization(result.authorization); void refresh(); }
@@ -166,6 +186,34 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       autoAuthorizationId,
     );
   }
+  async function runQueueAttempt(attempt: NonNullable<AssistantDraft["pendingQueue"]>, clearComposer = false) {
+    const path = attempt.kind === "enqueue" ? `${sessionApi(session.sessionId)}/queue` : `${sessionApi(session.sessionId)}/queue/${attempt.entryId}/approve`;
+    const body = attempt.kind === "enqueue" ? attempt.input : { quoteId: attempt.quoteId };
+    const started = beginAttempt({ kind: "queue", value: attempt });
+    if (!started) return;
+    if (clearComposer) updateDraft(previous => ({ ...previous, text: "", references: [], attachments: [], inputIds: [] }));
+    const result = await command.run(path, body, "POST", body, attempt.key);
+    if (result) clearRecovery(key, { kind: "queue", value: attempt });
+    else updateRecoveryFailure(key, { kind: "queue", value: attempt }, started, command.failure.current?.status ?? null);
+    if (result) setNotice(attempt.kind === "enqueue" ? "已排队，可继续输入下一条需求。" : "已核对排队消息的执行状态。");
+    await refresh();
+  }
+  useEffect(() => {
+    const attempt = draft.pendingQueue;
+    if (!attempt) return;
+    const saved = session.queue?.entries.find(entry => attempt.kind === "enqueue" ? entry.commandKey === attempt.key : entry.id === attempt.entryId && entry.state === "submitted");
+    if (saved) clearRecovery(key, { kind: "queue", value: attempt });
+    if (saved) updateDraft(previous => previous.pendingQueue?.key === attempt.key ? { ...previous, pendingQueue: undefined } : previous);
+  }, [session.eventSeq, draft.pendingQueue]);
+  async function queueAction(action: "cancel" | "quote" | "resume", entryId?: string) {
+    await command.run(`${sessionApi(session.sessionId)}/queue/${entryId ? `${entryId}/` : ""}${action}`, {});
+    await refresh();
+  }
+  function approveQueue(entryId: string, quoteId: string) {
+    if (command.pending || draft.pendingQueue) return;
+    const attempt = { kind: "approve" as const, key: crypto.randomUUID(), entryId, quoteId };
+    void runQueueAttempt(attempt);
+  }
   async function requestQuote(message: string, manually = false) {
     if (sendDisabled || quoting.current || !message.trim()) return;
     quoting.current = true;
@@ -187,6 +235,11 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     }
     const autoAuthorizationId = !manually && feeAuthorization?.enabled ? feeAuthorization.id : undefined;
     const input = inputFor(current, revision, autoAuthorizationId);
+    if (active || waitingEntries.length > 0) {
+      const attempt = { kind: "enqueue" as const, key: crypto.randomUUID(), input };
+      quoting.current = false; setQuoteReading(false);
+      await runQueueAttempt(attempt, true); return;
+    }
     const quote = await command.run<ToolQuote>(
       `${sessionApi(session.sessionId)}/quote`,
       input,
@@ -199,8 +252,11 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       quote &&
       JSON.stringify(inputFor(readDraft(key), revision, autoAuthorizationId)) === JSON.stringify(input)
     ) {
-      if (autoAuthorizationId) void submitConfirmed({ input, quoteId: quote.quoteId, attachments: current.attachments?.map((row) => ({ ...row })) });
-      else setQuoted({ input, quote });
+      if (autoAuthorizationId) void submitConfirmed({ commandKey: crypto.randomUUID(), input, quoteId: quote.quoteId, attachments: current.attachments?.map((row) => ({ ...row })) });
+      else {
+        if (!setQuoted({ commandKey: crypto.randomUUID(), input, quote })) return;
+        updateDraft(previous => ({ ...previous, text: "", references: [], attachments: [], inputIds: [] }));
+      }
     } else if (!quote) {
       if (autoAuthorizationId && command.failure.current?.code === "auto_confirmation_required") setManualFallback(true);
       await refresh();
@@ -213,30 +269,35 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     updateDraft((previous) => ({ ...previous, autoQuote: false }));
     void requestQuote(draft.text);
   }, [ready, draft.autoQuote]);
-  async function submitConfirmed(attempt: PendingTurn, retry = false) {
+  async function submitConfirmed(attempt: PendingTurn, retry = false, preserveDraft = false) {
     if (
       submitting.current ||
       command.pending ||
       (active && !retry) ||
+      (!retry && (!!readDraft(key).pendingTurn || !!readDraft(key).pendingQueue)) ||
       session.archived
     )
       return;
+    const started = beginAttempt({ kind: "turn", value: attempt });
+    if (!started) return;
     submitting.current = true;
-    if (!retry) updateDraft((previous) => freezeTurn(previous, attempt));
-    setQuoted(null);
+    if (!retry) updateDraft((previous) => preserveDraft ? { ...previous, pendingTurn: attempt } : freezeTurn(previous, attempt));
+    if (quoted?.quote.quoteId === attempt.quoteId) clearRecovery(key, { kind: "quote", value: quoted });
     const result = await command.run(
       `${sessionApi(session.sessionId)}/turns`,
       { ...attempt.input, quoteId: attempt.quoteId },
       "POST",
       attempt.input,
+      attempt.commandKey,
     );
     submitting.current = false;
-    if (result) updateDraft((previous) => settledDraft(previous, attempt));
+    if (result) { clearRecovery(key, { kind: "turn", value: attempt }); updateDraft((previous) => settledDraft(previous, attempt)); }
     else {
       const status = command.failure.current?.status ?? null;
-      updateDraft((previous) => failedTurn(previous, attempt, status));
-      if (attempt.input.autoAuthorizationId && canRejectTurn(attempt, status) && command.failure.current?.code === "auto_confirmation_required") {
+      const updated = updateRecoveryFailure(key, { kind: "turn", value: attempt }, started, status);
+      if (updated && !started.wasUnknown && !hasComposerDraft(readDraft(key)) && attempt.input.autoAuthorizationId && canRejectTurn(attempt, status) && command.failure.current?.code === "auto_confirmation_required") {
         updateDraft((previous) => rejectedDraft(previous, (id) => session.artifacts.find((artifact) => artifact.artifactId === id)?.content.title ?? "稿件"));
+        clearRecovery(key, { kind: "turn", value: attempt });
         setManualFallback(true);
       }
     }
@@ -270,14 +331,17 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   async function control(action: "stop" | "resume") {
     if (
       !session.turn ||
-      command.pending ||
+      stopCommand.pending ||
       (action === "resume" && !session.turn.canResume)
     )
       return;
-    const result = await command.run(
-      `${sessionApi(session.sessionId)}/turns/${session.turn.turnId}/${action}`,
-      { generation: session.turn.generation },
+    const target = action === "stop" ? stopAttempt.current ?? { turnId: session.turn.turnId, generation: session.turn.generation } : { turnId: session.turn.turnId, generation: session.turn.generation };
+    if (action === "stop") stopAttempt.current = target;
+    const result = await stopCommand.run(
+      `${sessionApi(session.sessionId)}/turns/${target.turnId}/${action}`,
+      { generation: target.generation },
     );
+    if (result || stopCommand.failure.current?.status != null && stopCommand.failure.current.status < 500) stopAttempt.current = null;
     if (!alive.current) return;
     if (result)
       setNotice(
@@ -400,7 +464,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     );
   }, [session.artifacts]);
   function reference(artifact: AssistantArtifact) {
-    if (question || active || session.archived || command.pending || draft.pendingTurn) { setNotice("请先结束当前处理，再为下一次需求更换稿件引用。"); return; }
+    if (question || session.archived || command.pending || draft.pendingTurn || draft.pendingQueue) { setNotice("请先核对当前提交，再更换稿件引用。"); return; }
     const references = readDraft(key).references ?? [];
     if (
       references.length >= 10 &&
@@ -411,7 +475,6 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       setNotice("每次最多引用 10 份稿件，请先移除一个引用。");
       return;
     }
-    setQuoted(null);
     updateDraft((previous) => ({
       ...previous,
       references: [
@@ -440,7 +503,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AssistantUnsavedGuard
-        hasDraft={!!draft.text || !!draft.answer?.text || !!draft.pendingTurn || !!draft.attachments?.length || !!draft.references?.length}
+        hasDraft={hasComposerDraft(draft) || !!draft.answer?.text || !!draft.recoveryCount}
       >
         <AssistantWorkspace
           assistantId={session.assistantId}
@@ -489,8 +552,35 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 showArtifacts={showArtifacts}
                 setView={setView}
                 view={view}
+                actionsStamp={`${quoted?.quote.quoteId ?? ""}:${session.queue?.paused}:${session.queue?.entries.map(entry => `${entry.id}:${entry.state}:${entry.quote?.quoteId ?? ""}:${entry.error ?? ""}`).join("|") ?? ""}`}
+                actions={<>{quoted && (                  <TurnQuoteDialog
+                    quote={quoted.quote}
+                    message={quoted.input.message}
+                    pending={command.pending || !!draft.pendingTurn || !!draft.pendingQueue || active}
+                    requiresRequote={quoted.input.expectedRevision !== session.revision}
+                    requote={() => void requoteSaved()}
+                    error={command.error}
+                    close={() => {
+                      if (!hasComposerDraft(readDraft(key))) restoreInput(quoted.input);
+                      setQuoted(null); setNotice("原需求已取消，未执行；输入框中的草稿已保留。");
+                    }}
+                    confirm={() => {
+                      if (!active)
+                        void submitConfirmed({
+                          commandKey: quoted.commandKey,
+                          input: quoted.input,
+                          quoteId: quoted.quote.quoteId,
+                          attachments: [],
+                        }, false, true);
+                    }}
+                  />)}
+                  {quoted && quoted.input.expectedRevision !== session.revision && <p role="status" className="text-[12px] text-hot">会话材料已变化，请重新获取报价后确认。</p>}
+              <AssistantMessageQueue queue={session.queue} pending={command.pending || !!draft.pendingQueue} approve={approveQueue} cancel={id => void queueAction("cancel", id)} resume={() => void queueAction("resume")} requote={id => void queueAction("quote", id)} />
+                </>}
               />
               <AssistantComposer
+                running={active && !session.archived}
+                onStop={() => void control("stop")}
                 text={question ? answerText : draft.text}
                 onChange={(text) => {
                   if (question)
@@ -499,7 +589,6 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                       answer: { questionId: question.questionId, text },
                     }));
                   else {
-                    setQuoted(null);
                     updateDraft((previous) => ({ ...previous, text }));
                   }
                 }}
@@ -512,28 +601,8 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   question ? command.pending || session.archived : sendDisabled
                 }
                 busy={command.pending}
+                stopBusy={stopCommand.pending}
                 answerMode={!!question}
-                confirmation={quoted && (
-                  <TurnQuoteDialog
-                    quote={quoted.quote}
-                    message={quoted.input.message}
-                    pending={command.pending}
-                    error={command.error}
-                    close={() => setQuoted(null)}
-                    confirm={() => {
-                      if (
-                        !active &&
-                          JSON.stringify(inputFor(readDraft(key), quoted.input.expectedRevision, quoted.input.autoAuthorizationId)) ===
-                          JSON.stringify(quoted.input)
-                      )
-                        void submitConfirmed({
-                          input: quoted.input,
-                          quoteId: quoted.quote.quoteId,
-                          attachments: readDraft(key).attachments?.map((row) => ({ ...row })),
-                        });
-                    }}
-                  />
-                )}
                 maxLength={
                   question ? 10000 : data.options.limits.inputCharacters
                 }
@@ -541,15 +610,15 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   quoteReading
                     ? "正在确认本次费用…"
                     : active && !question
-                      ? "可以记录下一次需求；这次处理结束后再发送，不会自动排队。"
+                      ? "输入后发送到队列；输入为空时可停止当前任务。"
                       : session.archived
                         ? "已归档会话可查看，不能发送新需求。"
                         : feeAuthorization?.enabled ? `额度内自动 · 剩余 ${feeAuthorization.remaining.toLocaleString()} 积分 · 当前创作 ${feeAuthorization.turnPrice.amount} 积分 · Shift+Enter 换行` : undefined
                 }
-                controls={profile && <AssistantComposerControls profile={profile} actionId={draft.actionId} onAction={(actionId) => { setQuoted(null); updateDraft((previous) => ({ ...previous, actionId })); }} disabled={active || session.archived || command.pending || quoteReading || !!draft.pendingTurn} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={data.options.inputCapabilities} artifacts={session.artifacts} onReference={reference} feeAuthorization={feeAuthorization} manualFees={() => void useManualFees()} configureFees={() => { setQuoted(null); setFeeOpen(true); }} />}
-                attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={data.options.inputCapabilities.maxAttachments} disabled={active || session.archived || command.pending || quoteReading || !!draft.pendingTurn} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
+                controls={profile && <AssistantComposerControls profile={profile} actionId={draft.actionId} onAction={(actionId) => { updateDraft((previous) => ({ ...previous, actionId })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={data.options.inputCapabilities} artifacts={session.artifacts} onReference={reference} feeAuthorization={feeAuthorization} manualFees={() => void useManualFees()} configureFees={() => { setFeeOpen(true); }} />}
+                attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={data.options.inputCapabilities.maxAttachments} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
               >
-                {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={active || command.pending || quoteReading || session.archived} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, data.options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } setQuoted(null); updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}
+                {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, data.options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}
                 {newArtifacts && (
                   <p role="status" className="mb-2 text-[12px] text-accent">
                     稿件有更新。
@@ -569,6 +638,18 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   </p>
                 )}
 
+                {stopCommand.error && <p role="alert" className="text-[12px] text-hot">{stopCommand.error}</p>}
+
+                {!!draft.recoveryCount && draft.recoveryCount > 1 && <p className="text-[12px] text-ink-3">还有 {draft.recoveryCount} 条保存的费用或提交记录，按原记录逐条核对。</p>}
+                {draft.pendingQueue && <div className="assistant-inline-notice" role="status">
+                  <p>正在核对原排队提交。新草稿会保留，不会作为重试内容。</p>
+                  <Button size="sm" disabled={command.pending} onClick={() => void runQueueAttempt(draft.pendingQueue!)}>核对原提交</Button>
+                  {!draft.pendingQueue.unknown && !command.pending && <Button size="sm" onClick={() => updateDraft(previous => {
+                    const attempt = previous.pendingQueue;
+                    if (attempt) clearRecovery(key, { kind: "queue", value: attempt });
+                    return { ...previous, pendingQueue: undefined, ...(attempt?.kind === "enqueue" && !hasComposerDraft(previous) ? { text: attempt.input.message, actionId: attempt.input.skillSelection?.actionId ?? null, inputIds: attempt.input.inputIds, references: attempt.input.artifactVersions.map(ref => ({ ...ref, title: "已选稿件" })) } : {}) };
+                  })}>返回编辑</Button>}
+                </div>}
                 {draft.pendingTurn && (
                   <div className="assistant-inline-notice" role="status">
                     <p>
@@ -603,6 +684,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                           <Button
                             size="sm"
                             onClick={() => {
+                              const oldAttempt = draft.pendingTurn!;
                               updateDraft((previous) =>
                                 rejectedDraft(
                                   previous,
@@ -612,16 +694,17 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                                     )?.content.title ?? "稿件",
                                 ),
                               );
+                              clearRecovery(key, { kind: "turn", value: oldAttempt });
                             }}
                           >
-                            {draft.text.trim()
+                            {hasComposerDraft(draft)
                               ? "保留新草稿并取消原提交"
                               : "返回修改原需求"}
                           </Button>
                         )}
                     </div>
                     <p className="mt-2 text-[11px] text-ink-4">
-                      本次页面会话内可恢复原提交；刷新或重新登录后先读取服务端状态，不自动重发。
+                      刷新后仍按原标识核对提交，不会自动重发或重新报价。
                     </p>
                   </div>
                 )}
@@ -664,10 +747,9 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                         </span>
                         <button
                           type="button"
-                          disabled={active || command.pending || quoteReading || session.archived}
+                          disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue}
                           aria-label={`移除引用 ${reference.title}`}
                           onClick={() => {
-                            setQuoted(null);
                             updateDraft((previous) => ({
                               ...previous,
                               references: previous.references?.filter(
@@ -692,7 +774,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
             </ThreadPrimitive.Root>
           }
         />
-        {feeOpen && <AssistantFeeDialog sessionId={session.sessionId} csrf={data.me.csrf} initial={feeAuthorization} close={() => setFeeOpen(false)} changed={(authorization) => { setQuoted(null); setFeeAuthorization(authorization); void refresh(); }} />}
+        {feeOpen && <AssistantFeeDialog sessionId={session.sessionId} csrf={data.me.csrf} initial={feeAuthorization} close={() => setFeeOpen(false)} changed={(authorization) => { setFeeAuthorization(authorization); void refresh(); }} />}
       </AssistantUnsavedGuard>
     </AssistantRuntimeProvider>
   );

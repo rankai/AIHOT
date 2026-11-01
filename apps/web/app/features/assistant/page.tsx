@@ -83,7 +83,7 @@ function EntryContent({
   assistantId: AssistantId;
 }) {
   const profile = data.options.assistants.find((row) => row.id === assistantId);
-  const identity = `${data.me.user.id}:${data.me.csrf}`;
+  const identity = String(data.me.user.id);
   const key = draftKey(identity, assistantId);
   const [draft, update, ready] = useAssistantDraft(
     key,

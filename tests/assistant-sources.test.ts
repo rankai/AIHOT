@@ -1,3 +1,4 @@
+import { catalog } from "@aihot/backend/assistant/catalog";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -82,6 +83,12 @@ test("assistant revisions preserve exact-version research sources without anothe
         };
         const quote = await quoteTurn(user.id, sessionId, input);
         const turn = await submitTurn(user.id, sessionId, { ...input, quoteId: quote.quoteId }, randomUUID());
+        // Historical v2 source propagation remains supported; v3 requires verified analysis, tested separately.
+        const old = (await catalog()).find((p) => p.manifest.skillId === "xiaohongshu-creator" && p.manifest.version === "2")!.manifest;
+        const frozen = old.modules.map((m) => ({ skillId: old.skillId, version: old.version, packageHash: old.packageHash,
+          moduleId: m.moduleId, moduleVersion: m.version, moduleHash: m.hash, description: m.description }));
+        await sql`UPDATE assistant_turns SET snapshot=jsonb_set(snapshot,'{candidates}',${sql.json(frozen)}) WHERE id=${turn.turnId}`;
+
         const [savedTurn] = await sql`SELECT * FROM assistant_turns WHERE id=${turn.turnId}`;
         const selected = savedTurn.snapshot.selected;
         assert.equal(selected.length, 1, "duplicate explicit references and implicit latest do not add extra versions");

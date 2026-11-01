@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readRecoveries, saveRecovery, clearRecovery, subscribeRecovery, beginRecoveryAttempt, updateRecoveryFailure, recoveryWriteVersion, replaceRecoveryQuote, type Recovery } from "../app/features/assistant/recovery-store.ts";
+import { readDraft, rememberDraft, emptyDraft, hasComposerDraft } from "../app/features/assistant/drafts.ts";
+const input = { message: "原需求", expectedRevision: 2, inputIds: ["uploaded"], artifactVersions: [{ artifactId: "draft", version: 1 }], skillSelection: null };
+const quote = { quoteId: "quote", amount: 7, expiresAt: "2099-01-01T00:00:00Z", priceVersion: 1, priceId: null, available: 70, affordable: true, recoveryOfRunId: null };
+test("independent command records survive refresh, interleaved tabs, ordinary edits and exact-key completion", async () => {
+  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, "window"), oldStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>(), events = new EventTarget();
+  const storage = { get length() { return values.size; }, key: (i: number) => [...values.keys()][i] ?? null, getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
+  Object.defineProperty(globalThis, "window", { value: events, configurable: true });
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+  try {
+    const scope = "member-a:session", a: Recovery = { kind: "turn", value: { commandKey: "turn-a", input, quoteId: quote.quoteId, hasUnknownResult: true, attachments: [{ id: "file", name: "local.txt", state: "ready", file: new File(["private"], "local.txt") }] } };
+    const b: Recovery = { kind: "queue", value: { kind: "enqueue", key: "queue-b", input, unknown: true } };
+    saveRecovery(scope, a);
+    // A second module instance models a refreshed document with no module cache or draft memory.
+    const tab = await import(new URL("../app/features/assistant/recovery-store.ts?second-tab", import.meta.url).href);
+    assert.equal(tab.readRecoveries(scope)[0].value.commandKey, "turn-a");
+    tab.saveRecovery(scope, b);
+    rememberDraft(scope, { ...emptyDraft(), attachments: [{ id: "new", name: "new.txt", state: "queued" }] });
+    assert.equal(readRecoveries(scope).length, 2, "ordinary editing never deletes another tab's pending command");
+    assert.equal(readDraft(scope).pendingTurn!.commandKey, "turn-a");
+    assert.equal(readDraft(scope).pendingQueue!.key, "queue-b");
+    assert(!JSON.stringify([...values.values()]).includes("private"));
+    assert(!JSON.stringify([...values.values()]).includes("attachments"));
+    assert.equal(tab.readRecoveries("member-b:session").length, 0);
+    let synced = 0; const unsubscribe = subscribeRecovery(scope, () => { synced++; });
+    tab.clearRecovery(scope, a);
+    const event = new Event("storage"); Object.assign(event, { key: `assistant-recovery:${encodeURIComponent(scope)}:turn:turn-a` }); events.dispatchEvent(event);
+    assert.equal(synced, 1); unsubscribe();
+    assert.equal(readDraft(scope).pendingTurn, undefined);
+    assert.equal(readDraft(scope).attachments![0]!.id, "new");
+    assert.equal(readDraft(scope).pendingQueue!.key, "queue-b");
+    const c: Recovery = { kind: "queue", value: { kind: "approve", key: "queue-c", entryId: "entry", quoteId: "quote", unknown: true } };
+    saveRecovery(scope, c); clearRecovery(scope, b);
+    assert.equal(readDraft(scope).pendingQueue!.key, "queue-c", "each remaining record can be checked after its predecessor completes");
+    const q: Recovery = { kind: "quote", value: { commandKey: "quote-confirm", input, quote } };
+    saveRecovery(scope, q);
+    assert.deepEqual(tab.readRecoveries(scope).find((r: Recovery) => r.kind === "quote").value, q.value);
+    clearRecovery(scope, q);
+    assert.equal(readDraft(scope).attachments![0]!.id, "new", "cancelling quote cannot merge its old material selection into the later draft");
+    assert.equal(readDraft(scope).pendingQueue!.key, "queue-c");
+    values.set(`assistant-recovery:${encodeURIComponent(scope)}:queue:bad`, "{");
+    assert.equal(readRecoveries(scope).length, 1, "a corrupt row cannot hide other recoverable commands");
+    values.set(`assistant-queue-command:${scope}`, JSON.stringify({ kind: "approve", key: "legacy", entryId: "entry", quoteId: "quote" }));
+    assert(readRecoveries(scope).some(r => r.kind === "queue" && r.value.key === "legacy" && r.value.unknown));
+    assert(!values.has(`assistant-queue-command:${scope}`));
+    for (const original of [a, b]) {
+      const fresh = original.kind === "turn" ? { kind: "turn" as const, value: { ...original.value, hasUnknownResult: false } } : { kind: "queue" as const, value: { ...original.value, unknown: false } };
+      const failedScope = `late:${original.kind}`;
+      const firstRequest = beginRecoveryAttempt(failedScope, fresh);
+      const retry = tab.beginRecoveryAttempt(failedScope, fresh);
+      assert.equal(retry.wasUnknown, true, "another tab must treat persisted inflight as unknown");
+      tab.clearRecovery(failedScope, fresh);
+      assert.equal(updateRecoveryFailure(failedScope, fresh, firstRequest, null), false);
+      assert.equal(readRecoveries(failedScope).length, 0, "a late failure never resurrects a cleared command");
+      const older = beginRecoveryAttempt(failedScope, fresh), newer = tab.beginRecoveryAttempt(failedScope, fresh);
+      tab.updateRecoveryFailure(failedScope, fresh, newer, 503);
+      assert.equal(updateRecoveryFailure(failedScope, fresh, older, 403), false, "old 4xx cannot overwrite another tab's unknown outcome");
+      const unknown = readRecoveries(failedScope)[0]!;
+      assert(unknown.kind === "turn" ? unknown.value.hasUnknownResult : unknown.kind === "queue" && unknown.value.unknown);
+      clearRecovery(failedScope, fresh);
+      const firstDefinite = beginRecoveryAttempt(failedScope, fresh);
+      assert.equal(updateRecoveryFailure(failedScope, fresh, firstDefinite, 403), true);
+      const known = readRecoveries(failedScope)[0]!;
+      assert.equal(known.kind === "turn" ? known.value.hasUnknownResult : known.kind === "queue" && known.value.unknown, false, "first unchanged request can record an explicit rejection");
+      assert.deepEqual("input" in known.value ? known.value.input : undefined, "input" in fresh.value ? fresh.value.input : undefined, "failure updates retain the frozen input");
+    }
+    const quoteScope = "late-quote", next = { ...q.value, commandKey: "next-quote", quote: { ...quote, quoteId: "q2" } };
+    saveRecovery(quoteScope, q);
+    const quoteVersion = recoveryWriteVersion(quoteScope, q);
+    tab.clearRecovery(quoteScope, q);
+    assert.equal(replaceRecoveryQuote(quoteScope, q.value, quoteVersion, next), false);
+    assert.equal(readRecoveries(quoteScope).length, 0, "late quote response cannot revive a cancelled requirement");
+    saveRecovery(quoteScope, q);
+    const beforeApproval = recoveryWriteVersion(quoteScope, q);
+    beginRecoveryAttempt(quoteScope, { kind: "turn", value: { commandKey: q.value.commandKey, quoteId: quote.quoteId, input } });
+    assert.equal(replaceRecoveryQuote(quoteScope, q.value, beforeApproval, next), false, "approval blocks a late replacement even before old quote cleanup");
+    clearRecovery(quoteScope, { kind: "turn", value: { commandKey: q.value.commandKey, quoteId: quote.quoteId, input } });
+    assert.equal(replaceRecoveryQuote(quoteScope, q.value, beforeApproval, next), true);
+    assert.equal(readRecoveries(quoteScope).length, 1);
+    for (let i = 0; i < 30; i++) saveRecovery("bounded", { kind: "queue", value: { kind: "approve", key: `k${i}`, entryId: "entry", quoteId: "quote" } });
+    assert.throws(() => saveRecovery("bounded", { kind: "queue", value: { kind: "approve", key: "overflow", entryId: "entry", quoteId: "quote" } }));
+    assert.throws(() => saveRecovery(scope, { kind: "quote", value: { ...q.value, input: { ...input, secret: "forbidden" } } } as Recovery));
+  } finally {
+    if (oldWindow) Object.defineProperty(globalThis, "window", oldWindow); else Reflect.deleteProperty(globalThis, "window");
+    if (oldStorage) Object.defineProperty(globalThis, "localStorage", oldStorage); else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+test("any new composer material prevents restoring old input into it", () => {
+  assert(!hasComposerDraft(emptyDraft()));
+  for (const extra of [{ text: "next" }, { inputIds: ["new"] }, { references: [{ artifactId: "new", version: 1, title: "new" }] }, { attachments: [{ id: "new", name: "new.txt", state: "queued" as const }] }]) assert(hasComposerDraft({ ...emptyDraft(), ...extra }));
+});

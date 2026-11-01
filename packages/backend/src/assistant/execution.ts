@@ -1,4 +1,3 @@
-import { projectToolResult } from "../users/tool-results.ts";
 import { randomUUID } from "node:crypto";
 import { sql } from "../db.ts";
 import { creditHash, requireCreditUser } from "../users/credits-core.ts";
@@ -15,6 +14,7 @@ import {
 } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
 import { BudgetExceededError, ReceiptBusyError } from "../providers/receipts.ts";
+import { researchResults, analysisSummary } from "./xhs-research.ts";
 import { activeTools, localCall, prepareSearch, autoApproveSearch, DraftArgumentsError } from "./tools.ts";
 import { generateStep } from "./model.ts";
 import { message, event, conflict } from "./store.ts";
@@ -77,6 +77,7 @@ async function modelStep(execution: Execution, turn: Record<string, any>) {
         system +
         "\n可信的冻结目录及限制：" +
         JSON.stringify({
+          researchClock: turn.snapshot.researchClock,
           assistantId: turn.snapshot.assistantId,
           taskHint: turn.snapshot.taskHint,
           skillSelection: turn.snapshot.skillSelection,
@@ -171,10 +172,10 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
         return;
       }
       const results =
-        await sql`SELECT id,kind,data FROM operation_results WHERE run_id=${c.child_run_id} ORDER BY id LIMIT 51`;
+        await sql`SELECT id,kind,data FROM operation_results WHERE run_id=${c.child_run_id} ORDER BY id`;
       await sql.begin(async (tx) => {
         await requireExecution(tx, execution);
-        await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json({ results: results.slice(0, 50).map((r) => projectToolResult({ id: r.id, kind: r.kind, data: r.data })), limited: results.length > 50 } as never)} WHERE id=${c.id}`;
+        await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json(researchResults(results.map((r) => ({ id: r.id, kind: r.kind, data: r.data }))) as never)} WHERE id=${c.id}`;
       });
       continue;
     }
@@ -204,7 +205,7 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
             type: "tool-result",
             toolCallId: c.upstream_id,
             toolName: c.name,
-            output: { type: "json", value: c.result },
+            output: { type: "json", value: c.name === "analyze_xhs_research" && c.state === "completed" ? analysisSummary(c.result) : c.result },
           },
         ],
       });

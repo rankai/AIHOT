@@ -35,7 +35,7 @@ test("explicit removal stays empty and frozen skill, files, versions and fee aut
   const attachment: DraftAttachment = { id: "file", name: "facts.md", state: "ready", inputId: "material", assetKey: "private-file" };
   const draft = { ...emptyDraft(), text: "修改旧稿", actionId: "xiaohongshu-rewrite", attachments: [attachment], references: [{ artifactId: "draft", version: 2, title: "旧稿" }] };
   const input = makeTurnInput(draft.text, 5, draft.actionId, draft.references, attachmentInputIds(draft.attachments), "consent-v1");
-  const attempt = { input, quoteId: "quote", attachments: [{ ...attachment }] };
+  const attempt = { commandKey: "attempt", input, quoteId: "quote", attachments: [{ ...attachment }] };
   const frozen = freezeTurn(draft, attempt);
   assert.equal(frozen.actionId, "xiaohongshu-rewrite", "session preference survives submission");
   assert.deepEqual(makeTurnInput("另一篇", 6, null), { message: "另一篇", expectedRevision: 6, skillSelection: null, inputIds: [], artifactVersions: [] });

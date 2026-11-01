@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ToolCreditIntent, ToolPrice, ToolQuote } from "@aihot/contracts/credits";
-import { sql, type Db } from "../db.ts";
+import { sql, type Db, type Tx } from "../db.ts";
 import { audit } from "../admin/auth.ts";
 import { AccountError, UserId } from "./accounts.ts";
 import { Credits, Kind, Reason, chargeForRun, creditHash, isRecoveryKind, parseCreditIntent, requireCreditUser, type PricingSnapshot, type CreditRunRow } from "./credits-core.ts";
@@ -82,10 +82,10 @@ export async function selectToolPrice(db: Db, intent: ToolCreditIntent): Promise
 }
 
 /** Pricing receives the same validated/normalized server intent used for submission. */
-export async function quoteTool(userId: number, raw: ToolCreditIntent): Promise<ToolQuote> {
+export async function quoteTool(userId: number, raw: ToolCreditIntent, transaction?: Tx): Promise<ToolQuote> {
   UserId.parse(userId);
   const intent = parseCreditIntent(raw);
-  return await sql.begin(async tx => {
+  const create = async (tx: Tx): Promise<ToolQuote> => {
     await requireCreditUser(tx, userId, true);
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`member-credit-quotes:${userId}`}))`;
     await tx`DELETE FROM member_tool_quotes WHERE user_id = ${userId} AND consumed_run_id IS NULL AND expires_at <= now()`;
@@ -121,5 +121,6 @@ export async function quoteTool(userId: number, raw: ToolCreditIntent): Promise<
     const [wallet] = await tx`SELECT available FROM member_credit_accounts WHERE user_id = ${userId}`;
     const available = Number(wallet?.available ?? 0);
     return { quoteId, amount, expiresAt: expiresAt.toISOString(), priceVersion, priceId, available, affordable: available >= amount, recoveryOfRunId: intent.recoveryRunId ?? null };
-  });
+  };
+  return transaction ? create(transaction) : sql.begin(create);
 }

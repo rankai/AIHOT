@@ -260,10 +260,22 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     );
     assert.match(entry, /disabled=""[^>]*>公众号创作/);
     assert(entry.includes("/assistant/sessions/owned"));
-    const answerComposer = renderToStaticMarkup(createElement(AssistantComposer, { text: "补充事实", onChange() {}, onSend() {}, disabled: false, busy: false, answerMode: true, maxLength: 10000, controls: createElement("span", null, "下一轮材料与技能"), attachments: createElement("span", null, "下一轮文件卡") }));
+    const answerComposer = renderToStaticMarkup(createElement(AssistantComposer, { text: "补充事实", onChange() {}, onSend() {}, disabled: false, busy: false, running: true, onStop() {}, answerMode: true, maxLength: 10000, controls: createElement("span", null, "下一轮材料与技能"), attachments: createElement("span", null, "下一轮文件卡") }));
     assert(answerComposer.includes("提交回答并继续"));
+    assert(!answerComposer.includes("停止当前任务"));
     assert(!answerComposer.includes("下一轮材料与技能"), "answer mode exposes only the current text command");
     assert(!answerComposer.includes("下一轮文件卡"));
+    const runningEmpty = renderToStaticMarkup(createElement(AssistantComposer, { text: "", running: true, onStop() {}, onChange() {}, onSend() {}, disabled: true, busy: true, stopBusy: false, maxLength: 30000 }));
+    assert.equal((runningEmpty.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
+    assert(runningEmpty.includes("<span>处理中</span>"));
+    assert(!runningEmpty.includes(">停止当前任务</button>"));
+    const emptyAnswer = renderToStaticMarkup(createElement(AssistantComposer, { text: "", running: true, answerMode: true, onStop() {}, onChange() {}, onSend() {}, disabled: true, busy: true, stopBusy: false, maxLength: 10000 }));
+    assert.equal((emptyAnswer.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
+    assert(emptyAnswer.includes("<span>处理中</span>"));
+    assert(!emptyAnswer.includes("提交回答并继续"));
+    assert(!runningEmpty.match(/<button[^>]*disabled[^>]*aria-label="停止当前任务"/), "slow enqueue cannot disable the independent stop action");
+    const runningDraft = renderToStaticMarkup(createElement(AssistantComposer, { text: "下一条", running: true, onStop() {}, onChange() {}, onSend() {}, disabled: false, busy: false, maxLength: 30000 }));
+    assert(!runningDraft.includes('aria-label="停止当前任务"'));
     const composerWithFiles = renderToStaticMarkup(createElement(AssistantComposer, { text: "根据文件创作", onChange() {}, onSend() {}, disabled: false, busy: false, maxLength: 30000, controls: createElement("span", null, "底部材料技能费用"), attachments: createElement(AssistantAttachmentCards, { attachments: [{ id: "ready", name: "同框参考.md", state: "ready", text: "参考" }], max: 10, disabled: false, retry() {}, remove() {}, error: null }) }));
     assert(composerWithFiles.indexOf("<form") < composerWithFiles.indexOf("同框参考.md"), "file cards belong inside the rounded input form");
     assert(composerWithFiles.indexOf("同框参考.md") < composerWithFiles.indexOf("<textarea"), "files appear above the text input");
@@ -287,7 +299,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       confirmation: createElement(TurnQuoteDialog, { quote, message: "保留原需求", pending: false, error: null, close() {}, confirm() {} }),
     }));
     assert(confirmingComposer.includes('class="assistant-composer-confirmation"'));
-    assert(confirmingComposer.includes(">开始</button>"));
+    assert(confirmingComposer.includes(">确认继续</button>"));
     assert(confirmingComposer.includes(">取消</button>"));
     assert(!confirmingComposer.includes("<form"), "quote approval replaces the editor so attachments cannot squeeze its actions away");
     assert(!confirmingComposer.includes("九张待发附件"));
@@ -306,8 +318,11 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(!feeDialog.includes("关闭自动确认"), "manual selection belongs in the menu");
     const turnQuote = render(TurnQuoteDialog, { quote, message: "私有需求", pending: false, error: null, close() {}, confirm() {} });
     assert(turnQuote.includes(`本次 ${quote.amount} 积分`));
+    assert(!turnQuote.includes('tabindex="-1"'), "the inline cost reminder does not steal keyboard focus");
+    assert(!turnQuote.includes('role="dialog"'));
+    assert(turnQuote.includes("<details"), "cost details remain collapsed");
     assert(turnQuote.includes("费用与需求详情"));
-    assert(turnQuote.includes(">开始</button>"));
+    assert(turnQuote.includes(">确认继续</button>"));
     assert(turnQuote.includes(">取消</button>"));
     assert(cards.includes("重试"));
     assert(cards.includes("移除附件 长文件名.md"));
@@ -360,7 +375,10 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       },
     });
     assert(question.includes("需要保留哪些事实？"));
-    assert(question.includes("提交回答并继续"));
+    assert(!question.includes("提交回答并继续"), "an empty answer uses the same composer stop control");
+    assert.equal((question.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
+    assert(question.includes("<span>处理中</span>"));
+    assert(!question.includes(">停止当前任务</button>"), "no separate stop button appears outside the composer");
     assert.equal(
       (question.match(/id="assistant-composer-input"/g) ?? []).length,
       1,
@@ -551,6 +569,15 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const completedSearch = modelThenTools([{ ...toolActivity("search_xhs_notes"), state: "completed", keyword: "咖啡" }]);
     assert(completedSearch.includes("已提出笔记检索需求"));
     assert(completedSearch.includes("查询“咖啡” · 查询结果已返回"));
+    const analysisPending = modelThenTools([toolActivity("analyze_xhs_research")]);
+    assert(analysisPending.includes("爆款规律分析已返回"));
+    assert(analysisPending.includes("准备整理爆款规律"));
+    assert(!analysisPending.includes("已保存爆款规律分析"));
+    const analysisSaved = modelThenTools([{ ...toolActivity("analyze_xhs_research"), state: "completed" }]);
+    assert(analysisSaved.includes("已保存爆款规律分析"));
+    const analysisFailed = modelThenTools([{ ...toolActivity("analyze_xhs_research"), state: "failed" }]);
+    assert(analysisFailed.includes("整理爆款规律 · 失败"));
+    assert(!analysisFailed.includes("已保存爆款规律分析"));
     const waitingHistory = renderTask({ ...projected, status: "waiting", activities: projected.activities.map((a) => a.id === "model:m2" ? { ...a, state: "waiting" as const } : a) });
     assert(waitingHistory.includes("等待处理 · 调用创作接口"));
     assert(!waitingHistory.includes("assistant-activity-dot"));

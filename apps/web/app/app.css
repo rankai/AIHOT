@@ -622,6 +622,7 @@
 }
 .assistant-activity-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--accent); animation: assistant-pulse 1.6s ease-in-out infinite; }
 @keyframes assistant-pulse { 50% { opacity: .35; } }
+.assistant-message-queue { width: 100%; margin-top: 16px; border-top: 1px solid var(--line); padding: 14px 0; background: var(--bg); }
 .assistant-composer { display: flex; flex-direction: column; min-height: 0; position: relative; z-index: 5; width: 100%; max-height: min(62dvh, 580px); flex-shrink: 0; overflow: visible; border-top: 1px solid var(--line); background: var(--bg); padding: 14px max(16px, calc((100% - 760px) / 2)) max(13px, env(safe-area-inset-bottom)); }
 .assistant-composer-context { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .assistant-composer-context:empty { display: none; }
@@ -695,7 +696,8 @@
 .assistant-reference { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-control); background: var(--accent-soft); padding: 5px 9px; color: var(--accent); font-size: 12px; }
 .assistant-reference button { min-width: 24px; min-height: 24px; }
 .assistant-inline-notice { min-width: 0; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg-sunk); padding: 12px; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.assistant-quote-card { min-width: 0; margin-bottom: 12px; border: 1px solid var(--accent); border-radius: var(--radius-panel); background: var(--surface); padding: 14px; }
+.assistant-quote-card { min-width: 0; margin-bottom: 12px; border: 0; border-radius: 8px; background: var(--bg-sunk); padding: 12px; }
+.assistant-quote-card :is(button, summary, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .assistant-new-message { position: relative; z-index: 12; align-self: center; flex-shrink: 0; margin-bottom: 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); padding: 8px 13px; color: var(--accent); font-size: 12px; box-shadow: 0 2px 8px rgb(0 0 0 / .06); }
 .assistant-artifact-inner { display: flex; min-width: 0; min-height: 0; width: 100%; flex-direction: column; }
 .assistant-artifact-heading { flex-shrink: 0; border-bottom: 1px solid var(--line); padding: 15px 20px; }

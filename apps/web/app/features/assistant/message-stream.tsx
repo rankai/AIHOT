@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MessagePrimitive, ThreadPrimitive } from "@assistant-ui/react";
 import type {
   AssistantMessage,
@@ -30,7 +30,11 @@ export function AssistantMessageStream({
   showArtifacts,
   setView,
   view,
+  actions,
+  actionsStamp = "",
 }: {
+  actions?: ReactNode;
+  actionsStamp?: string;
   session: AssistantSession;
   messages: AssistantMessage[];
   profile?: AssistantProfileDto;
@@ -79,7 +83,7 @@ export function AssistantMessageStream({
   const activityStamp = session.turn?.activities?.map((item) => `${item.id}:${item.state}`).join(":") ?? "";
   const messageStamp =
     messages.map((message) => message.id).join(":") +
-    `:${activityStamp}:${session.turn?.phase}:${session.turn?.question?.questionId}:${session.turn?.calls.map((call) => call.state).join(":")}`;
+    `:${actionsStamp}:${activityStamp}:${session.turn?.phase}:${session.turn?.question?.questionId}:${session.turn?.calls.map((call) => call.state).join(":")}`;
   const previousStamp = useRef({ scopeKey, messageStamp });
   useEffect(() => {
     const changed = previousStamp.current.scopeKey === scopeKey &&
@@ -231,6 +235,7 @@ export function AssistantMessageStream({
             showArtifacts={showArtifacts}
             setView={setView}
           />
+          {actions}
         </div>
         </div>
       </div>

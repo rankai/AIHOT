@@ -56,6 +56,7 @@ export async function answerTurn(userId: number, id: string, turnId: string, raw
   });
 }
 async function stopTx(tx: Tx, t: Record<string, any>, reason = "Stopped by owner") {
+  await tx`UPDATE assistant_sessions SET queue_paused=true,queue_resume_turn_id=NULL WHERE id=${t.session_id}`;
   const runs =
     await tx`SELECT r.* FROM operation_runs r WHERE r.id=${t.parent_operation_run_id} OR r.id IN (SELECT child_run_id FROM assistant_tool_calls WHERE turn_id=${t.id}) ORDER BY id FOR UPDATE`;
   for (const r of runs)
@@ -63,7 +64,19 @@ async function stopTx(tx: Tx, t: Record<string, any>, reason = "Stopped by owner
       await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,next_attempt_at=NULL,job_id=NULL,wait_reason=${reason},updated_at=now() WHERE id=${r.id}`;
       await settleForRun(tx, { runId: r.id, outcome: "stopped" });
     }
+  await tx`UPDATE assistant_turns SET snapshot=snapshot || jsonb_build_object('stoppedThroughGeneration',
+    (SELECT generation FROM operation_runs WHERE id=${t.parent_operation_run_id})) WHERE id=${t.id}`;
   await event(tx, t.session_id, "turn", t.id);
+}
+/** Only server-created queue successors inherit the original stop intent. */
+async function isQueueSuccessor(tx: Tx, sessionId: string, currentId: string, targetId: string) {
+  let id: string | null = currentId;
+  for (let depth = 0; id && depth < 100; depth++) {
+    if (id === targetId) return true;
+    const rows: { previous: string | null }[] = await tx`SELECT snapshot->>'queuePreviousTurnId' previous FROM assistant_turns WHERE id=${id} AND session_id=${sessionId}`;
+    id = rows[0]?.previous ?? null;
+  }
+  return false;
 }
 async function resumeTurnTx(tx: Tx, s: Record<string, any>, t: Record<string, any>) {
   if (s.active_turn_id !== t.id) throw conflict("会话已有新回合，不能恢复旧回合");
@@ -114,8 +127,18 @@ export async function controlTurn(
     .parse(raw);
   return sql.begin(async (tx) => {
     const { s, t } = await ownedTurn(tx, userId, id, turnId);
-    if (t.generation !== input.generation) throw conflict("回合状态已变化");
-    if (action === "stop") await stopTx(tx, t);
+    // Stop expresses a session-wide pause even when polling lags behind Worker progress.
+    // Resume still requires the exact observed state; future generations are never accepted.
+    if (action === "stop" ? input.generation > t.generation : input.generation !== t.generation) throw conflict("回合状态已变化");
+    if (action === "stop") {
+      if (typeof t.snapshot.stoppedThroughGeneration === "number" && input.generation <= t.snapshot.stoppedThroughGeneration) return { turnId };
+      if (s.active_turn_id && s.active_turn_id !== t.id && !await isQueueSuccessor(tx, id, s.active_turn_id, t.id)) throw conflict("会话已有独立新回合，请核对当前任务后停止");
+      await stopTx(tx, t);
+      if (s.active_turn_id && s.active_turn_id !== t.id) {
+        const current = await ownedTurn(tx, userId, id, s.active_turn_id);
+        await stopTx(tx, current.t);
+      }
+    }
     else {
       if (t.status !== "stopped") throw conflict("当前回合不可继续");
       await resumeTurnTx(tx, s, t);
@@ -172,7 +195,9 @@ export async function archiveSession(userId: number, id: string, remove: boolean
   return sql.begin(async (tx) => {
     await lockMemberAdmission(tx, `user:${userId}`);
     const s = await ownedSession(tx, userId, id, true);
+    await tx`UPDATE assistant_sessions SET queue_paused=true,queue_resume_turn_id=NULL WHERE id=${id}`;
     if (remove) {
+      await tx`UPDATE assistant_message_queue SET state='cancelled',quote=NULL,prepared_input=NULL WHERE session_id=${id} AND state IN ('pending','quoted')`;
       if (s.active_turn_id) {
         const { t } = await ownedTurn(tx, userId, id, s.active_turn_id);
         await stopTx(tx, t);

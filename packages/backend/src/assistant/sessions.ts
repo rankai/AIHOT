@@ -1,3 +1,4 @@
+import { researchClock } from "./xhs-research.ts";
 import { contextTokens } from "./context.ts";
 import { readAssistantAttachment } from "./attachments.ts";
 import { lockAssetInputs } from "../operations/assets.ts";
@@ -77,7 +78,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
     return { sessionId: id };
   });
 }
-async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown) {
+export async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown) {
   const input = TurnInput.parse(raw),
     session = await ownedSession(db, userId, sessionId);
   if (input.expectedRevision !== session.revision) throw conflict("会话已变化，请重新报价");
@@ -122,6 +123,7 @@ async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: str
   }
   const snapshot = {
     sessionId,
+    researchClock: researchClock(),
     revision: session.revision,
     assistantId: p.id,
     profileVersion: p.version,
@@ -156,6 +158,9 @@ export async function quoteTurn(userId: number, id: string, raw: unknown) {
   return quoteTool(userId, (await snapshotInput(sql, userId, id, raw)).intent);
 }
 export async function submitTurn(userId: number, id: string, raw: unknown, key: unknown) {
+  return sql.begin(tx => submitTurnTx(tx, userId, id, raw, key));
+}
+export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unknown, key: unknown, queueEntryId?: string) {
   const body = z
     .object({
       message: z.unknown(),
@@ -171,7 +176,6 @@ export async function submitTurn(userId: number, id: string, raw: unknown, key: 
     .parse(raw);
   const { quoteId, ...rest } = body,
     c = command(key, TurnInput.parse(rest));
-  return sql.begin(async (tx) => {
     await lockMemberAdmission(tx, `user:${userId}`);
     const session = await ownedSession(tx, userId, id, true);
     const [old] =
@@ -182,6 +186,9 @@ export async function submitTurn(userId: number, id: string, raw: unknown, key: 
       if (old.command_hash !== c.hash && !legacy) throw conflict("同一提交标识不能用于不同内容");
       return { turnId: old.id, runId: old.parent_operation_run_id };
     }
+    const [queued] = await tx`SELECT id FROM assistant_message_queue WHERE session_id=${id} AND state IN ('pending','quoted') ORDER BY position LIMIT 1`;
+    if (queued && queued.id !== queueEntryId) throw conflict("会话有排队需求，请按顺序处理");
+    if (session.archived_at) throw conflict("会话已归档");
     await requireAvailable(tx);
     const [active] =
       await tx`SELECT id FROM operation_runs WHERE id=(SELECT parent_operation_run_id FROM assistant_turns WHERE id=${session.active_turn_id}) AND status IN ('active','waiting','needs_review')`;
@@ -205,14 +212,13 @@ export async function submitTurn(userId: number, id: string, raw: unknown, key: 
       limits: { retries: 0, modelCalls: 8 },
       authorization: { quoteId, intent },
     });
-    await tx`INSERT INTO assistant_turns(id,session_id,parent_operation_run_id,command_key,command_hash,snapshot) VALUES (${turnId},${id},${run.id},${c.key},${c.hash},${tx.json(snapshot as never)})`;
+    await tx`INSERT INTO assistant_turns(id,session_id,parent_operation_run_id,command_key,command_hash,snapshot) VALUES (${turnId},${id},${run.id},${c.key},${c.hash},${tx.json((queueEntryId ? { ...snapshot, queuePreviousTurnId: session.active_turn_id } : snapshot) as never)})`;
     if(input.autoAuthorizationId) await linkAuto(tx,run.id,input.autoAuthorizationId,turnId,"turn",quoteId);
     await tx`UPDATE assistant_sessions SET active_turn_id=${turnId},revision=revision+1 WHERE id=${id}`;
     await message(tx, id, turnId, "user", input.message, { role: "user", content: input.message });
     await event(tx, id, "turn", turnId);
     await queueOperationStep(tx, run.id);
     return { turnId, runId: run.id };
-  });
 }
 export async function sessionSnapshot(userId: number, id: string): Promise<AssistantSession> {
   return sql.begin(async (tx) => {
@@ -232,7 +238,9 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     const [water] =
       await tx`SELECT coalesce(max(seq),0)::int seq FROM assistant_events WHERE session_id=${id}`;
     const activitySnapshot = turn ? await readActivities(tx, turn as Parameters<typeof readActivities>[1]) : null;
+    const queued = await tx`SELECT id,position,input,state,quote,error,submitted_turn_id,command_key FROM (SELECT * FROM assistant_message_queue WHERE session_id=${id} AND (state IN ('pending','quoted') OR id IN (SELECT id FROM assistant_message_queue WHERE session_id=${id} ORDER BY position DESC LIMIT 50))) q ORDER BY position`;
     return {
+      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
       sessionId: s.id,
       feeAuthorization: await readFeeAuthorization(tx,id),
       assistantId: s.assistant_id,

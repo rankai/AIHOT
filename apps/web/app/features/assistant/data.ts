@@ -26,6 +26,7 @@ export interface TurnInput {
   autoAuthorizationId?: string;
 }
 export interface PendingTurn {
+  commandKey: string;
   /** Once a response is lost, later rejection cannot disprove the original commit. */
   hasUnknownResult?: boolean;
   input: TurnInput;
@@ -196,6 +197,7 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
         save_draft: "稿件内容已返回",
         ask_question: "已提出需要补充的问题",
         search_xhs_notes: "已提出笔记检索需求",
+        analyze_xhs_research: "爆款规律分析已返回",
         read_skill_reference: "已选择创作参考",
       }[tool];
     }
@@ -204,12 +206,14 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
     model_request: "调用创作接口", load_skill: "加载创作技能",
     read_skill_reference: "读取创作参考", ask_question: "补充信息",
     search_xhs_notes: `查询${activity.keyword ? `“${activity.keyword}”` : "参考笔记"}`,
+    analyze_xhs_research: "整理爆款规律",
     save_draft: "保存稿件",
   }[kind];
   if (state === "completed") return {
     model_request: "创作接口已返回", load_skill: "已加载创作技能",
     read_skill_reference: "已读取创作参考", ask_question: "已提出补充问题",
     search_xhs_notes: `${action} · 查询结果已返回`, save_draft: "稿件已保存",
+    analyze_xhs_research: "已保存爆款规律分析",
   }[kind];
   if (state === "running") return `正在${action}`;
   if (state === "preparing") return `准备${action}`;

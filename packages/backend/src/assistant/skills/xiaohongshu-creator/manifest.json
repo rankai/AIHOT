@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "skillId": "xiaohongshu-creator",
-  "version": "2",
+  "version": "3",
   "name": "xiaohongshu-creator",
   "description": "Redfox小红书原文写作规则与受控工具适配（M1/M2）",
   "source": {
@@ -16,8 +16,8 @@
   "modules": [
     {
       "moduleId": "M1",
-      "version": "2",
-      "description": "Redfox原文M1笔记生成（资料不足诚实partial）",
+      "version": "3",
+      "description": "真实笔记检索、规律分析与完整M1创作",
       "inputSchema": "writing-input@1",
       "entryResource": "M1",
       "resources": [
@@ -27,7 +27,8 @@
       ],
       "tools": [
         "save_draft",
-        "search_xhs_notes"
+        "search_xhs_notes",
+        "analyze_xhs_research"
       ],
       "outputKinds": [
         "xhs-note"
@@ -43,11 +44,11 @@
       "toolContractVersion": 1,
       "outputSchemaVersion": 1,
       "deliveryContract": "writing-delivery@1",
-      "hash": "a5ee42666fa02f6018344e2ee4ae05970e14daaebfcdcc51a8cd55b8eebf0bc6"
+      "hash": "6ffa8ef6508017bacc07e7200706cae8184c767a9b29dcc9aaa84385f47817b0"
     },
     {
       "moduleId": "M2",
-      "version": "2",
+      "version": "3",
       "description": "Redfox原文M2小红书风格改写（完整platform-rules）",
       "inputSchema": "writing-input@1",
       "entryResource": "M2",
@@ -73,7 +74,7 @@
       "toolContractVersion": 1,
       "outputSchemaVersion": 1,
       "deliveryContract": "writing-delivery@1",
-      "hash": "98989372322659ba8c952d0e2acedb9d47b7211c5b136573779252ea38faf4e7"
+      "hash": "e01ed715466ee3960ae3141fe360dad115174d57f2ec8119f758dbea406d9464"
     }
   ],
   "resources": [
@@ -81,8 +82,8 @@
       "resourceId": "M1",
       "path": "write.md",
       "type": "text/markdown",
-      "bytes": 13391,
-      "sha256": "f1daffb8e50cbd17ba282e380785e4e392fc9b32481ff646efb970c347429b61"
+      "bytes": 15054,
+      "sha256": "a44697e9738338c4bdb59147d68cec7e971466049d1b7a2657d2505e1b140fc8"
     },
     {
       "resourceId": "M2",
@@ -95,8 +96,8 @@
       "resourceId": "adaptation",
       "path": "adaptation.md",
       "type": "text/markdown",
-      "bytes": 3018,
-      "sha256": "e69a331c6bf12cb2344e80783a53af99cb7a563a0b369e4a76b173acaff75940"
+      "bytes": 4681,
+      "sha256": "e38561b0a0604e9cff13a60bd59e481bba6407ef21570fc68a4320cffd89700b"
     },
     {
       "resourceId": "upstream-skill",
@@ -127,6 +128,6 @@
       "sha256": "9a9a496301bb37cfbf377f796215b3b1276271f4dd2b0742874f848319779288"
     }
   ],
-  "manifestHash": "b90c77789fb5f5ecbed34f7feb5b787a4a4ba73370dd18222c8c517af1f14441",
-  "packageHash": "f92babf5779c8240966a904927f391ec3a3fddefcd7d5dd71d57fd20b6fc7bc3"
+  "manifestHash": "e306827ec1ac1cbb262a6702b3356de81fbaf8c3ae563e7bb977a44498336529",
+  "packageHash": "42637819bf2c5c2cf2e43880307f2d67d59f06d6459cdab033118c2bd064f238"
 }

@@ -11,13 +11,13 @@ export function useToolCommand(csrf: string, commandScope?: string) {
   const busy = useRef(false);
   const failure = useRef<{ status: number | null; code: string | null; message: string } | null>(null);
   const commands = useRef(new Map<string, string>());
-  async function run<T>(path: string, body: unknown, method: "POST" | "DELETE" = "POST", identityInput?: unknown): Promise<T | null> {
+  async function run<T>(path: string, body: unknown, method: "POST" | "DELETE" = "POST", identityInput?: unknown, commandKey?: string): Promise<T | null> {
     if (busy.current) return null;
     const multipart = body instanceof FormData;
     const input = identityInput ?? (body && typeof body === "object" && "quoteId" in body && "input" in body ? body.input : body);
     const fingerprint = method + path + (multipart ? prepareAdminBody(body).fingerprint : JSON.stringify(input));
     const commandKeys = commandScope ? scopedCommandKeys(csrf, commandScope) : commands.current;
-    const key = commandKeys.get(fingerprint) ?? crypto.randomUUID();
+    const key = commandKey ?? commandKeys.get(fingerprint) ?? crypto.randomUUID();
     commandKeys.set(fingerprint, key);
     if (commandScope) limitCommandKeys(commandKeys);
     busy.current = true;

@@ -124,12 +124,11 @@ export function CurrentTask({
       </details>
       {working && waitingSeconds >= 15 && (
         <p className="text-[12px] leading-relaxed text-ink-4" aria-live="off">
-          本次查看已等待 {waitingSeconds} 秒。处理仍在进行，可刷新状态；这不代表已超时。
+          本次查看已等待 {waitingSeconds} 秒。处理仍在进行，状态会自动更新；这不代表已超时。
         </p>
       )}
       <div className="assistant-task-controls">
-        <Button size="sm" disabled={reading} onClick={() => void refresh()}>刷新状态</Button>
-        {active && <Button size="sm" disabled={pending} onClick={() => void control("stop")}>停止后续执行</Button>}
+        {readError && <Button size="sm" disabled={reading} onClick={() => void refresh()}>重新连接</Button>}
         {turn.canResume && <Button size="sm" disabled={pending} onClick={() => void control("resume")}>继续处理</Button>}
         {turn.phase === "completed" && !!session.artifacts.length && (
           <button className="assistant-task-artifacts" onClick={showArtifacts}>查看会话稿件</button>

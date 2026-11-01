@@ -52,6 +52,8 @@ export interface AssistantSource {
   kind: "user-material" | "artifact" | "research";
   label: string;
   url: string | null;
+  /** Server-owned verification; never accepted from editable content. */
+  research?: { analysisCallId: string; application: { explanation: string } };
 }
 export interface AssistantArtifact {
   artifactId: string;
@@ -82,7 +84,7 @@ export interface AssistantCall {
 /** Safe, read-only history of persisted actions; never contains execution payloads. */
 export interface AssistantActivity {
   id: string;
-  kind: "request_received" | "model_request" | "load_skill" | "read_skill_reference" | "ask_question" | "search_xhs_notes" | "save_draft";
+  kind: "request_received" | "model_request" | "load_skill" | "read_skill_reference" | "ask_question" | "search_xhs_notes" | "analyze_xhs_research" | "save_draft";
   state: "preparing" | "running" | "waiting" | "completed" | "rejected" | "stopped" | "failed" | "needs_review";
   callId?: string;
   keyword?: string;
@@ -101,7 +103,12 @@ export interface AssistantTurn {
   needsSnapshotRefresh?: boolean;
   canResume: boolean;
 }
+export interface AssistantQueuedMessage {
+  id: string; position: number; message: string; state: "pending" | "quoted" | "submitted" | "cancelled";
+  quote: ToolQuote | null; error: string | null; turnId: string | null; commandKey: string;
+}
 export interface AssistantSession {
+  queue?: { paused: boolean; entries: AssistantQueuedMessage[] };
   sessionId: string;
   feeAuthorization?: AssistantFeeAuthorization | null;
   assistantId: AssistantId;

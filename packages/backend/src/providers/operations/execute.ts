@@ -1,3 +1,4 @@
+import { recoverMessageQueues } from "../../assistant/message-queue.ts";
 import { executeAssistantStep, recoverAssistantChildren } from "../../assistant/execution.ts";
 import { executeWanStep } from "../aliyun/wan-execution.ts";
 import { executeSubscriptionVideoStep } from "./subscription-video.ts";
@@ -30,5 +31,6 @@ export async function executeOperationStep(runId: number, stepVersion: number, j
     // Provider transactions have released their child locks. Also check the parent after its own
     // step: a child may finish between the parent's read and its waiting_child commit.
     await recoverAssistantChildren(runId);
+    await recoverMessageQueues(runId);
   }
 }

@@ -1,3 +1,4 @@
+import { catalog } from "@aihot/backend/assistant/catalog";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -172,6 +173,13 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
       const submitKey = randomUUID();
       const submitted = { ...raw, quoteId: quote.quoteId };
       const result = await submitTurn(user.id, sessionId, submitted, submitKey);
+      if (mode.startsWith("search")) {
+        // Recovery fixtures exercise already accepted v2 requests. New v3 M1 is covered in assistant-xhs-research.
+        const old = (await catalog()).find((p) => p.manifest.skillId === "xiaohongshu-creator" && p.manifest.version === "2")!.manifest;
+        const frozen = old.modules.map((m) => ({ skillId: old.skillId, version: old.version, packageHash: old.packageHash,
+          moduleId: m.moduleId, moduleVersion: m.version, moduleHash: m.hash, description: m.description }));
+        await sql`UPDATE assistant_turns SET snapshot=jsonb_set(snapshot,'{candidates}',${sql.json(frozen)}) WHERE id=${result.turnId}`;
+      }
       return { user, sessionId, submitted, submitKey, ...result };
     };
     const advance = async (runId: number) => {

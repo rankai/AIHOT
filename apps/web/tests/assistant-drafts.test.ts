@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   emptyDraft,
+  readDraft,
+  rememberDraft,
+  draftKey,
   freezeTurn,
   failedTurn,
   canRejectTurn,
@@ -17,7 +20,7 @@ test("confirmed input, quote and artifact version remain frozen while the next d
     actionId: "general-writing",
     references: [{ artifactId: "a", version: 2, title: "原稿" }],
   };
-  const attempt: PendingTurn = {
+  const attempt: PendingTurn = { commandKey: "attempt",
     input: {
       message: original.text,
       expectedRevision: 7,
@@ -52,11 +55,11 @@ test("confirmed input, quote and artifact version remain frozen while the next d
 });
 
 test("a late result cannot clear a different pending command or a newer draft", () => {
-  const first: PendingTurn = {
+  const first: PendingTurn = { commandKey: "first",
     input: { message: "first", expectedRevision: 1, skillSelection: null, inputIds: [], artifactVersions: [] },
     quoteId: "q1",
   };
-  const second: PendingTurn = {
+  const second: PendingTurn = { commandKey: "second",
     input: { message: "second", expectedRevision: 2, skillSelection: null, inputIds: [], artifactVersions: [] },
     quoteId: "q2",
   };
@@ -66,7 +69,7 @@ test("a late result cannot clear a different pending command or a newer draft", 
 });
 
 test("a rejected frozen submission restores its explicit references without merging a later draft", () => {
-  const attempt: PendingTurn = {
+  const attempt: PendingTurn = { commandKey: "attempt",
     input: {
       message: "修改旧版本",
       expectedRevision: 4,
@@ -96,7 +99,7 @@ test("a rejected frozen submission restores its explicit references without merg
 });
 
 test("unknown submit remains frozen after a later 4xx and only successful replay releases it", () => {
-  const attempt: PendingTurn = {input:{message:"已确认需求",expectedRevision:1,inputIds:[],artifactVersions:[],skillSelection:null,autoAuthorizationId:"frozen-auth"},quoteId:"q"};
+  const attempt: PendingTurn = { commandKey: "attempt",input:{message:"已确认需求",expectedRevision:1,inputIds:[],artifactVersions:[],skillSelection:null,autoAuthorizationId:"frozen-auth"},quoteId:"q"};
   for (const status of [null, 500, 503]) {
     const frozen=freezeTurn(emptyDraft(),attempt);
     const unknown=failedTurn(frozen,attempt,status);
@@ -110,7 +113,7 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
       assert.equal(rejectedDraft(current,()=>"unused"),current,"cannot restore an unknown automatic attempt into a new manual quote");
     }
     const next={...unknown,text:"下一轮独立草稿"};
-    assert.equal(settledDraft(next,attempt),next,"a stale attempt cannot clear a newer pending identity");
+    assert.equal(settledDraft(next,{...attempt,commandKey:"other"}),next,"a different command cannot clear the pending identity");
     const settled=settledDraft(next,next.pendingTurn!);
     assert.equal(settled.pendingTurn,undefined);
     assert.equal(settled.text,"下一轮独立草稿");
@@ -118,7 +121,7 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
   const confirmedRejection=failedTurn(freezeTurn(emptyDraft(),attempt),attempt,409);
   assert.equal(canRejectTurn(confirmedRejection.pendingTurn,409),true);
   assert.equal(rejectedDraft(confirmedRejection,()=>"").text,attempt.input.message);
-  const other={...attempt,quoteId:"different"};
+  const other={...attempt,commandKey:"different",quoteId:"different"};
   const draft={...emptyDraft(),pendingTurn:other};
   assert.equal(failedTurn(draft,attempt,null),draft,"late failure cannot mark another pending attempt");
 });
