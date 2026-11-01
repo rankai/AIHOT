@@ -232,17 +232,26 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
     await event(tx, turn.session_id, "turn", turn.id);
   });
 }
-/** Bounded local continuation scan; no model polling while waiting for user/approval/child. */
-export async function recoverAssistantChildren() {
+/** Targeted post-step continuation; the existing recovery scan remains the missed-wakeup fallback. */
+export async function recoverAssistantChildren(relatedRunId?: number) {
   const rows =
-    await sql`SELECT t.id,t.parent_operation_run_id FROM assistant_turns t JOIN operation_runs r ON r.id=t.parent_operation_run_id WHERE t.phase='waiting_child' AND r.status='waiting' AND EXISTS(SELECT 1 FROM assistant_tool_calls c JOIN operation_runs ch ON ch.id=c.child_run_id WHERE c.turn_id=t.id AND ch.status NOT IN ('active','waiting')) ORDER BY r.id LIMIT 100`;
+    await sql`SELECT t.id,t.parent_operation_run_id FROM assistant_turns t JOIN operation_runs r ON r.id=t.parent_operation_run_id
+      WHERE t.phase='waiting_child' AND r.status='waiting'
+      AND (${relatedRunId ?? null}::bigint IS NULL OR t.parent_operation_run_id=${relatedRunId ?? null}
+        OR t.id IN (SELECT turn_id FROM assistant_tool_calls WHERE child_run_id=${relatedRunId ?? null}))
+      AND EXISTS(SELECT 1 FROM assistant_tool_calls c JOIN operation_runs ch ON ch.id=c.child_run_id WHERE c.turn_id=t.id AND c.state='running' AND ch.status NOT IN ('active','waiting'))
+      ORDER BY r.id LIMIT 100`;
   for (const row of rows)
     await sql.begin(async (tx) => {
       await lockRunAdmission(tx, [row.parent_operation_run_id]);
-      const [session] = await tx`SELECT session_id FROM assistant_turns WHERE id=${row.id}`;
-      await tx`SELECT id FROM assistant_sessions WHERE id=${session!.session_id} FOR UPDATE`;
+      const [turn] = await tx`SELECT session_id FROM assistant_turns WHERE id=${row.id}`;
+      const [session] = await tx`SELECT active_turn_id,deleted_at FROM assistant_sessions WHERE id=${turn!.session_id} FOR UPDATE`;
+      if (!session || session.deleted_at || session.active_turn_id !== row.id) return;
       const [r] = await tx`SELECT * FROM operation_runs WHERE id=${row.parent_operation_run_id} FOR UPDATE`;
-      if (!r || r.status !== "waiting") return;
+      const [current] = await tx`SELECT phase FROM assistant_turns WHERE id=${row.id} FOR UPDATE`;
+      if (!r || r.status !== "waiting" || r.wait_reason !== "assistant:waiting_child" || current?.phase !== "waiting_child") return;
+      const [finished] = await tx`SELECT 1 FROM assistant_tool_calls c JOIN operation_runs ch ON ch.id=c.child_run_id WHERE c.turn_id=${row.id} AND c.state='running' AND ch.status NOT IN ('active','waiting') LIMIT 1`;
+      if (!finished) return;
       await tx`UPDATE operation_runs SET status='active',generation=generation+1,wait_reason=NULL WHERE id=${r.id}`;
       await tx`UPDATE assistant_turns SET phase='executing' WHERE id=${row.id}`;
       await queueOperationStep(tx, r.id);

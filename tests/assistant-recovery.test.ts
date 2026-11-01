@@ -46,7 +46,7 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
     if (mode === "text-only") return { id: "text-only", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "这是一条尚未交付稿件的文字回复。" }, finish_reason: "stop" }] };
     if (mode === "question") return completion("ask_question", { text: "请补充材料" });
     const rewrite = mode.startsWith("m2-");
-    const xhs = mode === "search" || rewrite;
+    const xhs = mode.startsWith("search") || rewrite;
     const moduleId = rewrite ? "M2" : xhs ? "M1" : "write",
       skillId = xhs ? "xiaohongshu-creator" : "general-writing";
     if (mode === "limit" || !body.tools.some((x: any) => x.function.name === "save_draft"))
@@ -78,7 +78,7 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
           scope: "材料",
         },
       });
-    if (!body.messages.some((m: any) => m.role === "tool" && m.content.includes("limited")))
+    if (mode === "search-again" || !body.messages.some((m: any) => m.role === "tool" && m.content.includes("limited")))
       return completion("search_xhs_notes", {
         activationId,
         keyword: `测试相机-${unique}`,
@@ -177,6 +177,15 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
     const advance = async (runId: number) => {
       const [r] = await sql`SELECT * FROM operation_runs WHERE id=${runId}`;
       await executeOperationStep(runId, r.step_version, randomUUID());
+    };
+    const approvedSearch = async () => {
+      mode = "search";
+      const x = await setup("xiaohongshu");
+      for (let i = 0; i < 4; i++) await advance(x.runId);
+      const proposal = (await sessionSnapshot(x.user.id, x.sessionId)).turn!.calls[0]!;
+      await decideCall(x.user.id, x.sessionId, proposal.callId, true, { proposalRevision: 1 }, randomUUID());
+      const [call] = await sql`SELECT * FROM assistant_tool_calls WHERE id=${proposal.callId}`;
+      return { ...x, call };
     };
     await t.test("closed or missing member budget rejects new work but preserves accepted command replay", async () => {
       const x = await setup();
@@ -420,8 +429,21 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
         assert(c.child_run_id);
         assert.equal(redfox.hits(), before);
         await advance(x.runId);
+        const [waiting] = await sql`SELECT generation,step_version FROM operation_runs WHERE id=${x.runId}`;
+        // These tests drive the real dispatcher directly, so retire the already executed parent
+        // queue entries just as pg-boss does before checking the newly enqueued continuation.
+        await sql`UPDATE pgboss.job SET state='completed' WHERE name='operations.execute' AND data->>'runId'=${String(x.runId)}`;
         await advance(c.child_run_id);
-        await recoverAssistantChildren();
+        const [awakened] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+        assert.equal(awakened.status, "active", "the actual child dispatcher wakes its parent without the recovery cron");
+        assert.equal(awakened.generation, waiting.generation + 1);
+        const jobs = await sql`SELECT id,state FROM pgboss.job WHERE name='operations.execute' AND data->>'runId'=${String(x.runId)} AND state IN ('created','retry')`;
+        assert.deepEqual(jobs.map(job => job.id), [awakened.job_id]);
+        const [finishedChild] = await sql`SELECT step_version FROM operation_runs WHERE id=${c.child_run_id}`;
+        await executeOperationStep(c.child_run_id, finishedChild.step_version, randomUUID());
+        await recoverAssistantChildren(c.child_run_id);
+        const [replayed] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+        assert.deepEqual(replayed, awakened, "duplicate delivery and recovery do not enqueue or fence the parent again");
         await advance(x.runId);
         await advance(x.runId);
         await advance(x.runId);
@@ -440,6 +462,70 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
         assert(attempts.every((a) => a.budget_scope === "member"));
       },
     );
+    await t.test("parent post-step reconciliation covers a child that finished before its waiting commit", async () => {
+      const x = await approvedSearch();
+      // The child commits before the parent's waiting state is visible, so its notification has
+      // nothing to wake. Reproduce the late wait commit and deliver the already-finished parent
+      // step again: its post-step check must reconcile this race without the recovery scanner.
+      await advance(x.call.child_run_id);
+      const [parent] = await sql`SELECT status,generation,step_version FROM operation_runs WHERE id=${x.runId}`;
+      assert.equal(parent.status, "active");
+      await sql`UPDATE assistant_turns SET phase='waiting_child' WHERE id=${x.turnId}`;
+      await sql`UPDATE operation_runs SET status='waiting',wait_reason='assistant:waiting_child' WHERE id=${x.runId}`;
+      await sql`UPDATE pgboss.job SET state='completed' WHERE name='operations.execute' AND data->>'runId'=${String(x.runId)}`;
+      const before = supplier.hits();
+      await executeOperationStep(x.runId, parent.step_version, randomUUID());
+      const [woken] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+      assert.equal(woken.status, "active");
+      assert.equal(woken.generation, parent.generation + 1);
+      assert(woken.job_id);
+      assert.equal(supplier.hits(), before, "reconciliation only queues local continuation");
+      for (let i = 0; i < 3; i++) await advance(x.runId);
+      assert.equal((await sessionSnapshot(x.user.id, x.sessionId)).turn?.status, "completed");
+    });
+    await t.test("targeted child reconciliation ignores consumed history and preserves other waits and stopped parents", async () => {
+      const x = await approvedSearch();
+      await advance(x.runId);
+      await advance(x.call.child_run_id);
+      await advance(x.runId);
+      // A previous, already consumed search in the same turn is not a completion signal for
+      // the currently running child. Ask through the same turn's normal model/approval path.
+      mode = "search-again";
+      await advance(x.runId);
+      await advance(x.runId);
+      const [second] = await sql`SELECT id FROM assistant_tool_calls WHERE turn_id=${x.turnId} AND state='proposed'`;
+      await decideCall(x.user.id, x.sessionId, second.id, true, { proposalRevision: 1 }, randomUUID());
+      const [call] = await sql`SELECT * FROM assistant_tool_calls WHERE id=${second.id}`;
+      await advance(x.runId);
+      mode = "search";
+      const [waiting] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+      const before = redfox.hits();
+      assert.equal(await recoverAssistantChildren(x.runId), 0);
+      assert.equal(await recoverAssistantChildren(call.child_run_id), 0);
+      const [unchanged] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+      assert.deepEqual(unchanged, waiting);
+      assert.equal(redfox.hits(), before);
+      // Finish the current child while each protected parent state is visible. Neither the
+      // targeted post-step notification nor the fallback scan may turn it into executable work.
+      await sql`UPDATE assistant_turns SET phase='waiting_question' WHERE id=${x.turnId}`;
+      await sql`UPDATE operation_runs SET wait_reason='assistant:waiting_question' WHERE id=${x.runId}`;
+      await advance(call.child_run_id);
+      for (const phase of ["waiting_question", "waiting_approval"]) {
+        await sql`UPDATE assistant_turns SET phase=${phase} WHERE id=${x.turnId}`;
+        await sql`UPDATE operation_runs SET wait_reason=${`assistant:${phase}`} WHERE id=${x.runId}`;
+        const [expected] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+        assert.equal(await recoverAssistantChildren(call.child_run_id), 0);
+        const [actual] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+        assert.deepEqual(actual, expected);
+      }
+      await sql`UPDATE assistant_turns SET phase='waiting_child' WHERE id=${x.turnId}`;
+      await sql`UPDATE operation_runs SET status='stopped',wait_reason='Stopped by owner' WHERE id=${x.runId}`;
+      const [stopped] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+      assert.equal(await recoverAssistantChildren(call.child_run_id), 0);
+      await recoverAssistantChildren();
+      const [stillStopped] = await sql`SELECT status,generation,job_id FROM operation_runs WHERE id=${x.runId}`;
+      assert.deepEqual(stillStopped, stopped);
+    });
     await t.test("legacy draft argument failure is corrected without repeating approved research; ownership conflicts stay closed", async () => {
       for (const badId of ["invented-slug", randomUUID()]) {
         mode = "search";
@@ -451,7 +537,6 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
         const before = redfox.hits();
         await advance(x.runId);
         await advance(search.child_run_id);
-        await recoverAssistantChildren();
         await advance(x.runId);
         await advance(x.runId);
         const [draft] = await sql`SELECT c.*,s.request_snapshot FROM assistant_tool_calls c JOIN assistant_model_steps s ON s.id=c.model_step_id WHERE c.turn_id=${x.turnId} AND c.name='save_draft'`;

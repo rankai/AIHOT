@@ -1,4 +1,4 @@
-import { executeAssistantStep } from "../../assistant/execution.ts";
+import { executeAssistantStep, recoverAssistantChildren } from "../../assistant/execution.ts";
 import { executeWanStep } from "../aliyun/wan-execution.ts";
 import { executeSubscriptionVideoStep } from "./subscription-video.ts";
 import { executeAgentKeyStep } from "../agentkey/execution.ts";
@@ -18,11 +18,17 @@ export async function executeOperationStep(runId: number, stepVersion: number, j
   }); } catch(error) {if(error instanceof StaleOperationError)return {skipped:true};throw error;}
   const [run] = await sql`SELECT provider FROM operation_runs WHERE id = ${runId}`;
   if (!run) return {skipped:true};
-  if (run.provider === "assistant") return executeAssistantStep(runId,stepVersion,jobId);
-  if (run.provider === "aliyun") return executeWanStep(runId,stepVersion,jobId);
-  if (run.provider === "local") return executeSubscriptionVideoStep(runId,stepVersion,jobId);
-  if (run.provider === "agentkey") return executeAgentKeyStep(runId,stepVersion,jobId);
-  if (run.provider === "redfox") return executeRedfoxStep(runId,stepVersion,jobId);
-  if (["socialdata","dajiala"].includes(run.provider)) return executeNativeStep(runId,stepVersion,jobId);
-  throw new Error("Unsupported operation provider");
+  try {
+    if (run.provider === "assistant") return await executeAssistantStep(runId,stepVersion,jobId);
+    if (run.provider === "aliyun") return await executeWanStep(runId,stepVersion,jobId);
+    if (run.provider === "local") return await executeSubscriptionVideoStep(runId,stepVersion,jobId);
+    if (run.provider === "agentkey") return await executeAgentKeyStep(runId,stepVersion,jobId);
+    if (run.provider === "redfox") return await executeRedfoxStep(runId,stepVersion,jobId);
+    if (["socialdata","dajiala"].includes(run.provider)) return await executeNativeStep(runId,stepVersion,jobId);
+    throw new Error("Unsupported operation provider");
+  } finally {
+    // Provider transactions have released their child locks. Also check the parent after its own
+    // step: a child may finish between the parent's read and its waiting_child commit.
+    await recoverAssistantChildren(runId);
+  }
 }
