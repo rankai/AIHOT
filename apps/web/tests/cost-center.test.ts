@@ -24,6 +24,7 @@ const filters = {
   service: null,
   operation: null,
   model: null,
+  modelMissing: null,
   skillId: null,
   moduleId: null,
   userId: null,
@@ -163,7 +164,7 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     };
 
     const html = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: overview } }));
-    for (const text of ["成本中心", "概览", "调用明细", "已存账单", "筛选条件", "北京时间", "调用次数", "有估算费用的记录", "已有实扣的记录", "费用待确认", "按服务商汇总", "需要留意", "7 类数据需要核对", "影响："]) {
+    for (const text of ["成本中心", "概览", "调用明细", "已存账单", "筛选条件", "北京时间", "调用次数", "有估算费用的记录", "已有实扣的记录", "费用待确认", "按服务商汇总", "需要留意", "7 类数据需要核对", "影响：", "已收到响应 2", "已收到响应仅表示供应商响应已保存，不代表业务处理成功"]) {
       assert(html.includes(text), text);
     }
     const warningCopy = [
@@ -195,6 +196,60 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     assert(html.includes("view=details"));
     assert(html.includes("groupCursor=group-next") === false);
     assert(html.includes("cursor=group-next"));
+    assert(html.includes("origin=live"), "the default fixture retains the default live origin");
+    assert(html.includes(">全部来源</option>"));
+    const allOriginOverview = { ...overview, filters: { ...overview.filters, origin: null } };
+    const allOriginHtml = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: allOriginOverview } }));
+    assert(allOriginHtml.includes("origin=all"));
+    assert(allOriginHtml.includes("groupBy=model"));
+    const allOriginNavigation = [...allOriginHtml.matchAll(/href="([^"]+)"/g)]
+      .map((match) => match[1]!)
+      .filter((href) => (href.includes("groupBy=") || href.includes("cursor=")) && !href.includes("origin=live"));
+    assert(allOriginNavigation.length >= 3);
+    assert(allOriginNavigation.every((href) => href.includes("origin=all")));
+    assert(allOriginHtml.includes("origin=live"), "only the explicit reset link restores the default live origin");
+
+    const unknownServices: CostOverviewResponse = {
+      ...overview,
+      query: { ...overview.query, groupBy: "service" },
+      groups: ["unknown.service.alpha", "unknown.service.beta"].map((service) => ({
+        ...overview.groups[0]!, key: service, groupBy: "service", service, operation: service,
+      })),
+    };
+    const unknownHtml = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: unknownServices } }));
+    assert(unknownHtml.includes("unknown.service.alpha"));
+    assert(unknownHtml.includes("unknown.service.beta"));
+    assert(!unknownHtml.includes("其他外部服务"));
+    assert(!unknownHtml.includes("其他外部操作"));
+    assert(unknownHtml.includes("助手模型调用"), "known service keeps its readable label");
+    assert(unknownHtml.includes("chat.completions"), "service group retains its technical operation ID");
+    assert(render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: { ...unknownServices, groups: [{ ...unknownServices.groups[0]!, operation: "chat.completions" }] } } })).includes("生成文本"), "known operation keeps its readable label");
+
+    const nullModelOverview: CostOverviewResponse = {
+      ...overview,
+      query: { ...overview.query, groupBy: "model" },
+      groups: [{ ...overview.groups[0]!, groupBy: "model", model: null }],
+    };
+    const nullModelHtml = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: nullModelOverview } }));
+    assert(nullModelHtml.includes("model=__missing__"));
+    const nullModelLinks = nullModelHtml.match(/href="[^"]*model=__missing__[^"]*"/g) ?? [];
+    assert(nullModelLinks.length > 0);
+    assert(nullModelLinks.every((link) => !link.includes("modelMissing=")));
+    const nullModelDetails = { ...details, filters: { ...details.filters, model: null, modelMissing: true } };
+    const nullModelFormHtml = render(createElement(feature.CostCenter, { page: { view: "details", range: { start, end }, costs: nullModelDetails } }), "/admin/costs?view=details");
+    assert(nullModelFormHtml.includes('name="model"'), "missing model uses the existing model form field");
+    assert(nullModelFormHtml.includes('<option value="__missing__" selected="">模型未知/模型为空</option>'), "details without facets shows a readable missing-model option");
+    assert(!nullModelFormHtml.includes('input name="model"'), "internal missing-model marker is not exposed in a text input");
+    const nullModelOverviewHtml = render(createElement(feature.CostCenter, { page: { view: "overview", range: { start, end }, costs: { ...overview, filters: { ...overview.filters, modelMissing: true } } } }));
+    assert(nullModelOverviewHtml.includes('<option value="">全部模型</option>'));
+    assert(nullModelOverviewHtml.includes('<option value="__missing__" selected="">模型未知/模型为空</option>'));
+    assert(nullModelFormHtml.includes(">应用筛选</button>"));
+    assert(!nullModelFormHtml.includes('name="modelMissing"'));
+    const resetHref = nullModelFormHtml.match(/href="([^"]+)"[^>]*>清除筛选<\/a>/)?.[1];
+    assert(resetHref);
+    const resetSearch = new URL(resetHref.replaceAll("&amp;", "&"), "http://local.test").searchParams;
+    assert.equal(resetSearch.has("modelMissing"), false);
+    assert.equal(resetSearch.has("model"), false);
 
     const specialSkillStates = [
       ["__shared__", "多个技能共同使用", "费用只计一次，不能分别相加", "这笔费用不能拆分"],
@@ -233,7 +288,9 @@ test("cost center renders unified filters, exact decimal buckets, details and bi
     assert.equal(data.skillSpecialGroupPresentation("unexpected").label, "其他技能状态");
 
     const detailHtml = render(createElement(feature.CostCenter, { page: { view: "details", range: { start, end }, costs: details } }), "/admin/costs?view=details");
-    for (const text of ["调用明细 · 1 条", "左右滑动表格，可查看费用和记录依据", "运行 #42", "0.002", "CNY", "按资料估算", "标准输入价估算，不含缓存优惠", "价格已锁定", "小红书检索", "多个技能共同完成这次调用，费用不能按单个技能拆分", "复制回执", "下一页调用明细", "助手模型调用", "生成文本", "成功", "实时调用", "正式环境", "1.25 秒", "模型输入量/输出量"]) assert(detailHtml.includes(text), text);
+    for (const text of ["调用明细 · 1 条", "左右滑动表格，可查看费用和记录依据", "运行 #42", "0.002", "CNY", "按资料估算", "标准输入价估算，不含缓存优惠", "价格已锁定", "小红书检索", "多个技能共同完成这次调用，费用不能按单个技能拆分", "复制回执", "下一页调用明细", "助手模型调用", "生成文本", "已收到响应", "实时调用", "正式环境", "1.25 秒", "模型输入量/输出量"]) assert(detailHtml.includes(text), text);
+    assert(detailHtml.includes("已收到响应"));
+    assert(!detailHtml.includes(">成功<"));
     assert(detailHtml.includes("技术详情"));
     assert(detailHtml.includes("identity_source") === false);
     assert(detailHtml.includes("synthetic-model-with-a-long-name-that-must-wrap"));
@@ -302,6 +359,36 @@ test("cost route loaders, redirects, admin navigation and model/settings links u
     assert.equal(api.searchParams.get("origin"), "live");
     assert.equal(api.searchParams.get("model"), "synthetic-model");
     assert.equal(api.searchParams.get("limit"), "50");
+
+    calls.length = 0;
+    await costs.loader({ request: request("/admin/costs?origin=all&view=details&cursor=detail-next") });
+    const allOriginApi = new URL(calls[0]!, "http://local.test");
+    assert.equal(allOriginApi.searchParams.has("origin"), false);
+    assert.equal(allOriginApi.searchParams.get("view"), "details");
+    assert.equal(allOriginApi.searchParams.get("cursor"), "detail-next");
+
+    calls.length = 0;
+    await costs.loader({ request: request("/admin/costs?view=details&modelMissing=true") });
+    const missingModelApi = new URL(calls[0]!, "http://local.test");
+    assert.equal(missingModelApi.searchParams.get("modelMissing"), "true");
+    assert.equal(missingModelApi.searchParams.has("model"), false);
+    calls.length = 0;
+    await costs.loader({ request: request("/admin/costs?view=details&model=__missing__&origin=all") });
+    const formMissingModelApi = new URL(calls[0]!, "http://local.test");
+    assert.equal(formMissingModelApi.searchParams.get("modelMissing"), "true");
+    assert.equal(formMissingModelApi.searchParams.has("model"), false);
+    assert.equal(formMissingModelApi.searchParams.has("origin"), false);
+    calls.length = 0;
+    await costs.loader({ request: request("/admin/costs?view=details&model=") });
+    const allModelsApi = new URL(calls[0]!, "http://local.test");
+    assert.equal(allModelsApi.searchParams.has("modelMissing"), false);
+    assert.equal(allModelsApi.searchParams.has("model"), false);
+    calls.length = 0;
+    await costs.loader({ request: request("/admin/costs?view=details&model=known-model") });
+    const knownModelApi = new URL(calls[0]!, "http://local.test");
+    assert.equal(knownModelApi.searchParams.has("modelMissing"), false);
+    assert.equal(knownModelApi.searchParams.get("model"), "known-model");
+    await assert.rejects(costs.loader({ request: request("/admin/costs?model=a&modelMissing=true") }), (error: { init?: { status?: number } }) => error.init?.status === 400);
 
     calls.length = 0;
     const billing = await costs.loader({ request: request("/admin/costs?view=billing") });

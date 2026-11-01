@@ -40,6 +40,7 @@ export interface CostFilters {
   environment: CostEnvironment | null;
   status: CostAttemptStatus | null;
   costBasis: CostBasis | null;
+  modelMissing: boolean | null;
 }
 
 export interface CostStatusCounts {
@@ -129,7 +130,8 @@ export interface CostWarning {
     | "shared_skill_steps"
     | "wan_cost_conflict"
     | "unknown_fee_evidence"
-    | "facets_truncated";
+    | "facets_truncated"
+    | "skills_catalog_unavailable";
   count: number;
   message: string;
 }

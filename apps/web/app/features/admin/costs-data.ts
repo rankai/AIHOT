@@ -2,11 +2,13 @@ import type { CostFilters, CostGroupBy } from "@aihot/contracts/costs";
 
 export type CostPageView = "overview" | "details" | "billing";
 export type CostRangePreset = "24h" | "7d" | "30d";
+export type CostPageFilters = Omit<CostFilters, "origin"> & { origin: CostFilters["origin"] | "all" };
 
 const BEIJING_OFFSET = "+08:00";
 const DAY_MS = 86_400_000;
 const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 const ZONED_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+export const COST_MODEL_MISSING = "__missing__";
 
 export class CostFilterError extends Error {}
 
@@ -109,18 +111,19 @@ export function costSearchParams(input: {
   end: string;
   view: "overview" | "details";
   groupBy?: CostGroupBy | null;
-  filters?: CostFilters | null;
+  filters?: CostFilters | CostPageFilters | null;
   cursor?: string | null;
 }): URLSearchParams {
   const params = new URLSearchParams({ start: input.start, end: input.end, view: input.view });
   if (input.view === "overview") params.set("groupBy", input.groupBy ?? "provider");
   const filters = input.filters;
   if (filters) {
-    const entries: Array<[keyof CostFilters, string | number | null]> = [
+    const entries: Array<[keyof CostFilters, string | number | boolean | null]> = [
       ["billingProvider", filters.billingProvider],
       ["service", filters.service],
       ["operation", filters.operation],
       ["model", filters.model],
+      ["modelMissing", filters.modelMissing],
       ["skillId", filters.skillId],
       ["moduleId", filters.moduleId],
       ["userId", filters.userId],
@@ -131,7 +134,7 @@ export function costSearchParams(input: {
       ["status", filters.status],
       ["costBasis", filters.costBasis],
     ];
-    for (const [key, value] of entries) if (value !== null && value !== "") params.set(key, String(value));
+    for (const [key, value] of entries) if (value !== null && value !== "" && value !== false) params.set(key, String(value));
   }
   if (input.cursor) params.set("cursor", input.cursor);
   return params;

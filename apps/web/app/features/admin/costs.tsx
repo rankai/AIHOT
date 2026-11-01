@@ -12,15 +12,18 @@ import type {
 } from "@aihot/contracts/costs";
 import { Form, Link, useNavigation } from "react-router";
 import { bj, num } from "./format";
+import { operationLabel as catalogOperationLabel } from "./operation-types";
 import { RedfoxCosts } from "./redfox-costs";
 import {
   COST_GROUP_BY,
+  COST_MODEL_MISSING,
   beijingDateTimeInput,
   costPageHref,
   presetRange,
   skillSpecialGroupPresentation,
   type CostPageView,
   type CostRangePreset,
+  type CostPageFilters,
 } from "./costs-data";
 import { AdminPage, Badge, Button, ButtonLink, Card, DataTable, Empty, Field, Input, Select, Stat, Time, type Column } from "./ui";
 
@@ -204,7 +207,7 @@ function CostFiltersForm({ data, view }: { data: CostOverviewResponse | CostDeta
     end: data.query.end,
     view: view === "details" ? "details" : "overview",
     groupBy: view === "details" ? null : data.query.groupBy,
-    filters: { ...filters, billingProvider: null, service: null, operation: null, model: null, skillId: null, moduleId: null, userId: null, username: null, owner: null, origin: "live", environment: null, status: null, costBasis: null },
+    filters: { ...filters, billingProvider: null, service: null, operation: null, model: null, modelMissing: null, skillId: null, moduleId: null, userId: null, username: null, owner: null, origin: "live", environment: null, status: null, costBasis: null },
   });
   return (
     <Card title="筛选条件" right={<span>北京时间 · 开始包含、结束不包含</span>}>
@@ -233,9 +236,10 @@ function CostFiltersForm({ data, view }: { data: CostOverviewResponse | CostDeta
             </Select> : <Input name="service" defaultValue={filters.service ?? ""} placeholder="输入服务类型编号" />}
           </Field>
           <Field label="模型">
-            {facets ? <Select name="model" defaultValue={filters.model ?? ""}>
+            {facets || filters.modelMissing ? <Select name="model" defaultValue={filters.modelMissing ? COST_MODEL_MISSING : filters.model ?? ""}>
               <option value="">全部模型</option>
-              {facetOptions(facets.models, filters.model).map((item) => <option key={item.value} value={item.value}>{item.label}（{item.count}）</option>)}
+              <option value={COST_MODEL_MISSING}>模型未知/模型为空</option>
+              {facetOptions(facets?.models ?? [], filters.model).map((item) => <option key={item.value} value={item.value}>{item.label}（{item.count}）</option>)}
             </Select> : <Input name="model" defaultValue={filters.model ?? ""} placeholder="精确模型 ID" />}
           </Field>
           <Field label="具体操作" hint="输入调用动作的准确编号，支持目录外的自定义操作。">
@@ -268,7 +272,7 @@ function CostFiltersForm({ data, view }: { data: CostOverviewResponse | CostDeta
               ["production", "正式环境"], ["development", "开发环境"], ["test", "测试环境"], ["other", "其他环境"], ["unknown", "未知环境"],
             ]} />
             <EnumField name="status" label="调用状态" value={filters.status} options={[
-              ["received", "成功"], ["failed", "失败"], ["pending", "处理中"], ["unknown", "结果未知"],
+              ["received", "已收到响应"], ["failed", "失败"], ["pending", "处理中"], ["unknown", "结果未知"],
             ]} />
             <EnumField name="costBasis" label="费用依据" value={filters.costBasis} options={[
               ["actual", "供应商实扣"], ["estimated", "按资料估算"],
@@ -410,7 +414,7 @@ function UsageAndStatus({ totals }: { totals: CostGroup["totals"] }) {
   return (
     <div className="min-w-44">
       <p>{num(totals.attempts)} 次调用 · {num(totals.feeItems)} 个费用项目</p>
-      <p className="text-[11.5px] text-ink-4">成功 {num(totals.statusCounts.received)} · 失败 {num(totals.statusCounts.failed)} · 处理中 {num(totals.statusCounts.pending)} · 结果未知 {num(totals.statusCounts.unknown)}</p>
+      <p className="text-[11.5px] text-ink-4">已收到响应 {num(totals.statusCounts.received)} · 失败 {num(totals.statusCounts.failed)} · 处理中 {num(totals.statusCounts.pending)} · 结果未知 {num(totals.statusCounts.unknown)}</p>
       <p className="text-[11.5px] text-ink-4">模型输入量/输出量 {num(totals.usage.inputTokens)} / {num(totals.usage.outputTokens)} · 缓存输入量 {num(totals.usage.cachedTokens)}</p>
     </div>
   );
@@ -471,12 +475,12 @@ function StatusAndUsage({ data }: { data: CostOverviewResponse }) {
         <Fact label="多技能共用费用" value={num(data.totals.sharedFeeItems)} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <Badge tone="ok">成功 {num(data.totals.statusCounts.received)}</Badge>
+        <Badge tone="ok">已收到响应 {num(data.totals.statusCounts.received)}</Badge>
         <Badge tone="bad">失败 {num(data.totals.statusCounts.failed)}</Badge>
         <Badge tone="warn">处理中 {num(data.totals.statusCounts.pending)}</Badge>
         <Badge>结果未知 {num(data.totals.statusCounts.unknown)}</Badge>
       </div>
-      <p className="mt-4 text-[12px] leading-relaxed text-ink-4">读取于 {bj(data.asOf, true)}。成功记录表示调用已有结果，是否产生真实费用仍需以“供应商实扣”记录为准。</p>
+      <p className="mt-4 text-[12px] leading-relaxed text-ink-4">读取于 {bj(data.asOf, true)}。已收到响应仅表示供应商响应已保存，不代表业务处理成功；是否产生真实费用仍需以“供应商实扣”记录为准。</p>
     </Card>
   );
 }
@@ -538,6 +542,11 @@ const WARNING_PRESENTATIONS: Record<CostWarning["code"], {
     title: () => "筛选项较多，列表只展示前 50 项",
     impact: "可以直接输入准确编号继续筛选，下方费用汇总不受影响。",
     tone: "info",
+  },
+  skills_catalog_unavailable: {
+    title: () => "技能目录暂时不可用",
+    impact: "技能候选项为空；历史费用、服务商、模型统计和调用明细仍可查看。",
+    tone: "attention",
   },
 };
 
@@ -680,8 +689,8 @@ function facetOptions<T extends { value: string; label: string; count: number }>
   return [{ value: current, label: `${current}（当前条件）`, count: 0 }, ...items];
 }
 
-function canonicalFilters(filters: CostFilters): CostFilters {
-  return { ...filters, userId: filters.username ? null : filters.userId };
+function canonicalFilters(filters: CostFilters): CostPageFilters {
+  return { ...filters, userId: filters.username ? null : filters.userId, origin: filters.origin ?? "all" };
 }
 
 function costPageKey(data: CostOverviewResponse | CostDetailsResponse, view: CostPageView): string {
@@ -705,7 +714,7 @@ function groupCursorHref(data: CostOverviewResponse, cursor: string): string {
 }
 
 function groupDetailsHref(data: CostOverviewResponse, group: CostGroup): string {
-  const filters: CostFilters = { ...canonicalFilters(data.filters) };
+  const filters: CostPageFilters = { ...canonicalFilters(data.filters) };
   if (group.groupBy === "provider") filters.billingProvider = group.billingProvider;
   if (group.groupBy === "service") {
     filters.billingProvider = group.billingProvider;
@@ -714,7 +723,8 @@ function groupDetailsHref(data: CostOverviewResponse, group: CostGroup): string 
   }
   if (group.groupBy === "model") {
     filters.billingProvider = group.billingProvider;
-    filters.model = group.model;
+    filters.model = group.model ?? COST_MODEL_MISSING;
+    filters.modelMissing = null;
   }
   if (group.groupBy === "user") {
     filters.userId = group.userId;
@@ -742,12 +752,12 @@ function providerLabel(value: string | null): string {
 
 function serviceLabel(value: string | null): string {
   if (!value) return "服务类型未知";
-  return SERVICE_LABELS.find(([pattern]) => pattern.test(value))?.[1] ?? "其他外部服务";
+  return SERVICE_LABELS.find(([pattern]) => pattern.test(value))?.[1] ?? value;
 }
 
 function operationLabel(value: string | null): string {
   if (!value) return "具体操作未知";
-  return OPERATION_LABELS.find(([pattern]) => pattern.test(value))?.[1] ?? "其他外部操作";
+  return catalogOperationLabel[value] ?? OPERATION_LABELS.find(([pattern]) => pattern.test(value))?.[1] ?? value;
 }
 
 function groupByLabel(value: CostGroupBy): string {
@@ -778,7 +788,7 @@ function statusTone(status: CostDetailRow["status"]): "ok" | "warn" | "bad" | "m
 }
 
 function statusLabel(status: CostDetailRow["status"]): string {
-  return status === "received" ? "成功" : status === "pending" ? "处理中" : status === "failed" ? "失败" : "结果未知";
+  return status === "received" ? "已收到响应" : status === "pending" ? "处理中" : status === "failed" ? "失败" : "结果未知";
 }
 
 function identitySourceLabel(value: CostDetailRow["identitySource"]): string {

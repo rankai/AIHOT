@@ -46,6 +46,7 @@ export const CostsQuery = z
     service: Id.optional(),
     operation: Id.optional(),
     model: Id.optional(),
+    modelMissing: z.preprocess((value) => value === "true" ? true : value, z.literal(true)).optional(),
     skillId: Id.optional(),
     moduleId: Id.optional(),
     userId: z.string().regex(/^[1-9]\d*$/).max(18).optional(),
@@ -68,6 +69,8 @@ export const CostsQuery = z
       ctx.addIssue({ code: "custom", path: ["username"], message: "用户 ID 和用户名只能选择一个" });
     if (!!value.skillId !== !!value.moduleId)
       ctx.addIssue({ code: "custom", path: [value.skillId ? "moduleId" : "skillId"], message: "技能和模块必须同时指定" });
+    if (value.model && value.modelMissing)
+      ctx.addIssue({ code: "custom", path: ["modelMissing"], message: "模型 ID 和模型为空不能同时指定" });
     if (value.view === "details" && value.groupBy)
       ctx.addIssue({ code: "custom", path: ["groupBy"], message: "调用明细不执行分组" });
   });
@@ -159,6 +162,7 @@ let runningCostReads = 0;
 
 export interface CostReadOptions {
   signal?: AbortSignal;
+  loadCatalog?: typeof catalog;
 }
 
 export interface LegacyAttemptCostGroup {
@@ -333,14 +337,14 @@ function baseSql(q: Query) {
         JOIN assistant_turns st ON st.id=sm.turn_id
         JOIN assistant_sessions su ON su.id=st.session_id
         JOIN timed a ON a.receipt_id=sm.receipt_id
-        WHERE a.owner_user_id IS NULL
+        WHERE a.owner_user_id IS NULL AND a.owner_kind IS NULL
         UNION ALL
         SELECT a.id,su.owner_user_id
         FROM assistant_tool_calls tc
         JOIN assistant_turns st ON st.id=tc.turn_id
         JOIN assistant_sessions su ON su.id=st.session_id
         JOIN timed a ON a.operation_run_id=tc.child_run_id
-        WHERE a.owner_user_id IS NULL
+        WHERE a.owner_user_id IS NULL AND a.owner_kind IS NULL
       ) linked
     ),
     operation_owner_candidates AS (
@@ -713,6 +717,7 @@ function scopeConditions(q: Query, user: FilterState) {
   if (q.service) conditions.push(sql`b.service = ${q.service}`);
   if (q.operation) conditions.push(sql`b.operation = ${q.operation}`);
   if (q.model) conditions.push(sql`b.model = ${q.model}`);
+  if (q.modelMissing) conditions.push(sql`b.model IS NULL`);
   if (q.origin) conditions.push(sql`b.origin = ${q.origin}`);
   if (q.environment) conditions.push(sql`b.environment = ${q.environment}`);
   if (q.status) conditions.push(sql`b.status = ${q.status}`);
@@ -1286,6 +1291,7 @@ async function overviewMeta(
   tx: Tx,
   q: Query,
   user: FilterState,
+  loadCatalog: CostReadOptions["loadCatalog"] = catalog,
 ): Promise<{ facets: CostFacetsLike; truncated: boolean; shared: number; warnings: CostWarning[] }> {
   const condition = scopeConditions(q, user);
   const [row] = await tx<OverviewMetaRow[]>`
@@ -1383,8 +1389,8 @@ async function overviewMeta(
       .filter((facet) => facet.kind === kind)
       .slice(0, 50)
       .map((facet) => ({ value: facet.value, label: facet.value, count: facet.n }));
-  const packages = await catalog();
-  const localSkills = packages.flatMap(({ manifest }) =>
+  const packages = await loadCatalog().catch(() => null);
+  const localSkills = (packages ?? []).flatMap(({ manifest }) =>
     manifest.modules.map((module) => ({
       value: `${manifest.skillId}:${module.moduleId}`,
       label: `${manifest.name} · ${module.description}`,
@@ -1401,6 +1407,7 @@ async function overviewMeta(
     unknownFee: integer(row?.unknown_fee),
     shared,
     facetsTruncated: truncated,
+    catalogUnavailable: packages === null,
   });
   return {
     facets: { providers: pick("provider"), services: pick("service"), models: pick("model"), skills: localSkills },
@@ -1430,7 +1437,7 @@ async function costOverview(q: Query, options: CostReadOptions): Promise<CostOve
     // queries on that connection or multiply memory spikes when a large range is scanned.
     const grouped = await overviewGroups(tx, q, user);
     const total = grouped.total ?? (await totalRow(tx, q, user));
-    const meta = await overviewMeta(tx, q, user);
+    const meta = await overviewMeta(tx, q, user, options.loadCatalog);
     const totals = totalsFrom(total);
     totals.sharedFeeItems = meta.shared;
     const groupBy = (q.groupBy ?? "provider") as CostGroupBy;
@@ -1470,6 +1477,7 @@ function costWarnings(input: {
   unknownFee: number;
   shared: number;
   facetsTruncated: boolean;
+  catalogUnavailable: boolean;
 }): CostWarning[] {
   const warnings: CostWarning[] = [];
   if (input.unknownIdentity)
@@ -1486,6 +1494,8 @@ function costWarnings(input: {
     warnings.push({ code: "shared_skill_steps", count: input.shared, message: "多 Skill 共同步骤只计一次；按单个 Skill 相加会重复，因此标记为不可加总。" });
   if (input.facetsTruncated)
     warnings.push({ code: "facets_truncated", count: 1, message: "候选项过多，列表只显示前 50 项；可使用精确 ID 继续筛选。" });
+  if (input.catalogUnavailable)
+    warnings.push({ code: "skills_catalog_unavailable", count: 1, message: "技能目录读取或校验失败，技能候选项已降级为空；费用、服务商、模型统计和调用明细仍可使用。" });
   return warnings;
 }
 
@@ -1495,6 +1505,7 @@ function filtersDto(q: Query, user: FilterState) {
     service: q.service ?? null,
     operation: q.operation ?? null,
     model: q.model ?? null,
+    modelMissing: q.modelMissing ?? null,
     skillId: q.skillId ?? null,
     moduleId: q.moduleId ?? null,
     userId: user.userId,
@@ -1653,13 +1664,9 @@ function detailRow(
     });
   }
   const activationList = [...activations.values()];
-  const fallbackOwner =
-    row.owner_user_id === null && links.length && new Set(links.map((link) => link.session_owner_user_id)).size === 1
-      ? links[0]!.session_owner_user_id
-      : null;
-  const ownerUserId = row.owner_user_id ?? fallbackOwner;
-  const ownerKind: CostOwnerKind | null =
-    row.owner_kind ?? (ownerUserId !== null ? "member" : null);
+  // The base CTE is the sole owner authority, including conflicting and explicit non-member outcomes.
+  const ownerUserId = row.owner_user_id;
+  const ownerKind: CostOwnerKind | null = row.owner_kind;
   const user = ownerUserId === null ? null : users.get(ownerUserId);
   const attribution: CostSkillAttribution =
     activationList.length > 1

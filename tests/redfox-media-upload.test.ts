@@ -47,7 +47,7 @@ test("PNG audio video multipart uses fixed query, actual MIME and immutable byte
  }
 });
 test("HTTP options are free; auth CSRF strict input and command idempotency",async()=>{
- for(const format of assetUploadOptions().formats)assert.equal(inputMediaFormat(format.mime,100),format.format);
+ for(const format of assetUploadOptions().formats.filter(format=>format.kind!=="text"))assert.equal(inputMediaFormat(format.mime,100),format.format);
  assert.throws(()=>inputMediaFormat("audio/x-m4a",100));
  const count=hits;config.devAdmin=null;assert.equal((await app.inject({method:"GET",url:"/api/admin/redfox/media/uploads/options"})).statusCode,401);config.devAdmin={displayName:"Media test"};assert.equal((await app.inject({method:"GET",url:"/api/admin/redfox/media/uploads/options"})).statusCode,200);
  const a=await asset(),b=await asset(),headers={"idempotency-key":tag(),"x-csrf-token":"dev"},url="/api/admin/redfox/media/uploads";

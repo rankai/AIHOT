@@ -7,6 +7,7 @@ import { AdminPage, ButtonLink, Card } from "../../features/admin/ui";
 import { CostCenter } from "../../features/admin/costs";
 import {
   CostFilterError,
+  COST_MODEL_MISSING,
   costGroupBy,
   costPageView,
   costSearchParams,
@@ -51,11 +52,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     const username = search.get("username")?.trim().toLowerCase() || null;
     if (userId !== null && username) throw new CostFilterError("用户 ID 和用户名只能填写一个。");
 
+    const rawModelMissing = search.get("modelMissing");
+    if (rawModelMissing !== null && rawModelMissing !== "true") throw new CostFilterError("模型为空筛选值无效。");
+    const rawModel = search.get("model")?.trim() || null;
+    const model = rawModel === COST_MODEL_MISSING ? null : rawModel;
+    const modelMissing = rawModel === COST_MODEL_MISSING || rawModelMissing === "true" ? true : null;
+    if (model && modelMissing) throw new CostFilterError("模型 ID 和模型为空不能同时选择。");
+
     const filters: CostFilters = {
       billingProvider: search.get("billingProvider")?.trim() || null,
       service: search.get("service")?.trim() || null,
       operation: search.get("operation")?.trim() || null,
-      model: search.get("model")?.trim() || null,
+      model,
+      modelMissing,
       skillId,
       moduleId,
       userId,

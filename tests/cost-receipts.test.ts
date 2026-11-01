@@ -48,6 +48,97 @@ test("attempt price is frozen before dispatch; reuse preserves attribution and r
     await sql`DELETE FROM service_prices WHERE service=${service}`;
   }
 });
+test("unreliable provider costs become unknown without losing responses or rejection evidence", async () => {
+  const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
+  assertConfiguredTestDatabase(db!.name, db!.port);
+  const suffix = tag();
+  const service = `cost-evidence-${suffix}`;
+  const invalidAmounts: Array<string | number> = ["-0.01", -0.01, "100000000", "99999999.9999999", "00000000000000000000000000000000000000000001", "1e2", "not-a-number", Number.NaN, Number.POSITIVE_INFINITY, 1e21];
+  const receiptIds: number[] = [];
+  try {
+    for (const [index, amount] of invalidAmounts.entries()) {
+      const result = await paidRequest({
+        service,
+        model: "synthetic",
+        purpose: `received-${index}`,
+        identity: { suffix, index },
+      }, async () => ({
+        response: { received: index },
+        cost: { amount, currency: "CNY", basis: "actual" },
+      }));
+      receiptIds.push(result.receiptId);
+      const [row] = await sql`SELECT r.status,r.response,r.cost,r.currency,r.cost_basis,a.status AS attempt_status,a.response AS attempt_response,a.cost AS attempt_cost,a.currency AS attempt_currency,a.cost_basis AS attempt_cost_basis
+        FROM receipts r JOIN receipt_attempts a ON a.receipt_id=r.id WHERE r.id=${result.receiptId}`;
+      assert.equal(row!.status, "received");
+      assert.deepEqual(row!.response, { received: index });
+      assert.equal(row!.cost, null);
+      assert.equal(row!.currency, null);
+      assert.equal(row!.cost_basis, null);
+      assert.equal(row!.attempt_status, "received");
+      assert.equal(row!.attempt_response, null, "accepted attempt response is retained by the existing business/recovery path");
+      assert.equal(row!.attempt_cost, null);
+      assert.equal(row!.attempt_currency, null);
+      assert.equal(row!.attempt_cost_basis, null);
+    }
+
+    const validAmounts: Array<[string | number, string]> = [
+      [0.00035999999999999997, "0.000360"],
+      [0.0006000000000000001, "0.000600"],
+      ["1.0000000", "1.000000"],
+      ["0.0000004", "0.000000"],
+      ["99999999.9999994", "99999999.999999"],
+    ];
+    for (const [index, [amount, expected]] of validAmounts.entries()) {
+      const result = await paidRequest({
+        service,
+        model: "synthetic",
+        purpose: `valid-${index}`,
+        identity: { suffix, validAmountIndex: index },
+      }, async () => ({
+        response: { received: true },
+        cost: { amount, currency: "CNY", basis: "actual" },
+      }));
+      receiptIds.push(result.receiptId);
+      const [row] = await sql`SELECT cost::text FROM receipts WHERE id=${result.receiptId}`;
+      assert.equal(row!.cost, expected);
+    }
+
+    const rejection = new ProviderRejectedError("synthetic rejected response", 400, false, {
+      response: { rejected: true },
+      cost: { amount: "-1.25", currency: "CNY", basis: "actual" },
+    });
+    await assert.rejects(() => paidRequest({
+      service,
+      model: "synthetic",
+      purpose: "rejected",
+      identity: { suffix, rejected: true },
+    }, async () => { throw rejection; }), (error) => error === rejection);
+    const [row] = await sql`SELECT r.id,r.status,r.error,r.response,r.cost,r.currency,r.cost_basis,a.status AS attempt_status,a.response AS attempt_response,a.cost AS attempt_cost,a.currency AS attempt_currency,a.cost_basis AS attempt_cost_basis
+      FROM receipts r JOIN receipt_attempts a ON a.receipt_id=r.id WHERE r.service=${service} AND r.purpose='rejected'`;
+    receiptIds.push(row!.id);
+    assert.equal(row!.status, "failed");
+    assert.equal(row!.error, "synthetic rejected response");
+    assert.deepEqual(row!.response, { rejected: true });
+    assert.equal(row!.cost, null);
+    assert.equal(row!.currency, null);
+    assert.equal(row!.cost_basis, null);
+    assert.equal(row!.attempt_status, "failed");
+    assert.deepEqual(row!.attempt_response, { rejected: true });
+    assert.equal(row!.attempt_cost, null);
+    assert.equal(row!.attempt_currency, null);
+    assert.equal(row!.attempt_cost_basis, null);
+
+    const maximum = await paidRequest({ service, model: "synthetic", purpose: "maximum", identity: { suffix, maximum: true } }, async () => ({
+      response: { ok: true }, cost: { amount: "99999999.999999", currency: "CNY", basis: "actual" },
+    }));
+    receiptIds.push(maximum.receiptId);
+    const [maximumRow] = await sql`SELECT cost::text FROM receipts WHERE id=${maximum.receiptId}`;
+    assert.equal(maximumRow!.cost, "99999999.999999");
+  } finally {
+    if (receiptIds.length) await sql`DELETE FROM receipts WHERE id IN ${sql(receiptIds)}`;
+  }
+});
+
 test("official DeepSeek off-peak rates are frozen in the attempt snapshot", async () => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db!.name, db!.port);

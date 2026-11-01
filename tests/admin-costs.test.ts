@@ -748,11 +748,24 @@ test("historical owner recovery keeps unique actors and leaves conflicting recei
   const systemRun = await addRun("scheduler");
   const sharedRunA = await addRun(`user:${userA!.id}`);
   const sharedRunB = await addRun(`user:${userB!.id}`);
+  const sessionId = randomUUID();
+  const turnId = randomUUID();
   const directReceipt = await addReceipt(`cost.owner.direct.${suffix}`);
   const adminReceipt = await addReceipt(`cost.owner.admin.${suffix}`);
   const systemReceipt = await addReceipt(`cost.owner.system.${suffix}`);
   const sharedReceipt = await addReceipt(`cost.owner.shared.${suffix}`);
+  const explicitReceipts: Record<"admin" | "system" | "unassigned", number> = {
+    admin: await addReceipt(`cost.owner.explicit.admin.${suffix}`),
+    system: await addReceipt(`cost.owner.explicit.system.${suffix}`),
+    unassigned: await addReceipt(`cost.owner.explicit.unassigned.${suffix}`),
+  };
   try {
+    await sql`INSERT INTO assistant_sessions(id,owner_user_id,assistant_id,assistant_name,profile_version,title,command_key,command_hash)
+      VALUES (${sessionId},${userA!.id},'creative','创作助手','v1','归属测试',${randomUUID()},${`session-${suffix}`})`;
+    await sql`INSERT INTO assistant_turns(id,session_id,parent_operation_run_id,command_key,command_hash,snapshot)
+      VALUES (${turnId},${sessionId},${sharedRunA},${randomUUID()},${`turn-${suffix}`},'{}')`;
+    await sql`INSERT INTO assistant_model_steps(id,turn_id,model_ordinal,operation_step_version,request_snapshot,request_hash,receipt_id,cost_context_version)
+      VALUES (${randomUUID()},${turnId},1,1,'{}',${`shared-step-${suffix}`},${sharedReceipt},1)`;
     await sql`INSERT INTO receipt_attempts(
       receipt_id,attempt,service,model,origin,status,started_at,environment,operation_run_id
     ) VALUES
@@ -825,12 +838,85 @@ test("historical owner recovery keeps unique actors and leaves conflicting recei
     });
     assert.equal(userOnly.view, "details");
     if (userOnly.view === "details") assert.equal(userOnly.rows.length, 0);
+
+    const grouped = await costs({ start, end, view: "overview", groupBy: "user", service: `cost.owner.shared.${suffix}`, limit: 50 });
+    assert.equal(grouped.view, "overview");
+    if (grouped.view === "overview") {
+      assert.equal(grouped.groups.length, 1);
+      assert.equal(grouped.groups[0]!.userId, null);
+      assert.equal(grouped.groups[0]!.ownerKind, null);
+    }
+    for (const kind of ["admin", "system", "unassigned"] as const) {
+      const receiptId = explicitReceipts[kind];
+      await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,started_at,environment,owner_kind)
+        VALUES (${receiptId},1,${`cost.owner.explicit.${kind}.${suffix}`},NULL,'live','received',
+          ${new Date("2038-01-10T05:00:00.000Z")},'test',${kind})`;
+      await sql`INSERT INTO assistant_model_steps(id,turn_id,model_ordinal,operation_step_version,request_snapshot,request_hash,receipt_id,cost_context_version)
+        VALUES (${randomUUID()},${turnId},${kind === "admin" ? 2 : kind === "system" ? 3 : 4},${kind === "admin" ? 2 : kind === "system" ? 3 : 4},'{}',${`${kind}-step-${suffix}`},${receiptId},1)`;
+      const service = `cost.owner.explicit.${kind}.${suffix}`;
+      const details = await costs({ start, end, view: "details", service, limit: 50 });
+      assert.equal(details.view, "details");
+      if (details.view === "details") {
+        assert.equal(details.rows[0]!.owner.kind, kind);
+        assert.equal(details.rows[0]!.owner.userId, null);
+        assert.equal(details.rows[0]!.owner.username, null);
+      }
+      const overview = await costs({ start, end, view: "overview", groupBy: "user", service, limit: 50 });
+      assert.equal(overview.view, "overview");
+      if (overview.view === "overview") {
+        assert.equal(overview.groups[0]!.ownerKind, kind);
+        assert.equal(overview.groups[0]!.userId, null);
+      }
+    }
   } finally {
     if (createdRuns.length)
       await sql`DELETE FROM operation_results WHERE run_id IN ${sql(createdRuns)}`;
-    await sql`DELETE FROM receipts WHERE id IN ${sql(createdReceipts)}`;
+    await sql`UPDATE assistant_model_steps SET receipt_id=NULL WHERE turn_id=${turnId}`;
+    await sql`DELETE FROM assistant_model_steps WHERE turn_id=${turnId}`;
+    await sql`DELETE FROM assistant_turns WHERE id=${turnId}`;
+    await sql`DELETE FROM assistant_sessions WHERE id=${sessionId}`;
+    if (createdReceipts.length) await sql`DELETE FROM receipts WHERE id IN ${sql(createdReceipts)}`;
     if (createdRuns.length)
       await sql`DELETE FROM operation_runs WHERE id IN ${sql(createdRuns)}`;
     await sql`DELETE FROM site_users WHERE id IN ${sql([userA!.id, userB!.id])}`;
+  }
+});
+
+test("model-null groups close into exact details", async () => {
+  const [database] = await sql`SELECT current_database() name,inet_server_port() port`;
+  assertConfiguredTestDatabase(database!.name, database!.port);
+  const suffix = tag();
+  const range = { start: "2041-01-01T00:00:00.000Z", end: "2041-02-01T00:00:00.000Z" };
+  const service = `cost.catalog.${suffix}`;
+  const created: number[] = [];
+  try {
+    for (const model of [null, "known-model"]) {
+      const id = await receipt(service, "catalog-test", model);
+      created.push(id);
+      await sql`INSERT INTO receipt_attempts(receipt_id,attempt,service,model,origin,status,started_at,environment,
+          billing_provider,operation_id,model_id,cost,currency,cost_basis)
+        VALUES (${id},1,${service},${model},'live','received',${new Date("2041-01-10T00:00:00.000Z")},'test',
+          'catalog-fixture','catalog.operation',${model},1.25,'CNY','actual')`;
+    }
+    const grouped = await costs({ ...range, view: "overview", groupBy: "model", billingProvider: "catalog-fixture", limit: 50 });
+    assert.equal(grouped.view, "overview");
+    if (grouped.view === "overview") assert.equal(grouped.groups.find((group) => group.model === null)?.totals.attempts, 1);
+    const missing = await costs({ ...range, view: "details", billingProvider: "catalog-fixture", modelMissing: true, limit: 50 });
+    assert.equal(missing.view, "details");
+    if (missing.view === "details") {
+      assert.equal(missing.rows.length, 1);
+      assert.equal(missing.rows[0]!.model, null);
+      assert.equal(missing.filters.modelMissing, true);
+    }
+    const ordinary = await costs({ ...range, view: "details", billingProvider: "catalog-fixture", limit: 50 });
+    assert.equal(ordinary.view, "details");
+    if (ordinary.view === "details") assert.equal(ordinary.rows.length, 2);
+    const directQuery = await costs({ ...range, view: "details", billingProvider: "catalog-fixture", modelMissing: "true" as never, limit: 50 });
+    assert.equal(directQuery.view, "details");
+    if (directQuery.view === "details") assert.deepEqual(directQuery.rows.map((row) => row.model), [null]);
+    await assert.rejects(() => costs({ ...range, view: "details", model: "known-model", modelMissing: true }));
+
+  } finally {
+    if (created.length) await sql`DELETE FROM receipts WHERE id IN ${sql(created)}`;
   }
 });

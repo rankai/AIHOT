@@ -335,6 +335,24 @@ async function checkBudget(tx: Db, service: string, scope: BudgetScope | null = 
   if (c.day >= budget.per_day) throw new BudgetExceededError(service, "day", 3600, scope);
 }
 
+/** Provider cost is untrusted evidence. Keep the response, but never let its amount break receipt persistence. */
+function reliableCost(cost: CallOutcome["cost"]): CallOutcome["cost"] {
+  if (!cost) return null;
+  let amount: string;
+  if (typeof cost.amount === "number") {
+    if (!Number.isFinite(cost.amount) || cost.amount < 0) return null;
+    amount = cost.amount.toFixed(6);
+  } else {
+    amount = cost.amount;
+  }
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(amount);
+  if (!match || match[1]!.length > 8) return null;
+  const fraction = (match[2] ?? "").padEnd(7, "0");
+  const micros = BigInt(match[1]) * 1_000_000n + BigInt(fraction.slice(0, 6)) + (Number(fraction[6]) >= 5 ? 1n : 0n);
+  if (micros > 99_999_999_999_999n) return null;
+  return { ...cost, amount: microsText(micros) };
+}
+
 /**
  * Runs a paid request at most once per logical key and returns its raw response.
  * The caller parses the response and commits business results, then calls completeReceipt.
@@ -423,7 +441,7 @@ export async function paidRequest(req: ReceiptRequest, call: (context: { priceSn
   const { id: receiptId, attemptId, attempt, priceSnapshot } = claimed;
   const started = Date.now();
   const usageFor = (actual: CallOutcome["usage"]) => req.estimatedUsage ? { ...req.estimatedUsage, ...actual } : actual;
-  const costFor = (outcome: CallOutcome) => outcome.cost;
+  const costFor = (outcome: CallOutcome) => reliableCost(outcome.cost);
   let outcome: CallOutcome;
   try {
     outcome = await call({ priceSnapshot });
