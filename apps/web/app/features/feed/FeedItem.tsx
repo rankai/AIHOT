@@ -38,7 +38,7 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
   };
 
   return (
-    <article className="relative min-w-0 lg:card lg:card-hover lg:px-[18px] lg:pb-[14px] lg:pt-[15px]" data-item-id={item.id}>
+    <article className="relative min-w-0 lg:card lg:card-hover lg:p-5" data-item-id={item.id}>
       <header className="flex min-h-[18px] items-center gap-2 text-[12.5px] leading-[18px] text-ink-4">
         <SourceLine item={item} className="text-ink-4" />
         {item.video && <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-3"><IconMonitor size={12} />视频</span>}
@@ -68,7 +68,7 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
         </p>
       ) : (
         <>
-          <h3 className={`mt-2 line-clamp-2 text-[17px] font-bold leading-[1.55] lg:line-clamp-none lg:font-[650] ${read ? "text-ink-4" : "text-ink"}`}>
+          <h3 className={`mt-2 line-clamp-2 text-[17px] font-semibold leading-[1.55] lg:line-clamp-none lg:font-medium ${read ? "text-ink-4" : "text-ink"}`}>
             <IntentLink to={`/items/${item.id}`} onClick={open} className="after:absolute after:inset-0 after:content-['']">
               {item.title}
             </IntentLink>

@@ -18,7 +18,7 @@ export default function LeaderboardFrame() {
     <div className="pb-10">
       <header className="flex flex-col gap-3 pb-4 pt-5 sm:flex-row sm:items-end sm:justify-between lg:pt-1">
         <div>
-          <div className="mono text-[11px] font-semibold tracking-[0.16em] text-accent">{SITE.name.toUpperCase()} LEADERBOARD</div>
+          <div className="mono text-[12px] text-accent">{SITE.name} · 模型评测</div>
           <h1 className="mt-1.5 text-[24px] font-semibold leading-[1.3] text-ink">{navigationLabel(presentation, "leaderboard", "AI 模型排行榜")}</h1>
         </div>
         <div className="flex gap-2">

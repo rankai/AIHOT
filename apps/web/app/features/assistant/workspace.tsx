@@ -15,6 +15,7 @@ import {
   IconClose,
   IconMenu,
   IconMessage,
+  IconPlus,
 } from "../../components/icons";
 import { ThemeSwitch } from "../../components/shell/ThemeSwitch";
 import { AccountLink } from "../../components/shell/AccountLink";
@@ -215,9 +216,10 @@ export function AssistantWorkspace({
           </p>
           <Link
             to={assistantHref(assistantId)}
-            className="assistant-new-conversation"
+            className="assistant-new-conversation flex items-center gap-2"
           >
-            ＋ 新对话
+            <IconPlus size={16} />
+            新对话
           </Link>
           <nav aria-label="选择助手">
             {(

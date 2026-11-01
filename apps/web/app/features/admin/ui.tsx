@@ -10,7 +10,7 @@ export function AdminPage({ title, subtitle, actions, children }: { title: React
     <div className="mx-auto w-full max-w-[1320px] px-4 pb-24 pt-6 sm:px-6 lg:px-8 lg:pt-8">
       <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink sm:text-[24px]">{title}</h1>
+          <h1 className="text-[22px] font-medium text-ink sm:text-[24px]">{title}</h1>
           {subtitle && <p className="mt-1 text-[13.5px] leading-relaxed text-ink-3">{subtitle}</p>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -25,7 +25,7 @@ export function Card({ title, right, children, className = "", pad = true }: { t
     <section className={`rounded-panel bg-surface ring-1 ring-line ${className}`}>
       {(title || right) && (
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <h2 className="text-[14px] font-semibold text-ink">{title}</h2>
+          <h2 className="text-[14px] font-medium text-ink">{title}</h2>
           {right && <div className="flex items-center gap-2 text-[12.5px] text-ink-3">{right}</div>}
         </div>
       )}
@@ -39,7 +39,7 @@ export function Stat({ label, value, hint, tone }: { label: ReactNode; value: Re
   return (
     <div className="rounded-panel bg-surface px-4 py-3.5 ring-1 ring-line">
       <div className="text-[12.5px] text-ink-3">{label}</div>
-      <div className={`num mt-1 text-[22px] font-semibold tracking-tight ${color}`}>{value}</div>
+      <div className={`num mt-1 text-[28px] font-medium leading-8 ${color}`}>{value}</div>
       {hint && <div className="mt-0.5 text-[12px] text-ink-4">{hint}</div>}
     </div>
   );
@@ -57,7 +57,7 @@ const TONES: Record<Tone, string> = {
 
 export function Badge({ tone = "muted", children, title }: { tone?: Tone; children: ReactNode; title?: string }) {
   return (
-    <span title={title} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium ring-1 ${TONES[tone]}`}>
+    <span title={title} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-mark px-2 py-0.5 text-[12px] font-medium ring-1 ${TONES[tone]}`}>
       {children}
     </span>
   );
@@ -66,10 +66,7 @@ export function Badge({ tone = "muted", children, title }: { tone?: Tone; childr
 export function Dot({ tone }: { tone: Tone }) {
   const c = tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-amber" : tone === "bad" ? "bg-hot" : tone === "accent" ? "bg-accent" : "bg-ink-4";
   return (
-    <span className="relative inline-flex size-2">
-      {tone === "bad" && <span className={`absolute inline-flex size-full animate-ping rounded-full opacity-50 ${c}`} />}
-      <span className={`relative inline-flex size-2 rounded-full ${c}`} />
-    </span>
+    <span className={`inline-flex size-2 rounded-full ${c}`} />
   );
 }
 
@@ -153,8 +150,8 @@ export function Button({
       type="button"
       {...rest}
       disabled={rest.disabled || busy}
-      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[opacity,transform] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-45 ${
-        size === "sm" ? "h-7 px-2.5 text-[12.5px]" : "h-9 px-3.5 text-[13.5px]"
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[color,background-color,opacity,transform] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-45 ${
+        size === "sm" ? "h-8 px-3 text-[13px]" : "h-9 px-4 text-[14px]"
       } ${BTN[tone]} ${className}`}
     >
       {busy && <span className="size-3 animate-spin rounded-full border-[1.5px] border-current border-r-transparent" />}
@@ -167,8 +164,8 @@ export function ButtonLink({ to, children, tone = "secondary", size = "md" }: { 
   return (
     <Link
       to={to}
-      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-opacity ${
-        size === "sm" ? "h-7 px-2.5 text-[12.5px]" : "h-9 px-3.5 text-[13.5px]"
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-control font-medium transition-[color,background-color,opacity] ${
+        size === "sm" ? "h-8 px-3 text-[13px]" : "h-9 px-4 text-[14px]"
       } ${BTN[tone]}`}
     >
       {children}
@@ -222,7 +219,7 @@ export function FilterChips({ param, options }: { param: string; options: Array<
             key={o.value || "all"}
             to={`?${next}`}
             preventScrollReset
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] ${active ? "bg-ink text-bg" : "bg-surface text-ink-2 ring-1 ring-line hover:bg-bg-sunk"}`}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-control px-3 text-[13px] transition-colors ${active ? "bg-ink text-bg" : "bg-surface text-ink-2 ring-1 ring-line hover:bg-bg-sunk"}`}
           >
             {o.label}
             {o.count !== undefined && <span className={`num text-[11.5px] ${active ? "text-bg/70" : "text-ink-4"}`}>{o.count}</span>}

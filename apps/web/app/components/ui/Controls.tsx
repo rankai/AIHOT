@@ -3,18 +3,18 @@ import { IconChevronDown } from "../icons";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-contrast hover:bg-accent-ink disabled:opacity-45",
-  secondary: "border border-line-strong bg-surface text-ink-2 hover:border-ink-4 hover:text-ink disabled:opacity-50",
+  primary: "bg-accent text-accent-contrast hover:bg-accent-ink dark:bg-ink dark:text-bg dark:hover:bg-ink-2 disabled:opacity-45",
+  secondary: "border border-line bg-surface text-ink-2 hover:border-line-strong hover:bg-bg-sunk hover:text-ink disabled:opacity-50",
   ghost: "text-ink-3 hover:bg-bg-sunk hover:text-ink disabled:opacity-50",
   danger: "bg-hot text-white dark:text-bg hover:opacity-90 disabled:opacity-45",
 };
 
 type Size = "sm" | "md" | "lg";
-const SIZES: Record<Size, string> = { sm: "h-8 px-3 text-[12.5px]", md: "h-9 px-4 text-[13.5px]", lg: "h-11 px-5 text-[14.5px]" };
+const SIZES: Record<Size, string> = { sm: "h-8 px-3 text-[13px]", md: "h-9 px-4 text-[14px]", lg: "h-11 px-5 text-[14px]" };
 
-/** The pill button's classes, for links that look like buttons. */
+/** Shared button classes for actions and links that look like actions. */
 export function buttonClass(variant: Variant = "secondary", size: Size = "md"): string {
-  return `inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-[border-color,transform] duration-150 active:scale-[0.98] ${SIZES[size]} ${VARIANTS[variant]}`;
+  return `inline-flex items-center justify-center gap-2 rounded-control font-medium transition-[color,background-color,border-color,opacity,transform] duration-150 active:scale-[0.98] ${SIZES[size]} ${VARIANTS[variant]}`;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size }>(function Button(
@@ -31,12 +31,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
   );
 });
 
-/** Native select as a pill, like the site's other controls. */
+/** Native select sharing the site's compact control geometry. */
 export function Select({ className = "", children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className={`relative inline-flex ${className}`}>
       <select
-        className="h-8 w-full cursor-pointer appearance-none rounded-full border border-line-strong bg-surface py-0 pl-3.5 pr-8 text-[12.5px] text-ink-2 outline-none transition-colors hover:border-ink-4 focus:border-accent"
+        className="h-8 w-full cursor-pointer appearance-none rounded-control border border-line bg-surface py-0 pl-3 pr-8 text-[13px] text-ink-2 outline-none transition-colors hover:border-line-strong focus:border-accent"
         {...rest}
       >
         {children}

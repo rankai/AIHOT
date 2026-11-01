@@ -48,7 +48,7 @@ function Figure({ n, unit }: { n: number; unit: string }) {
   const f = figure(n);
   return (
     <div className="flex items-baseline gap-1.5">
-      <span className="num text-[30px] font-black leading-none tracking-[-0.03em] text-ink xl:text-[36px]">{f.value}</span>
+      <span className="num text-[30px] font-medium leading-none tracking-[-0.03em] text-ink xl:text-[36px]">{f.value}</span>
       <span className="text-[13px] text-ink-3">
         {f.unit}
         {unit}
@@ -149,7 +149,7 @@ function Maker({ maker, contact }: { maker: NonNullable<typeof ABOUT.maker>; con
     <section aria-labelledby="maker" className="mt-20 grid gap-10 xl:mt-28 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-16">
       <div>
         <Kicker>做这个站的人</Kicker>
-        <h2 id="maker" className="mt-4 flex items-center gap-3.5 text-[26px] font-black leading-[1.3] tracking-[-0.02em] text-ink xl:gap-4 xl:text-[34px]">
+        <h2 id="maker" className="mt-4 flex items-center gap-4 text-[26px] font-medium leading-[1.3] tracking-[-0.02em] text-ink xl:text-[34px]">
           {contact.makerAvatar && <MakerFace src={contact.makerAvatar} />}
           <span>
             嗨，我是 <span className="whitespace-nowrap text-accent">{maker.name}</span>
@@ -187,7 +187,7 @@ function Latest({ item, className = "" }: { item: SiteStats["latest"][number] | 
   if (!item) return null;
   return (
     <Link to={`/items/${item.id}`} prefetch="intent" className={`group block ${className}`}>
-      <span className="text-[11px] font-semibold tracking-[0.2em] text-accent">最近精选</span>
+      <span className="text-[12px] font-medium text-accent">最近精选</span>
       <span key={item.id} className="animate-fade-up mt-1.5 block">
         <span className="line-clamp-2 text-[13.5px] font-semibold leading-[1.55] text-ink transition-colors group-hover:text-accent">{item.title}</span>
         <span className="mt-1 block truncate text-[12px] text-ink-4">{shortSourceName(item.source)}</span>
@@ -218,7 +218,7 @@ export default function AboutPage() {
       <header className="grid items-end gap-8 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div>
           <Kicker>{ABOUT.kicker}</Kicker>
-          <h1 className="mt-5 text-[34px] font-black leading-[1.18] tracking-[-0.03em] text-ink [text-wrap:balance] sm:text-[46px] xl:text-[56px] 2xl:text-[64px]">
+          <h1 className="mt-5 text-[34px] font-medium leading-[1.18] tracking-[-0.03em] text-ink [text-wrap:balance] sm:text-[46px] xl:text-[56px] 2xl:text-[64px]">
             {ABOUT.headline[0]}
             <br />
             <span className="text-accent">{ABOUT.headline[1]}</span>
@@ -263,8 +263,8 @@ export default function AboutPage() {
               className={`border-line py-6 outline-none transition-colors ${STAGE_CELL[i]} ${focus === i ? "bg-accent-softer" : ""}`}
             >
               <div className="flex items-baseline gap-2.5">
-                <span className="num text-[12px] font-bold tracking-[0.12em] text-accent">{s.no}</span>
-                <h3 className="text-[17px] font-bold text-ink">{s.title}</h3>
+                <span className="num text-[12px] font-medium text-accent">{s.no}</span>
+                <h3 className="text-[17px] font-medium text-ink">{s.title}</h3>
               </div>
               {s.figure && <div className="mt-4">{s.figure}</div>}
               <p className="mt-3 text-[14px] leading-[1.8] text-ink-3">{s.text}</p>

@@ -17,6 +17,7 @@ import { AssistantComposerControls } from "./composer-controls";
 import { AssistantAttachmentCards, useAssistantMaterials } from "./materials";
 import { attachmentsReady } from "./materials-data";
 import { AssistantUnsavedGuard } from "./unsaved";
+import { RingMark } from "../../components/Logo";
 export { AssistantHistory } from "./history";
 
 export function AssistantActions({
@@ -155,10 +156,8 @@ function EntryContent({
           <>
             <div className="assistant-message-scroll assistant-entry-welcome">
               <div className="assistant-welcome">
-                <div className="assistant-welcome-mark" aria-hidden="true">
-                  ✳
-                </div>
-                <h2 className="text-[27px] font-semibold tracking-tight text-ink">
+                <RingMark className="assistant-welcome-mark size-9 text-accent" />
+                <h2 className="text-[28px] font-medium leading-tight text-ink">
                   {assistantId === "creative"
                     ? "把想法变成一篇好稿"
                     : "一起写出下一篇小红书"}

@@ -27,8 +27,11 @@ function Thumb({ id }: { id: string }) {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (entrance && !reduce && prev && now.at - prev.at < 1000 && (prev.left !== now.left || prev.width !== now.width) && el.animate) {
       el.animate(
-        [{ transform: `translateX(${prev.left - now.left}px)`, width: `${prev.width}px` }, { transform: "translateX(0)", width: `${now.width}px` }],
-        { duration: 300, easing: "cubic-bezier(0.25, 1, 0.5, 1)" },
+        [
+          { transform: `translateX(${prev.left - now.left}px) scaleX(${prev.width / now.width})` },
+          { transform: "translateX(0) scaleX(1)" },
+        ],
+        { duration: 200, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
       );
     }
     return () => {

@@ -209,7 +209,7 @@ export default function StoryPage() {
           热点事件
           <Badge tone={status.tone}>{status.label}</Badge>
         </div>
-        <h1 className="mt-2.5 text-[27px] font-bold leading-[1.5] tracking-[-0.01em] text-ink lg:mt-3 lg:text-[36px] lg:font-[730]">{story.title}</h1>
+        <h1 className="mt-2.5 text-[27px] font-medium leading-[1.5] tracking-[-0.01em] text-ink lg:mt-3 lg:text-[36px]">{story.title}</h1>
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12.5px] text-ink-3">
           <span className="inline-flex items-center gap-1.5">
             <IconDoc size={15} className="text-ink-4" />
