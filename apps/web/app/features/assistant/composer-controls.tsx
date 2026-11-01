@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { AssistantArtifact, AssistantFeeAuthorization, AssistantOptions, AssistantProfileDto } from "@aihot/contracts/assistant";
+import { IconApps } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
 
 export function AssistantComposerControls({ profile, actionId, onAction, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled }: {
@@ -17,7 +18,7 @@ export function AssistantComposerControls({ profile, actionId, onAction, disable
   return <div className="assistant-composer-controls">
     <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
     <details className="assistant-add-menu" ref={menu}>
-      <summary aria-label="添加材料" aria-disabled={disabled} onClick={(event) => { if (disabled) event.preventDefault(); }}><span aria-hidden="true">＋</span><span className="assistant-control-long"> 添加材料</span></summary>
+      <summary aria-label="添加材料" title="添加材料" aria-disabled={disabled} onClick={(event) => { if (disabled) event.preventDefault(); }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></summary>
       <div>
         <button type="button" disabled={disabled} onClick={() => { menu.current?.removeAttribute("open"); input.current?.click(); }}>上传 TXT / MD 文件</button>
         <button type="button" disabled={disabled || !artifacts.length} onClick={() => { menu.current?.removeAttribute("open"); setPickArtifact(true); }}>引用已保存稿件{!artifacts.length ? "（暂无）" : ""}</button>
@@ -26,6 +27,7 @@ export function AssistantComposerControls({ profile, actionId, onAction, disable
     </details>
     <label className="assistant-skill-control" title={label}>
       <span className="sr-only">选择技能，当前{label}</span>
+      <IconApps size={16} />
       <select value={actionId ?? ""} disabled={disabled} aria-label={`选择技能，当前${label}`} onChange={(event) => onAction(event.target.value || null)}>
         <option value="">自动选择技能</option>
         {profile.actions.map((action) => <option key={action.actionId} value={action.actionId} disabled={!action.available}>{action.label}{!action.available ? " · 未开放" : ""}</option>)}
