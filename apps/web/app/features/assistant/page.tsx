@@ -1,4 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useAssistantOptions, unavailableSelection } from "./use-options";
+import { saveRecovery } from "./recovery-store";
+import type { AssistantInitialRequest } from "@aihot/contracts/assistant";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { AccountMe } from "@aihot/contracts/account";
 import type {
@@ -13,7 +16,7 @@ import { sessionHref, type SessionPage } from "./data";
 import { draftKey, rememberDraft, useAssistantDraft } from "./drafts";
 import { AssistantWorkspace } from "./workspace";
 import { AssistantComposer } from "./composer";
-import { AssistantComposerControls } from "./composer-controls";
+import { AssistantComposerControls, AssistantSkillNotice } from "./composer-controls";
 import { AssistantAttachmentCards, useAssistantMaterials } from "./materials";
 import { attachmentsReady } from "./materials-data";
 import { AssistantUnsavedGuard } from "./unsaved";
@@ -82,18 +85,27 @@ function EntryContent({
   data: AssistantEntryData;
   assistantId: AssistantId;
 }) {
-  const profile = data.options.assistants.find((row) => row.id === assistantId);
+  const { options, refresh: refreshOptions, error: optionsError } = useAssistantOptions(data.options);
+  const profile = options.assistants.find((row) => row.id === assistantId);
   const identity = String(data.me.user.id);
   const key = draftKey(identity, assistantId);
   const [draft, update, ready] = useAssistantDraft(
     key,
   );
-  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: data.options.inputCapabilities, update, invalidate: () => {} });
+  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: options.inputCapabilities, update, invalidate: () => {} });
   const command = useToolCommand(
     data.me.csrf,
     `assistant:entry:${assistantId}`,
   );
   const navigate = useNavigate();
+  const [createdSession, setCreatedSession] = useState<string | null>(null);
+  // Navigate after the cleared frozen command has rendered. The child blocker then
+  // sees only a genuinely newer draft, which still requires the ordinary guard.
+  useEffect(() => {
+    if (!createdSession || draft.pendingCreate) return;
+    setCreatedSession(null);
+    navigate(sessionHref(createdSession));
+  }, [createdSession, draft.pendingCreate, navigate]);
   const alive = useRef(true);
   const creating = useRef(false);
   useEffect(() => {
@@ -107,9 +119,9 @@ function EntryContent({
       !ready ||
       command.pending ||
       creating.current ||
-      !profile?.available ||
+      (!draft.pendingCreate && !configureFees && (!profile?.available || unavailableSelection(profile, draft.actionId))) ||
       (!draft.text.trim() && !draft.pendingCreate && !configureFees) ||
-      !attachmentsReady(draft.attachments)
+      (!draft.pendingCreate && !attachmentsReady(draft.attachments))
     )
       return;
     creating.current = true;
@@ -118,6 +130,7 @@ function EntryContent({
       actionId: draft.actionId,
       attachments: draft.attachments,
       configureFees,
+      unknown: false,
     };
     if (!draft.pendingCreate)
       update((previous) => ({
@@ -127,26 +140,37 @@ function EntryContent({
         attachments: [],
         pendingCreate: frozen,
       }));
-    const result = await command.run<{ sessionId: string }>(
+    const result = await command.run<{ sessionId: string; initialRequest: AssistantInitialRequest | null }>(
       "/api/assistant/sessions",
-      { assistantId, title: Array.from(frozen.text.replace(/\s+/g, " ")).slice(0, 60).join("") || "新创作" },
+      { assistantId, title: Array.from(frozen.text.replace(/\s+/g, " ")).slice(0, 60).join("") || "新创作",
+        ...(!frozen.configureFees ? { initialRequest: { message: frozen.text, skillSelection: frozen.actionId ? { actionId: frozen.actionId } : null, attachments: (frozen.attachments ?? []).map(row => ({ assetKey: row.assetKey })) } } : {}) },
     );
     creating.current = false;
-    if (!result) return;
+    if (!result) {
+      const status = command.failure.current?.status;
+      if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => !previous.text && !previous.attachments?.length
+        ? { ...previous, pendingCreate: undefined, text: frozen.text, actionId: frozen.actionId, attachments: frozen.attachments }
+        : { ...previous, pendingCreate: { ...frozen, rejected: true } });
+      else update(previous => ({ ...previous, pendingCreate: { ...frozen, unknown: true } }));
+      return;
+    }
+    if (result.initialRequest) {
+      try { saveRecovery(draftKey(identity, result.sessionId), { kind: "quote", value: result.initialRequest }); }
+      catch { /* The session retains an explicit recovery action if browser storage fails. */ }
+    }
     rememberDraft(draftKey(identity, result.sessionId), {
-      ...frozen,
-      autoQuote: !frozen.configureFees,
+      ...(frozen.configureFees ? frozen : { text: "", actionId: null, attachments: [] }),
     });
     update((previous) =>
       previous.pendingCreate === frozen
         ? { ...previous, pendingCreate: undefined }
         : previous,
     );
-    if (alive.current) navigate(sessionHref(result.sessionId));
+    if (alive.current) setCreatedSession(result.sessionId);
   }
   const title = assistantId === "creative" ? "创作助手" : "小红书助手";
   return (
-    <AssistantUnsavedGuard hasDraft={!!draft.text || !!draft.attachments?.length}>
+    <AssistantUnsavedGuard hasDraft={!!draft.text || !!draft.attachments?.length || !!draft.pendingCreate}>
       <AssistantWorkspace
         assistantId={assistantId}
         history={data.history}
@@ -199,17 +223,19 @@ function EntryContent({
               text={draft.text}
               onChange={(text) => update((previous) => ({ ...previous, text }))}
               onSend={() => void send()}
-              disabled={!ready || !profile?.available || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
+              disabled={!ready || !profile?.available || unavailableSelection(profile, draft.actionId) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
               busy={command.pending}
-              maxLength={data.options.limits.inputCharacters}
+              maxLength={options.limits.inputCharacters}
               hint={
                 command.pending
                   ? "正在免费建立会话，随后确认本次费用…"
                   : undefined
               }
-              controls={profile && <AssistantComposerControls profile={profile} actionId={draft.actionId} onAction={(actionId) => update((previous) => ({ ...previous, actionId }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={data.options.inputCapabilities} configureFees={() => void send(true)} />}
-              attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={data.options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
+              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} actionId={draft.actionId} onAction={(actionId) => update((previous) => ({ ...previous, actionId }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} configureFees={() => void send(true)} />}
+              attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
+              {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
+              {unavailableSelection(profile, draft.actionId) && <AssistantSkillNotice />}
               {draft.pendingCreate && (
                 <div className="assistant-inline-notice" role="status">
                   <p>
@@ -226,6 +252,7 @@ function EntryContent({
                       重试原建会话命令
                     </Button>
                   )}
+                  {draft.pendingCreate.rejected && <><Button size="sm" disabled={!!draft.text || !!draft.attachments?.length} onClick={() => update(previous => previous.pendingCreate ? { ...previous, text: previous.pendingCreate.text, actionId: previous.pendingCreate.actionId, attachments: previous.pendingCreate.attachments, pendingCreate: undefined } : previous)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
                   <p className="mt-2 text-[11px] text-ink-4">
                     本次页面会话内可按原命令恢复；刷新或重新登录后先核对历史，不自动重发。
                   </p>

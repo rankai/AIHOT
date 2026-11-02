@@ -280,6 +280,13 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(composerWithFiles.indexOf("<form") < composerWithFiles.indexOf("同框参考.md"), "file cards belong inside the rounded input form");
     assert(composerWithFiles.indexOf("同框参考.md") < composerWithFiles.indexOf("<textarea"), "files appear above the text input");
     assert(composerWithFiles.indexOf("</textarea>") < composerWithFiles.indexOf("底部材料技能费用"), "the input controls remain below the textarea");
+    const removedSelection = renderToStaticMarkup(createElement(AssistantComposerControls, {
+      profile: { ...options.assistants[0], actions: [] }, actionId: "xiaohongshu-write", onAction() {}, disabled: false,
+      addFiles() {}, capabilities: options.inputCapabilities, configureFees() {},
+    }));
+    assert.match(removedSelection, /value="unavailable" disabled="" selected=""/);
+    assert(removedSelection.includes("原技能不可用，请重新选择"));
+    assert(!removedSelection.includes('value="xiaohongshu-write"'));
     for (const remaining of [0, 800, 2147483647]) {
       const controls = renderToStaticMarkup(createElement(AssistantComposerControls, {
         profile: options.assistants[0], actionId: null, onAction() {}, disabled: false, addFiles() {},
@@ -289,6 +296,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       assert.match(controls, new RegExp(`<span class="assistant-fee-remaining">剩余 ${remaining} 积分</span>`), "remaining allowance must be rendered text outside responsive hidden labels");
       assert(controls.includes('<span class="assistant-control-short">自动</span>'), "mobile label preserves automatic mode");
       assert(controls.includes('class="assistant-fee-menu-options"'));
+      assert(!controls.includes('value="wechat"'), "unimplemented skills are not dropdown choices");
       assert(controls.includes('aria-pressed="false">每次确认</button>'));
       assert(controls.includes('aria-pressed="true">额度内自动</button>'));
     }

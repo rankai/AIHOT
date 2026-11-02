@@ -37,7 +37,7 @@ export async function assistantOptions(userId: number): Promise<AssistantOptions
       available: profileActions(p.id).some(a => availability(a).available),
       reason: profileActions(p.id).some(a => availability(a).available) ? null : profileActions(p.id).map(a => availability(a).reason).find(Boolean) ?? "暂无可用技能",
       actions: [
-        ...profileActions(p.id).map(a => ({ actionId: a.actionId, label: a.label, ...availability(a) })),
+        ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, label: a.label, ...availability(a) })),
         { actionId: "wechat", label: "公众号创作", available: false, reason: "未开放" },
       ],
     })),
@@ -50,21 +50,30 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
         assistantId: z.enum(["creative", "xiaohongshu"]),
         title: z.string().trim().min(1).max(160).default("新创作"),
         brief: z.string().max(10000).default(""),
+        initialRequest: z.object({
+          message: z.string().trim().min(1).max(30000),
+          skillSelection: TurnInput.shape.skillSelection,
+          attachments: z.array(z.object({ assetKey: z.string().min(1).max(300) }).strict()).max(10).default([]),
+        }).strict().optional(),
       })
       .strict()
       .parse(raw),
     c = command(key, input);
-  accepting();
   const p = profile(input.assistantId);
   return sql.begin(async (tx) => {
     await lockMemberAdmission(tx, `user:${userId}`);
     await requireCreditUser(tx, userId, true);
     const [old] =
-      await tx`SELECT id,command_hash,deleted_at FROM assistant_sessions WHERE owner_user_id=${userId} AND command_key=${c.key}`;
+      await tx`SELECT id,command_hash,deleted_at,initial_request FROM assistant_sessions WHERE owner_user_id=${userId} AND command_key=${c.key}`;
     if (old) {
       if (old.command_hash !== c.hash) throw conflict("幂等标识已用于其他请求");
       if (old.deleted_at) throw conflict("会话已删除");
-      return { sessionId: old.id };
+      return { sessionId: old.id, initialRequest: old.initial_request };
+    }
+    accepting();
+    if (input.initialRequest) {
+      await skillAdmission(tx, p.id, input.initialRequest.skillSelection, true);
+      await requireAvailable(tx);
     }
     const [count] =
       await tx`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${userId} AND deleted_at IS NULL`;
@@ -72,7 +81,22 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
     const id = randomUUID();
     await tx`INSERT INTO assistant_sessions(id,owner_user_id,assistant_id,assistant_name,profile_version,title,brief,command_key,command_hash) VALUES (${id},${userId},${p.id},${p.name},${p.version},${input.title},${input.brief},${c.key},${c.hash})`;
     await event(tx, id, "session", id);
-    return { sessionId: id };
+    let initialRequest = null;
+    if (input.initialRequest) {
+      await lockAssetInputs(tx, input.initialRequest.attachments.map(attachment => attachment.assetKey));
+      const inputIds: string[] = [];
+      for (const attachment of input.initialRequest.attachments) {
+        const bound = await attachInputTx(tx, userId, id, attachment, randomUUID());
+        inputIds.push(bound.inputId);
+      }
+      const session = await ownedSession(tx, userId, id);
+      const turnInput = { message: input.initialRequest.message, skillSelection: input.initialRequest.skillSelection ?? null,
+        expectedRevision: session.revision, inputIds, artifactVersions: [] };
+      const { intent } = await snapshotInput(tx, userId, id, turnInput, undefined, true);
+      initialRequest = { commandKey: randomUUID(), input: turnInput, quote: await quoteTool(userId, intent, tx) };
+      await tx`UPDATE assistant_sessions SET initial_request=${tx.json(initialRequest as never)} WHERE id=${id}`;
+    }
+    return { sessionId: id, initialRequest };
   });
 }
 export async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown, queueEntryId?: string, lockPolicy = false) {
@@ -244,6 +268,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     return {
       queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
       sessionId: s.id,
+      initialRequest: !s.active_turn_id && !messages.length ? s.initial_request : null,
       feeAuthorization: await readFeeAuthorization(tx,id),
       assistantId: s.assistant_id,
       assistantName: s.assistant_name,
@@ -359,8 +384,10 @@ export async function artifactVersions(userId: number, id: string, artifactId: s
 }
 
 export async function attachInput(userId:number,id:string,raw:unknown,key:unknown) {
+ return sql.begin(tx => attachInputTx(tx,userId,id,raw,key));
+}
+async function attachInputTx(tx: Tx,userId:number,id:string,raw:unknown,key:unknown) {
  const input=z.object({assetKey:z.string().min(1).max(300)}).strict().parse(raw),c=command(key,input);
- return sql.begin(async tx=>{
  await lockMemberAdmission(tx,`user:${userId}`);
  const session=await ownedSession(tx,userId,id,true);
  const [old]=await tx`SELECT * FROM assistant_session_inputs WHERE session_id=${id} AND command_key=${c.key}`;
@@ -372,5 +399,4 @@ export async function attachInput(userId:number,id:string,raw:unknown,key:unknow
  await tx`UPDATE assistant_sessions SET revision=revision+1 WHERE id=${id}`;
  await event(tx,id,"input",inputId);
  return {inputId,...attachment,revision:session.revision+1};
- });
 }
