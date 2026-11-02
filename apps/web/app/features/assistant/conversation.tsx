@@ -1,3 +1,4 @@
+import { useAssistantOptions, unavailableSelection } from "./use-options";
 import { AssistantMessageQueue } from "./message-queue";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -35,7 +36,7 @@ import { useAssistantSnapshot } from "./use-snapshot";
 import { AssistantMessageStream } from "./message-stream";
 import { AssistantWorkspace } from "./workspace";
 import { AssistantComposer } from "./composer";
-import { AssistantComposerControls } from "./composer-controls";
+import { AssistantComposerControls, AssistantSkillNotice } from "./composer-controls";
 import { AssistantAttachmentCards, useAssistantMaterials } from "./materials";
 import { attachmentBatchIssue, attachmentInputIds, attachmentSelectionCount, attachmentsReady, patchAttachment } from "./materials-data";
 import { AssistantFeeDialog } from "./fee-dialog";
@@ -72,6 +73,7 @@ export function AssistantConversation({
   );
 }
 function ConversationContent({ data }: { data: AssistantSessionData }) {
+  const { options, refresh: refreshOptions, error: optionsError } = useAssistantOptions(data.options);
   const {
     snapshot: session,
     refresh,
@@ -119,7 +121,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const [feeModeUncertain, setFeeModeUncertain] = useState(false);
   const [manualFallback, setManualFallback] = useState(false);
   const inputCommand = useToolCommand(data.me.csrf, `assistant:inputs:${session.sessionId}`);
-  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: data.options.inputCapabilities, update: updateDraft, invalidate: () => {} });
+  const materials = useAssistantMaterials({ csrf: data.me.csrf, scopeKey: key, capabilities: options.inputCapabilities, update: updateDraft, invalidate: () => {} });
   const [notice, setNotice] = useState<string | null>(null);
   const [view, setView] = useState<"chat" | "artifacts">("chat");
   const [artifactOpen, setArtifactOpen] = useState(true);
@@ -132,7 +134,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const latest = useRef(draft);
   latest.current = draft;
   const navigate = useNavigate();
-  const profile = data.options.assistants.find(
+  const profile = options.assistants.find(
     (row) => row.id === session.assistantId,
   );
   const active = turnActive(session);
@@ -142,7 +144,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const sendDisabled =
     !ready ||
     session.archived ||
-    (!question && !profile?.available) ||
+    (!question && (!profile?.available || unavailableSelection(profile, draft.actionId))) ||
     command.pending ||
     feeModeCommand.pending || feeModeUncertain ||
     !!draft.pendingTurn ||
@@ -262,13 +264,6 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       await refresh();
     }
   }
-  const autoQuoteStarted = useRef(false);
-  useEffect(() => {
-    if (!ready || !draft.autoQuote || autoQuoteStarted.current) return;
-    autoQuoteStarted.current = true;
-    updateDraft((previous) => ({ ...previous, autoQuote: false }));
-    void requestQuote(draft.text);
-  }, [ready, draft.autoQuote]);
   async function submitConfirmed(attempt: PendingTurn, retry = false, preserveDraft = false) {
     if (
       submitting.current ||
@@ -530,7 +525,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 sessionId={session.sessionId}
                 csrf={data.me.csrf}
                 active={active}
-                options={data.options}
+                options={options}
                 refresh={refresh}
                 onReference={reference}
               />
@@ -604,7 +599,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 stopBusy={stopCommand.pending}
                 answerMode={!!question}
                 maxLength={
-                  question ? 10000 : data.options.limits.inputCharacters
+                  question ? 10000 : options.limits.inputCharacters
                 }
                 hint={
                   quoteReading
@@ -615,10 +610,10 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                         ? "已归档会话可查看，不能发送新需求。"
                         : feeAuthorization?.enabled ? `额度内自动 · 剩余 ${feeAuthorization.remaining.toLocaleString()} 积分 · 当前创作 ${feeAuthorization.turnPrice.amount} 积分 · Shift+Enter 换行` : undefined
                 }
-                controls={profile && <AssistantComposerControls profile={profile} actionId={draft.actionId} onAction={(actionId) => { updateDraft((previous) => ({ ...previous, actionId })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={data.options.inputCapabilities} artifacts={session.artifacts} onReference={reference} feeAuthorization={feeAuthorization} manualFees={() => void useManualFees()} configureFees={() => { setFeeOpen(true); }} />}
-                attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={data.options.inputCapabilities.maxAttachments} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
+                controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} actionId={draft.actionId} onAction={(actionId) => { updateDraft((previous) => ({ ...previous, actionId })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={options.inputCapabilities} artifacts={session.artifacts} onReference={reference} feeAuthorization={feeAuthorization} manualFees={() => void useManualFees()} configureFees={() => { setFeeOpen(true); }} />}
+                attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={options.inputCapabilities.maxAttachments} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
               >
-                {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, data.options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}
+                {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}
                 {newArtifacts && (
                   <p role="status" className="mb-2 text-[12px] text-accent">
                     稿件有更新。
@@ -627,6 +622,9 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                     </button>
                   </p>
                 )}
+                {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
+                {!question && unavailableSelection(profile, draft.actionId) && <AssistantSkillNotice />}
+                {session.initialRequest && !session.turn && !draft.recoveryCount && !hasComposerDraft(draft) && <Button size="sm" onClick={() => setQuoted(session.initialRequest!)}>恢复首条需求报价</Button>}
                 {notice && (
                   <p role="status" className="mb-2 text-[12px] text-accent">
                     {notice}

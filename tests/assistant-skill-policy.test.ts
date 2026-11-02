@@ -1,6 +1,10 @@
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag, gate } from "./setup.ts";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { publishUpload, uploadKey } from "@aihot/backend/operations/assets";
+import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
@@ -11,7 +15,7 @@ import { passwordLogin, sessionPrincipal, SESSION_COOKIE } from "@aihot/backend/
 import { createSession, quoteTurn, submitTurn, submitTurnTx, assistantOptions, sessionSnapshot, editArtifact, artifactVersions } from "@aihot/backend/assistant/sessions";
 import { answerTurn, controlTurn } from "@aihot/backend/assistant/controls";
 import { enqueueMessage, approveQueuedMessage, refreshQueuedQuote, cancelQueuedMessage } from "@aihot/backend/assistant/message-queue";
-import { skillAdmission, readSkillPolicies, updateAssistantSkill, listAssistantSkills } from "@aihot/backend/assistant/skill-policy";
+import { lockSkillPolicies, skillAdmission, readSkillPolicies, updateAssistantSkill, listAssistantSkills } from "@aihot/backend/assistant/skill-policy";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { buildApp } from "../apps/api/src/app.ts";
 const completion = (name: string, input: unknown) => ({ id: "policy-fixture", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: [{ id: "call_0", type: "function", function: { name, arguments: JSON.stringify(input) } }] }, finish_reason: "tool_calls" }] });
@@ -59,6 +63,68 @@ test("skill policy admission, administration, concurrency and grandfathered work
       const [audit] = await sql`SELECT * FROM audit_log WHERE action='assistant.skill.update' AND subject='assistant-skill:general-writing' ORDER BY id DESC LIMIT 1`;
       assert.deepEqual(audit.before, { acceptingNew: true, revision: 1 }); assert.deepEqual(audit.after, { acceptingNew: false, revision: 2 }); assert.equal(audit.reason, payload.reason);
       assert.equal(supplier.hits(), 0); await change(true);
+    });
+    await t.test("initial request rolls back rejection, binds material once and replays the exact quote after pause", async () => {
+      const originalDir = config.dataDir, directory = await mkdtemp(path.join(tmpdir(), "assistant-initial-"));
+      config.dataDir = directory;
+      try {
+        const text = "首次材料，不产生模型调用", file = path.join(directory, "fixture.md");
+        await writeFile(file, text);
+        const asset = await publishUpload({ actor: `user:${user.id}`, key: uploadKey(`user:${user.id}`, randomUUID()), file, filename: "fixture.md", mime: "text/markdown", bytes: Buffer.byteLength(text), sha256: createHash("sha256").update(text).digest("hex") });
+        const raw = { assistantId: "creative", initialRequest: { message: "用材料写稿", skillSelection: { actionId: "general-writing" }, attachments: [{ assetKey: asset.key }] } };
+        const counts = async () => (await sql`SELECT (SELECT count(*) FROM assistant_sessions WHERE owner_user_id=${user.id})::int sessions, (SELECT count(*) FROM member_tool_quotes WHERE user_id=${user.id})::int quotes, (SELECT count(*) FROM member_credit_charges WHERE user_id=${user.id})::int charges, (SELECT count(*) FROM receipts)::int receipts`)[0];
+        const before = await counts(), hits = supplier.hits();
+        await change(false);
+        await assert.rejects(createSession(user.id, raw, randomUUID()), /暂停/);
+        assert.deepEqual(await counts(), before);
+        await change(true);
+        await assert.rejects(createSession(user.id, { ...raw, initialRequest: { ...raw.initialRequest, attachments: [{ assetKey: "uploads/redfox/" + "0".repeat(64) }] } }, randomUUID()), /missing|unavailable/);
+        assert.deepEqual(await counts(), before);
+        const other = await createSiteUser({ username: `initial_${unique}`, displayName: "Other", password: "synthetic-initial-password" }, "test");
+        await assert.rejects(createSession(other.id, raw, randomUUID()), { statusCode: 404 });
+        assert.equal((await sql`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${other.id}`)[0].n, 0);
+        const key = randomUUID(), created = await createSession(user.id, raw, key);
+        assert(created.initialRequest);
+        assert.equal(created.initialRequest.input.expectedRevision, 2);
+        assert.equal(created.initialRequest.input.inputIds.length, 1);
+        assert.equal((await sessionSnapshot(user.id, created.sessionId)).inputs[0].text, text);
+        assert.deepEqual((await sessionSnapshot(user.id, created.sessionId)).initialRequest, created.initialRequest);
+        await change(false);
+        assert.deepEqual(await createSession(user.id, raw, key), created);
+        const after = await counts();
+        assert.equal(after.sessions, before.sessions + 1); assert.equal(after.quotes, before.quotes + 1);
+        assert.equal(after.charges, before.charges); assert.equal(after.receipts, before.receipts); assert.equal(supplier.hits(), hits);
+        await change(true);
+        const saved = created.initialRequest;
+        await assert.rejects(submitTurn(user.id, created.sessionId, { ...saved.input, quoteId: saved.quote.quoteId }, saved.commandKey), /报价/);
+        const quote = await quoteTurn(user.id, created.sessionId, saved.input);
+        const accepted = await submitTurn(user.id, created.sessionId, { ...saved.input, quoteId: quote.quoteId }, saved.commandKey);
+        assert.equal((await sessionSnapshot(user.id, created.sessionId)).initialRequest, null);
+        const [run] = await sql`SELECT generation FROM operation_runs WHERE id=${accepted.runId}`;
+        await controlTurn(user.id, created.sessionId, accepted.turnId, "stop", { generation: run.generation });
+        // Pruning an expired quote never removes the durable create result or creates a replacement quote.
+        const expired = await createSession(user.id, raw, randomUUID()), expiredKey = randomUUID();
+        const expiry = await createSession(user.id, raw, expiredKey);
+        await sql`UPDATE member_tool_quotes SET expires_at=now()-interval '1 second' WHERE id=${expiry.initialRequest!.quote.quoteId}`;
+        await quoteTurn(user.id, expired.sessionId, expired.initialRequest!.input);
+        assert.equal((await sql`SELECT id FROM member_tool_quotes WHERE id=${expiry.initialRequest!.quote.quoteId}`).length, 0);
+        assert.deepEqual(await createSession(user.id, raw, expiredKey), expiry);
+      } finally { config.dataDir = originalDir; await rm(directory, { recursive: true, force: true }); }
+    });
+    await t.test("pause-first race rejects atomic creation without leaving a session", async () => {
+      const locked = gate(), release = gate();
+      const pause = sql.begin(async tx => {
+        await lockSkillPolicies(tx, ["general-writing"]);
+        await tx`UPDATE settings SET value=jsonb_set(value,'{acceptingNew}','false') WHERE key='assistant.skills.general-writing'`;
+        locked.open(); await release.promise;
+      });
+      await locked.promise;
+      const key = randomUUID();
+      const creation = createSession(user.id, { assistantId: "creative", initialRequest: { message: "竞态需求", skillSelection: { actionId: "general-writing" } } }, key);
+      const rejected = assert.rejects(creation, /暂停/);
+      release.open(); await pause; await rejected;
+      assert.equal((await sql`SELECT id FROM assistant_sessions WHERE command_key=${key}`).length, 0);
+      await change(true);
     });
     await t.test("unrelated skill policy does not stale a manually scoped quote", async () => {
       const f = await fresh(), q = await quoteTurn(user.id, f.sessionId, f.input);
@@ -157,7 +223,7 @@ test("skill policy admission, administration, concurrency and grandfathered work
       await change(false, "xiaohongshu-creator");
       const scope = await skillAdmission(sql, "creative"); assert(scope.candidates.every(c => c.skillId === "general-writing")); assert.equal(scope.unavailableSkills[0]!.skillId, "xiaohongshu-creator");
       await assert.rejects(skillAdmission(sql, "xiaohongshu"), /暂停/);
-      const options = await assistantOptions(user.id); assert.equal(options.assistants.find(a => a.id === "xiaohongshu")!.available, false);
+      const options = await assistantOptions(user.id); assert(options.assistants.every(a => !a.actions.some(action => action.actionId.startsWith("xiaohongshu-")))); assert.equal(options.assistants.find(a => a.id === "xiaohongshu")!.available, false);
       await sql`UPDATE settings SET value='{"acceptingNew":true,"revision":20}'::jsonb WHERE key='assistant.skills.xiaohongshu-creator'`;
       const actions = (await assistantOptions(user.id)).assistants[0]!.actions;
       assert.equal(actions.find(a => a.actionId === "xiaohongshu-write")!.available, false);

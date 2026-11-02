@@ -623,17 +623,19 @@
 .assistant-activity-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--accent); animation: assistant-pulse 1.6s ease-in-out infinite; }
 @keyframes assistant-pulse { 50% { opacity: .35; } }
 .assistant-message-queue { width: 100%; margin-top: 16px; border-top: 1px solid var(--line); padding: 14px 0; background: var(--bg); }
-.assistant-composer { display: flex; flex-direction: column; min-height: 0; position: relative; z-index: 5; width: 100%; max-height: min(62dvh, 580px); flex-shrink: 0; overflow: visible; border-top: 1px solid var(--line); background: var(--bg); padding: 14px max(16px, calc((100% - 760px) / 2)) max(13px, env(safe-area-inset-bottom)); }
+.assistant-composer { display: flex; flex-direction: column; min-height: 0; position: relative; z-index: 5; width: 100%; max-height: min(62dvh, 580px); flex-shrink: 0; overflow: visible; background: var(--bg); padding: 14px max(16px, calc((100% - 760px) / 2)) max(13px, env(safe-area-inset-bottom)); }
 .assistant-composer-context { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .assistant-composer-context:empty { display: none; }
+.assistant-skill-notice { display: flex; align-items: flex-start; gap: 7px; margin: 0 4px 10px; color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.assistant-skill-notice svg { flex-shrink: 0; margin-top: 3px; }
 .assistant-composer-confirmation { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .assistant-composer-confirmation .assistant-quote-card { margin: 0; }
-.assistant-composer > form { display: flex; flex-direction: column; flex-shrink: 1; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); padding: 12px; }
+.assistant-composer > form { display: flex; flex-direction: column; flex-shrink: 1; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); padding: 12px; box-shadow: 0 2px 12px color-mix(in srgb, var(--ink) 4%, transparent); }
 .assistant-composer-attachments { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .assistant-composer > form > :is(textarea, .assistant-composer-bottom, .mt-2) { flex-shrink: 0; }
 .assistant-composer textarea { min-height: 65px; max-height: 22dvh; resize: vertical; border: 0; border-radius: 0; background: transparent; padding: 1px; font-size: 14px; line-height: 1.7; box-shadow: none; }
 .assistant-composer textarea:focus { box-shadow: none; outline: none; }
-.assistant-composer > form:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.assistant-composer > form:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .assistant-send { display: inline-flex; min-height: 36px; flex-shrink: 0; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-control); background: var(--accent); padding: 7px 12px; color: var(--accent-contrast); font-size: 12px; font-weight: 500; }
 .assistant-send:disabled { cursor: not-allowed; opacity: .4; }
 .assistant-composer-bottom { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }

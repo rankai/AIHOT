@@ -107,7 +107,14 @@ export interface AssistantQueuedMessage {
   id: string; position: number; message: string; state: "pending" | "quoted" | "submitted" | "cancelled";
   quote: ToolQuote | null; error: string | null; turnId: string | null; commandKey: string;
 }
+export interface AssistantInitialRequest {
+  commandKey: string;
+  input: { message: string; expectedRevision: number; skillSelection: AssistantTaskHint | null; inputIds: string[]; artifactVersions: { artifactId: string; version: number }[] };
+  quote: ToolQuote;
+}
 export interface AssistantSession {
+  /** Explicit recovery only; never automatically submits or resurrects a dismissed quote. */
+  initialRequest?: AssistantInitialRequest | null;
   queue?: { paused: boolean; entries: AssistantQueuedMessage[] };
   sessionId: string;
   feeAuthorization?: AssistantFeeAuthorization | null;

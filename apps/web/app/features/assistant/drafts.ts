@@ -18,9 +18,8 @@ export interface AssistantDraft {
   pendingQueue?: QueueAttempt;
   pendingQuote?: SavedQuote;
   recoveryCount?: number;
-  pendingCreate?: { text: string; actionId: string | null; attachments?: DraftAttachment[]; configureFees?: boolean };
+  pendingCreate?: { text: string; actionId: string | null; attachments?: DraftAttachment[]; configureFees?: boolean; unknown?: boolean; rejected?: boolean };
   configureFees?: boolean;
-  autoQuote?: boolean;
   pendingLifecycle?: "archive" | "delete";
 }
 export const emptyDraft = (): AssistantDraft => ({ text: "", actionId: null });

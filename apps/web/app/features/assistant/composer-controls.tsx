@@ -3,18 +3,18 @@ import type { AssistantArtifact, AssistantFeeAuthorization, AssistantOptions, As
 import { IconApps } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
 
-export function AssistantComposerControls({ profile, actionId, onAction, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled }: {
+export function AssistantComposerControls({ profile, actionId, onAction, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled, refreshOptions }: {
   profile: AssistantProfileDto; actionId: string | null; onAction: (id: string | null) => void; disabled: boolean;
   addFiles: (files: File[]) => void; capabilities: AssistantOptions["inputCapabilities"];
   artifacts?: AssistantArtifact[]; onReference?: (artifact: AssistantArtifact) => void;
   feeAuthorization?: AssistantFeeAuthorization | null; configureFees: () => void; manualFees?: () => void;
-  feeDisabled?: boolean;
+  feeDisabled?: boolean; refreshOptions?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const menu = useRef<HTMLDetailsElement>(null);
   const feeMenu = useRef<HTMLDetailsElement>(null);
   const [pickArtifact, setPickArtifact] = useState(false);
-  const label = profile.actions.find((action) => action.actionId === actionId)?.label ?? "自动选择技能";
+  const label = profile.actions.find((action) => action.actionId === actionId)?.label ?? (actionId ? "原技能不可用，请重新选择" : "自动选择技能");
   return <div className="assistant-composer-controls">
     <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
     <details className="assistant-add-menu" ref={menu}>
@@ -28,9 +28,10 @@ export function AssistantComposerControls({ profile, actionId, onAction, disable
     <label className="assistant-skill-control" title={label}>
       <span className="sr-only">选择技能，当前{label}</span>
       <IconApps size={16} />
-      <select value={actionId ?? ""} disabled={disabled} aria-label={`选择技能，当前${label}`} onChange={(event) => onAction(event.target.value || null)}>
+      <select onFocus={refreshOptions} onPointerDown={refreshOptions} value={actionId && !profile.actions.some(action => action.actionId === actionId) ? "unavailable" : actionId ?? ""} disabled={disabled} aria-label={`选择技能，当前${label}`} onChange={(event) => onAction(event.target.value || null)}>
+        {actionId && !profile.actions.some(action => action.actionId === actionId) && <option value="unavailable" disabled>原技能不可用，请重新选择</option>}
         <option value="">自动选择技能</option>
-        {profile.actions.map((action) => <option key={action.actionId} value={action.actionId} disabled={!action.available}>{action.label}{!action.available ? " · 未开放" : ""}</option>)}
+        {profile.actions.filter(action => action.actionId !== "wechat").map((action) => <option key={action.actionId} value={action.actionId} disabled={!action.available}>{action.label}{!action.available ? " · 暂不可用" : ""}</option>)}
       </select>
     </label>
     <details className="assistant-fee-menu" ref={feeMenu}>
@@ -57,4 +58,11 @@ function ArtifactPicker({ artifacts, close, select }: { artifacts: AssistantArti
     <Select value={id} aria-label="选择要引用的稿件" onChange={(event) => setId(event.target.value)}>{artifacts.map((artifact) => <option key={artifact.artifactId} value={artifact.artifactId}>{artifact.content.title} · v{artifact.version}</option>)}</Select>
     <div className="mt-5 flex justify-end gap-2"><Button onClick={close}>取消</Button><Button tone="primary" disabled={!id} onClick={() => { const artifact = artifacts.find((row) => row.artifactId === id); if (artifact) select(artifact); }}>引用这版</Button></div>
   </dialog>;
+}
+
+export function AssistantSkillNotice() {
+  return <p role="status" className="assistant-skill-notice">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>
+    <span>内容已保留。当前技能暂不可用，可稍后再试或更换技能。</span>
+  </p>;
 }
