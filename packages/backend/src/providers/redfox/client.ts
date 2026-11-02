@@ -78,6 +78,13 @@ export function parseRedfoxJson(text: string): unknown {
     return JSON.parse(text, (_key, value, context?: { source?: string }) => typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value) ? context!.source : value);
   } catch { throw new RedfoxResponseError("Redfox response is not valid JSON"); }
 }
+/** Local readiness only; never sends a probe or creates a receipt. */
+export function assertRedfoxAvailable(operation: Operation, purpose: string) {
+  if (process.env.REDFOX_CALLS_ENABLED !== "true" || (purpose === "collect" && process.env.COLLECT_ENABLED === "false")) throw new RedfoxDisabledError("Redfox outbound calls are disabled");
+  if (operation in aiSearchPaths && process.env.MODEL_CALLS_ENABLED !== "true") throw new RedfoxDisabledError("AI search outbound calls are disabled");
+  if ((operation in videoPaths || operation in newImagePaths || ["FXDGJO1V","ATY07YGY","849ONCDF"].includes(operation)) && process.env.MODEL_CALLS_ENABLED !== "true") throw new RedfoxDisabledError("Image generation outbound calls are disabled");
+  if (!credential("collectors", "REDFOX_API_KEY")) throw new RedfoxDisabledError("REDFOX_API_KEY is not configured");
+}
 export async function redfoxRequest(operation: Operation, input: Record<string, unknown>, window: string, purpose: "video" | "query" | "collect" | "image" | "poll" | "media" | "account" | "transcript" | "ai_search", options: PaidRequestOptions, upload?: {file: string; format: InputMediaFormat|"jpeg"; mime?:string}) {
   const base = redfoxBaseUrl(), service = `redfox.${purpose}`;
   let uploadBody: FormData | undefined;
@@ -122,10 +129,7 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
         const retryAt=retryDeadline((previous.response as RawResponse).headers.retryAfter,previous.finished_at);
         if(retryAt.getTime()>Date.now())throw new RedfoxDeferredError(id,retryAt);
       }
-      if (process.env.REDFOX_CALLS_ENABLED !== "true" || (purpose === "collect" && process.env.COLLECT_ENABLED === "false")) throw new RedfoxDisabledError("Redfox outbound calls are disabled");
-      if (operation in aiSearchPaths && process.env.MODEL_CALLS_ENABLED !== "true") throw new RedfoxDisabledError("AI search outbound calls are disabled");
-      if ((operation in videoPaths || operation in newImagePaths || ["FXDGJO1V","ATY07YGY","849ONCDF"].includes(operation)) && process.env.MODEL_CALLS_ENABLED !== "true") throw new RedfoxDisabledError("Image generation outbound calls are disabled");
-      if (!credential("collectors", "REDFOX_API_KEY")) throw new RedfoxDisabledError("REDFOX_API_KEY is not configured");
+      assertRedfoxAvailable(operation, purpose);
       if(operation === "FXDGJO1V" || operation === "6L178PZD") {
         if(!upload)throw new Error("Missing upload transport");
         // Local preparation is inside the placeholder transaction: failure rolls back the attempt.

@@ -169,17 +169,29 @@ export function taskHint(id: AssistantId, raw: unknown): AssistantTaskHint | nul
     throw catalogError("scope_denied", "当前助手不支持此动作");
   return hint;
 }
-export async function candidates(id: AssistantId, selection?: AssistantTaskHint | null): Promise<Candidate[]> {
+/** Code-owned bindings shared by public options and model scope. */
+export const actions = [
+  { actionId: "general-writing", label: "通用文章草稿", skillId: "general-writing", moduleId: "write" },
+  { actionId: "xiaohongshu-write", label: "小红书创作", skillId: "xiaohongshu-creator", moduleId: "M1" },
+  { actionId: "xiaohongshu-rewrite", label: "小红书改写", skillId: "xiaohongshu-creator", moduleId: "M2" },
+] as const;
+export const skillNames: Record<string, string> = { "general-writing": "通用创作", "xiaohongshu-creator": "小红书创作" };
+export const currentSkillVersions: Record<string, string> = { "general-writing": "2", "xiaohongshu-creator": "3" };
+export const registeredSkillIds = Object.keys(currentSkillVersions).sort();
+export function profileActions(id: AssistantId) {
+  return actions.filter(a => (profile(id).skills as readonly string[]).includes(a.skillId));
+}
+export async function candidates(id: AssistantId, selection?: AssistantTaskHint | null, versions = currentSkillVersions): Promise<Candidate[]> {
   const p = profile(id);
   const selected = taskHint(id, selection);
-  const bindings: Record<string, [string, string]> = { "general-writing": ["general-writing", "write"], "xiaohongshu-write": ["xiaohongshu-creator", "M1"], "xiaohongshu-rewrite": ["xiaohongshu-creator", "M2"] };
+  const binding = actions.find(a => a.actionId === selected?.actionId);
   return (await catalog())
     .filter((s) => (p.skills as readonly string[]).includes(s.manifest.skillId))
-    .filter((s) => s.manifest.skillId !== "xiaohongshu-creator" || s.manifest.version === "3")
+    .filter((s) => s.manifest.version === versions[s.manifest.skillId])
     .flatMap(({ manifest: s }) =>
       s.modules
         .filter((m) => ((p.modules as Record<string, readonly string[]>)[s.skillId] ?? []).includes(m.moduleId))
-        .filter((m) => !selected || (bindings[selected.actionId]![0] === s.skillId && bindings[selected.actionId]![1] === m.moduleId))
+        .filter((m) => !selected || (binding?.skillId === s.skillId && binding.moduleId === m.moduleId))
         .map((m) => ({
           skillId: s.skillId,
           version: s.version,

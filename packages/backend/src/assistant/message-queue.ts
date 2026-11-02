@@ -6,7 +6,8 @@ import { requireCreditUser } from "../users/credits-core.ts";
 import { quoteTool } from "../users/credits.ts";
 import { lockMemberAdmission, StaleOperationError } from "../providers/operations/store.ts";
 import { TurnInput, accepting } from "./config.ts";
-import { candidates, taskHint } from "./catalog.ts";
+import { taskHint } from "./catalog.ts";
+import { skillAdmission } from "./skill-policy.ts";
 import { assertSessionReceiptsReviewed } from "./fees.ts";
 import { snapshotInput, submitTurnTx } from "./sessions.ts";
 import { command, ownedSession, conflict, event } from "./store.ts";
@@ -26,7 +27,8 @@ export async function enqueueMessage(userId: number, sessionId: string, raw: unk
     if (s.revision !== input.expectedRevision) throw conflict("会话已变化，请核对后重新排队");
     const [count] = await tx`SELECT count(*)::int n FROM assistant_message_queue WHERE session_id=${sessionId} AND state IN ('pending','quoted')`;
     if (count!.n >= 10) throw conflict("最多等待10条需求，请先处理或取消");
-    taskHint(s.assistant_id, input.taskHint); await candidates(s.assistant_id, input.skillSelection);
+    taskHint(s.assistant_id, input.taskHint);
+    const admission = await skillAdmission(tx, s.assistant_id, input.skillSelection as never, true);
     const inputs = await tx`SELECT id FROM assistant_session_inputs WHERE session_id=${sessionId}`;
     const inputIds = input.inputIds ?? inputs.map(row => row.id);
     if (inputIds.some(id => !inputs.some(row => row.id === id))) throw conflict("选定材料不可访问");
@@ -37,7 +39,7 @@ export async function enqueueMessage(userId: number, sessionId: string, raw: unk
     }
     if (input.autoAuthorizationId && !(await tx`SELECT id FROM assistant_fee_authorizations WHERE id=${input.autoAuthorizationId} AND session_id=${sessionId}`)[0]) throw conflict("费用授权不属于本会话");
     const id = randomUUID(), frozen = { ...input, inputIds, artifactVersions: versions };
-    await tx`INSERT INTO assistant_message_queue(id,session_id,command_key,command_hash,input) VALUES (${id},${sessionId},${c.key},${c.hash},${tx.json(frozen as never)})`;
+    await tx`INSERT INTO assistant_message_queue(id,session_id,command_key,command_hash,input,admission_snapshot) VALUES (${id},${sessionId},${c.key},${c.hash},${tx.json(frozen as never)},${tx.json(admission as never)})`;
     await event(tx, sessionId, "queue", id);
     return { entryId: id, state: "pending", turnId: null };
   });
@@ -64,7 +66,7 @@ async function prepare(tx: Tx, userId: number, s: Record<string, any>, entry: Re
   // Stored exact selections remain fixed; revision, model, prices and capabilities are checked now.
   const raw = { ...entry.input, expectedRevision: s.revision };
   if (manual) delete raw.autoAuthorizationId;
-  const { intent } = await snapshotInput(tx, userId, s.id, raw);
+  const { intent } = await snapshotInput(tx, userId, s.id, raw, entry.id);
   const quote = await quoteTool(userId, intent, tx);
   await tx`UPDATE assistant_message_queue SET state='quoted',quote=${tx.json(quote as never)},prepared_input=${tx.json(raw)},error=NULL WHERE id=${entry.id}`;
   await event(tx, s.id, "queue", entry.id);

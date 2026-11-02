@@ -128,3 +128,11 @@ export interface AssistantEvent {
   type: string;
   entityId: string;
 }
+
+export interface AssistantSkillAdminRow {
+  skillId: string; name: string; version: string;
+  modules: { id: string; name: string }[];
+  acceptingNew: boolean; revision: number; policyValid: boolean; available: boolean; reasons: string[];
+  updatedBy: string | null; updatedAt: string | null;
+  source: Record<string, unknown> | null; packageHash: string | null; dependencies: string[];
+}

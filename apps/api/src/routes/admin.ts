@@ -1,3 +1,5 @@
+import { listAssistantSkills, updateAssistantSkill } from "@aihot/backend/assistant/skill-policy";
+import { AccountError } from "@aihot/backend/users/accounts";
 // /api/admin/*: queries are GET, creation POST, edits PATCH, business commands POST.
 // Every route goes through adminHandler (session + CSRF); manual changes are audited in the modules.
 import { listOperations, operationDetail, operationResults, controlOperation } from "@aihot/backend/providers/operations/read";
@@ -38,6 +40,14 @@ function decodeImage(dataUrl: unknown): Buffer {
 
 export function registerAdmin(app: FastifyInstance) {
   registerAdminRedfox(app);
+  app.get("/api/admin/assistant-skills", adminHandler(async () => listAssistantSkills()));
+  app.put("/api/admin/assistant-skills/:id", adminHandler(async (req, reply, admin) => {
+    try { return await updateAssistantSkill(param(req, "id"), req.body, actorOf(admin)); }
+    catch (error) {
+      if (error instanceof AccountError) return sendProblem(req, reply, { status: error.statusCode, code: error.code, detail: error.message });
+      throw error;
+    }
+  }));
   // Sources (F18)
   app.get("/api/admin/sources", adminHandler(async (req) => {
     const f = q(req);

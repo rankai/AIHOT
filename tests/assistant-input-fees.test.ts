@@ -12,6 +12,7 @@ import { command } from "@aihot/backend/assistant/store";
 import { ownedTurn } from "@aihot/backend/assistant/controls";
 import { controlTurn } from "@aihot/backend/assistant/controls";
 import { candidates,resolveCandidate } from "@aihot/backend/assistant/catalog";
+import { updateAssistantSkill, readSkillPolicies } from "@aihot/backend/assistant/skill-policy";
 import { TurnInput } from "@aihot/backend/assistant/config";
 import { feeSettings,setFeeAuthorization } from "@aihot/backend/assistant/fees";
 
@@ -135,6 +136,13 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  await assert.rejects(()=>decideCall(user.id,searchSession.sessionId,second.call.id,true,{proposalRevision:blockedQuote.proposalRevision},randomUUID()),/次数已达上限/);
  assert.equal((await sql`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${user.id}`}`)[0]!.n,beforeLimit,"receipt attempts exhausted cannot reserve another child even with fewer runs");
  await sql`UPDATE assistant_turns SET child_calls=1 WHERE id=${searchRun.turnId}`;
+ const [priorSkillPolicy] = await sql`SELECT value,updated_by,updated_at FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+ const [parentChargeBeforeClose] = await sql`SELECT c.* FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id=${searchRun.runId}`;
+ const ledgerBeforeClose = await sql`SELECT * FROM member_credit_entries WHERE user_id=${user.id} ORDER BY id`;
+ try {
+ const policy = (await readSkillPolicies()).find(p=>p.skillId==='xiaohongshu-creator')!;
+ await updateAssistantSkill('xiaohongshu-creator',{acceptingNew:false,expectedRevision:policy.revision,reason:'已受理检索关闭后继续测试'},'test');
+ assert.deepEqual(await sql`SELECT * FROM member_credit_entries WHERE user_id=${user.id} ORDER BY id`,ledgerBeforeClose,'closing does not alter the credit ledger');
  const freshQuote=await refreshCallQuote(user.id,searchSession.sessionId,second.call.id);
  assert.equal((await sql`SELECT result FROM assistant_tool_calls WHERE id=${second.call.id}`)[0]!.result.approvalBlockedReason,undefined);
  await decideCall(user.id,searchSession.sessionId,second.call.id,true,{proposalRevision:freshQuote.proposalRevision},randomUUID());
@@ -144,6 +152,15 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  const replayed=await decideCall(user.id,searchSession.sessionId,second.call.id,true,{proposalRevision:freshQuote.proposalRevision},randomUUID());
  assert.equal(replayed.childRunId,manualAttribution!.child_run_id);
  assert.equal((await sql`SELECT activation_id FROM assistant_tool_calls WHERE id=${second.call.id}`)[0]!.activation_id,activationId);
+
+ const [parentChargeAfterApproval] = await sql`SELECT c.* FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id=${searchRun.runId}`;
+ assert.deepEqual(parentChargeAfterApproval,parentChargeBeforeClose,'closed-skill search approval preserves its original parent reservation');
+ const ledgerAfterApproval = await sql`SELECT * FROM member_credit_entries WHERE user_id=${user.id} ORDER BY id`;
+ assert.deepEqual(ledgerAfterApproval.slice(0,ledgerBeforeClose.length),[...ledgerBeforeClose],'prior ledger rows remain immutable');
+ assert.equal((await sql`SELECT count(*)::int n FROM member_credit_run_links WHERE run_id=${manualAttribution!.child_run_id}`)[0]!.n,1,'approval replay reserves only one child charge');
+ } finally {
+ await sql`UPDATE settings SET value=${sql.json(priorSkillPolicy!.value)},updated_by=${priorSkillPolicy!.updated_by},updated_at=${priorSkillPolicy!.updated_at} WHERE key='assistant.skills.xiaohongshu-creator'`;
+ }
 
  const [autoCount]=await sql`SELECT count(*)::int n FROM assistant_auto_charges WHERE turn_id=${searchRun.turnId}`;
  assert.equal(autoCount!.n,2);
