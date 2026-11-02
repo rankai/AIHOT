@@ -142,7 +142,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const sendDisabled =
     !ready ||
     session.archived ||
-    !profile?.available ||
+    (!question && !profile?.available) ||
     command.pending ||
     feeModeCommand.pending || feeModeUncertain ||
     !!draft.pendingTurn ||

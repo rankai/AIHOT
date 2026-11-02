@@ -11,20 +11,21 @@ import { quoteTool } from "../users/credits.ts";
 import { creditHash, requireCreditUser } from "../users/credits-core.ts";
 import { createRun, lockMemberAdmission } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
-import { profile, profiles, candidates, taskHint } from "./catalog.ts";
+import { profile, profiles, profileActions, taskHint } from "./catalog.ts";
+import { skillAdmission, queuedSkillAdmission, readSkillPolicies, skillHealth } from "./skill-policy.ts";
 import { accepting, requireAvailable, modelPolicy, TurnInput } from "./config.ts";
 import { command, ownedSession, event, message, conflict, saveArtifact, Content } from "./store.ts";
 import type { AssistantSession, AssistantOptions } from "@aihot/contracts/assistant";
 import type { ToolCreditIntent } from "@aihot/contracts/credits";
 import { selectToolPrice } from "../users/credits-prices.ts";
 export async function assistantOptions(userId: number): Promise<AssistantOptions> {
-  let reason: string | null = null;
-  try {
-    const m = await requireAvailable();
-    await selectToolPrice(sql, { kind: "assistant-turn", provider: "assistant", model: m.model, input: {} });
-  } catch (e) {
-    reason = (e as Error).message;
-  }
+  const policies = await readSkillPolicies(), health = await skillHealth();
+  const availability = (action: ReturnType<typeof profileActions>[number]) => {
+    const { skillId, actionId } = action;
+    const policy = policies.find(p => p.skillId === skillId)!;
+    const reason = policy.reason ?? (!policy.acceptingNew ? "已暂停新任务；已开始的任务可继续" : health.get(actionId)?.[0] ?? null);
+    return { available: !reason, reason };
+  };
   await requireCreditUser(sql, userId, true);
   return {
     inputCapabilities: { fileTypes: [".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152 },
@@ -33,14 +34,10 @@ export async function assistantOptions(userId: number): Promise<AssistantOptions
       name: p.name,
       version: p.version,
       welcome: p.welcome,
-      available: !reason,
-      reason,
+      available: profileActions(p.id).some(a => availability(a).available),
+      reason: profileActions(p.id).some(a => availability(a).available) ? null : profileActions(p.id).map(a => availability(a).reason).find(Boolean) ?? "暂无可用技能",
       actions: [
-        ...(p.id === "creative"
-          ? [{ actionId: "general-writing", label: "通用文章草稿", available: !reason, reason }]
-          : []),
-        { actionId: "xiaohongshu-write", label: "小红书创作", available: !reason, reason },
-        { actionId: "xiaohongshu-rewrite", label: "小红书改写", available: !reason, reason },
+        ...profileActions(p.id).map(a => ({ actionId: a.actionId, label: a.label, ...availability(a) })),
         { actionId: "wechat", label: "公众号创作", available: false, reason: "未开放" },
       ],
     })),
@@ -78,7 +75,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
     return { sessionId: id };
   });
 }
-export async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown) {
+export async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown, queueEntryId?: string, lockPolicy = false) {
   const input = TurnInput.parse(raw),
     session = await ownedSession(db, userId, sessionId);
   if (input.expectedRevision !== session.revision) throw conflict("会话已变化，请重新报价");
@@ -86,7 +83,10 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
   const hint = taskHint(session.assistant_id, input.taskHint),
     p = profile(session.assistant_id),
     model = await modelPolicy(),
-    allowed = await candidates(p.id, input.skillSelection);
+    admission = queueEntryId
+      ? await queuedSkillAdmission(db as Tx, sessionId, queueEntryId, p.id)
+      : await skillAdmission(db, p.id, input.skillSelection as never, lockPolicy),
+    allowed = admission.candidates;
   const selected: unknown[] = [];
   const history =
     await db`SELECT role,text FROM assistant_messages WHERE session_id=${sessionId} AND role IN ('user','assistant') AND text<>'' ORDER BY seq`;
@@ -130,6 +130,8 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     profileHash: creditHash(p),
     allowedTools: [...p.tools],
     candidates: allowed,
+    skillPolicy: admission.policies,
+    unavailableSkills: admission.unavailableSkills,
     catalogHash: creditHash(allowed),
     model,
     limits: { modelCalls: 8, childCalls: 20 },
@@ -198,7 +200,7 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
     if (count!.n >= 2) throw conflict("同时最多执行2个助手回合");
     const [usage] = await tx`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${id}`;
     if (usage!.n >= 100) throw conflict("单会话最多100个回合，请新建会话");
-    const { input, snapshot, intent } = await snapshotInput(tx, userId, id, rest);
+    const { input, snapshot, intent } = await snapshotInput(tx, userId, id, rest, queueEntryId, true);
     const turnId = randomUUID();
     if(input.autoAuthorizationId) await checkAuto(tx,userId,id,input.autoAuthorizationId,quoteId,"turn");
     const run = await createRun(tx, {

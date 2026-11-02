@@ -27,8 +27,8 @@ function checkedURL(baseURL: string) {
 }
 export async function modelPolicy(): Promise<AssistantModelSnapshot> {
   const key = await modelFor("assistant"), spec = MODELS[key]!;
-  const baseURL = credential("models", spec.baseUrlEnv) ?? "";
-  if (process.env.ASSISTANT_MODEL_VERIFIED !== "true" || !spec.model || !baseURL)
+  const baseURL = spec ? credential("models", spec.baseUrlEnv) ?? "" : "";
+  if (process.env.ASSISTANT_MODEL_VERIFIED !== "true" || !spec?.model || !baseURL)
     throw catalogError("model_incompatible", "助手模型尚未配置或验证");
   if (process.env.ASSISTANT_TOKENIZER !== "cl100k_base")
     throw catalogError("model_incompatible", "助手模型需要明确的tokenizer配置");

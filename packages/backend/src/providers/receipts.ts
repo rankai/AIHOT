@@ -310,7 +310,7 @@ export function estimatedCatalogCost(snapshot: PriceSnapshot | null, usage: Reco
   return result((numerator + 500_000n) / 1_000_000n);
 }
 
-async function checkBudget(tx: Db, service: string, scope: BudgetScope | null = null): Promise<void> {
+export async function checkBudget(tx: Db, service: string, scope: BudgetScope | null = null): Promise<void> {
   const [budget] = scope === null
     ? await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`SELECT per_minute, per_hour, per_day FROM budgets WHERE service = ${service}`
     : await tx<{ per_minute: number; per_hour: number; per_day: number }[]>`SELECT per_minute, per_hour, per_day FROM budget_scopes WHERE service = ${service} AND scope = ${scope}`;
