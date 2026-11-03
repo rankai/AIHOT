@@ -48,6 +48,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 const SERVICE_LABELS: Array<[RegExp, string]> = [
+  [/^assistant\.vision$/, "封面图像分析"],
   [/^assistant\.text$/, "助手模型调用"],
   [/^redfox\.query$/, "Redfox 数据查询"],
   [/^redfox\.media$/, "Redfox 素材处理"],
@@ -756,6 +757,7 @@ function serviceLabel(value: string | null): string {
 }
 
 function operationLabel(value: string | null): string {
+  if(value === "quote-preparation")return "任务报价准备（平台承担）";
   if (!value) return "具体操作未知";
   return catalogOperationLabel[value] ?? OPERATION_LABELS.find(([pattern]) => pattern.test(value))?.[1] ?? value;
 }

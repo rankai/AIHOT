@@ -11,7 +11,7 @@ import { createSiteUser } from "@aihot/backend/users/accounts";
 import { loginSiteUser } from "@aihot/backend/users/auth";
 import { grantCredits, saveToolPrice, reconcileCreditCharge } from "@aihot/backend/users/credits";
 import { createSession, quoteTurn, submitTurn, sessionSnapshot, editArtifact, attachInput } from "@aihot/backend/assistant/sessions";
-import { enqueueMessage, advanceMessageQueue, approveQueuedMessage, cancelQueuedMessage, resumeMessageQueue, recoverMessageQueues } from "@aihot/backend/assistant/message-queue";
+import { enqueueMessage, advanceMessageQueue, approveQueuedMessage, cancelQueuedMessage, resumeMessageQueue, recoverMessageQueues, refreshQueuedQuote } from "@aihot/backend/assistant/message-queue";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { buildApp } from "../apps/api/src/app.ts";
 const completion = (name: string, input: unknown) => ({ id: "queue-fixture", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: null,
@@ -43,8 +43,9 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
     const { sessionId } = await createSession(user.id, { assistantId: "creative" }, randomUUID());
     const raw = { message: "先完成第一篇", expectedRevision: 1, inputIds: [], artifactVersions: [], skillSelection: { actionId: "general-writing" } };
     const q = await quoteTurn(user.id, sessionId, raw), first = await submitTurn(user.id, sessionId, { ...raw, quoteId: q.quoteId }, randomUUID());
+    assert.deepEqual(q.additionalFeeKinds, []);
     const advance = async (id: number) => { const [r] = await sql`SELECT step_version FROM operation_runs WHERE id=${id}`; await executeOperationStep(id, r.step_version, randomUUID()); };
-    const queued = { ...raw, message: "第二篇排队", expectedRevision: 2 }, key = randomUUID();
+    const queued = { ...raw, message: "第二篇排队", expectedRevision: 2, skillSelection: { skillId: "general-writing" }, taskHint: { actionId: "general-writing" } }, key = randomUUID();
     const before = await sql`SELECT count(*)::int n FROM member_tool_quotes WHERE user_id=${user.id}`;
     const entry = await post(`/api/assistant/sessions/${sessionId}/queue`, queued, key);
     const duplicate = await post(`/api/assistant/sessions/${sessionId}/queue`, queued, key);
@@ -58,10 +59,13 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
     assert.equal(snapshot.turn?.status, "completed"); assert.equal(snapshot.queue!.entries[0]!.state, "quoted");
     assert.equal((await sql`SELECT count(*)::int n FROM member_credit_charges WHERE user_id=${user.id}`)[0]!.n, 1);
     const proposal = snapshot.queue!.entries[0]!;
+    assert.deepEqual(proposal.quote!.additionalFeeKinds, []);
     const approved = await post(`/api/assistant/sessions/${sessionId}/queue/${entry.entryId}/approve`, { quoteId: proposal.quote!.quoteId });
     const replay = await post(`/api/assistant/sessions/${sessionId}/queue/${entry.entryId}/approve`, { quoteId: proposal.quote!.quoteId });
     assert.equal(replay.turnId, approved.turnId);
-    const [turn] = await sql`SELECT parent_operation_run_id FROM assistant_turns WHERE id=${approved.turnId}`;
+    const [turn] = await sql`SELECT parent_operation_run_id,snapshot FROM assistant_turns WHERE id=${approved.turnId}`;
+    assert.deepEqual(turn.snapshot.skillSelection, queued.skillSelection);
+    assert.deepEqual(turn.snapshot.taskHint, queued.taskHint);
     for (let i = 0; i < 4; i++) await advance(turn.parent_operation_run_id);
     await recoverMessageQueues();
     snapshot = await sessionSnapshot(user.id, sessionId);
@@ -96,17 +100,19 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
       const auto = await post(path, autoInput, autoKey);
       await Promise.all([post(`${path}/${secondQueued.entryId}/cancel`, {}), post(`${path}/${secondQueued.entryId}/cancel`, {})]);
       state = await sessionSnapshot(user.id, sessionId);
-      assert.equal(state.queue!.entries.find(e => e.id === auto.entryId)!.state, "submitted");
+      assert.equal(state.queue!.entries.find(e => e.id === auto.entryId)!.state, "quoted", "new tasks never inherit old automatic spend permission");
       await post(path, autoInput, autoKey);
-      assert.equal(await chargeCount(user.id), before + 1);
+      assert.equal(await chargeCount(user.id), before);
       assert.equal(supplier.hits(), hits, "command admission queues Worker work without calling a model");
-      await controlTurn(user.id, sessionId, state.turn!.turnId, "stop", { generation: state.turn!.generation });
+      await cancelQueuedMessage(user.id,sessionId,auto.entryId);
     });
     await t.test("post-commit quote rejection preserves original command and can recover explicitly", async () => {
       const x = await fixture(), key = randomUUID();
       const [price] = await sql`SELECT id,version FROM member_tool_prices WHERE kind='assistant-turn' AND model=${model}`;
+      await sql`UPDATE assistant_sessions SET queue_paused=true WHERE id=${x.id}`;
+      const queued = await enqueueMessage(x.u.id,x.id,x.input,key);
       await saveToolPrice({ id: price.id, expectedVersion: price.version, kind: "assistant-turn", provider: "assistant", model, baseCredits: 7, enabled: false, reason: "Synthetic unavailable price" }, "test");
-      const queued = await enqueueMessage(x.u.id, x.id, x.input, key);
+      await resumeMessageQueue(x.u.id,x.id);
       const failed = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!;
       assert.equal(failed.state, "pending"); assert(failed.error); assert.equal(await chargeCount(x.u.id), 0);
       assert.equal((await enqueueMessage(x.u.id, x.id, x.input, key)).entryId, queued.entryId);
@@ -158,15 +164,18 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
       await attachInput(x.u.id, x.id, { assetKey: upload.json().key }, randomUUID());
       const changed = await approveQueuedMessage(x.u.id, x.id, queued.entryId, { quoteId: initial.quoteId });
       assert('requote' in changed && changed.requote); assert.equal(await chargeCount(x.u.id), 0);
+      await refreshQueuedQuote(x.u.id,x.id,queued.entryId);
       let current = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!.quote!;
       await sql`UPDATE member_tool_quotes SET expires_at=now()-interval '1 second' WHERE id=${current.quoteId}`;
       const expired = await approveQueuedMessage(x.u.id, x.id, queued.entryId, { quoteId: current.quoteId });
       assert('requote' in expired && expired.requote);
+      await refreshQueuedQuote(x.u.id,x.id,queued.entryId);
       current = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!.quote!;
       const [price] = await sql`SELECT id,version FROM member_tool_prices WHERE kind='assistant-turn' AND model=${model}`;
       await saveToolPrice({ id: price.id, expectedVersion: price.version, kind: "assistant-turn", provider: "assistant", model, baseCredits: 9, enabled: true, reason: "Synthetic price change" }, "test");
       const repriced = await approveQueuedMessage(x.u.id, x.id, queued.entryId, { quoteId: current.quoteId });
       assert('requote' in repriced && repriced.requote); assert.equal(await chargeCount(x.u.id), 0);
+      await refreshQueuedQuote(x.u.id,x.id,queued.entryId);
       current = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!.quote!; assert.equal(current.amount, 9);
       const accepted = await approveQueuedMessage(x.u.id, x.id, queued.entryId, { quoteId: current.quoteId });
       const [saved] = await sql`SELECT snapshot FROM assistant_turns WHERE id=${accepted.turnId!}`;
@@ -176,31 +185,29 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
       const [latestPrice] = await sql`SELECT version FROM member_tool_prices WHERE id=${price.id}`;
       await saveToolPrice({ id: price.id, expectedVersion: latestPrice.version, kind: "assistant-turn", provider: "assistant", model, baseCredits: 7, enabled: true, reason: "Restore synthetic price" }, "test");
     });
-    await t.test("automatic authorization is bound at enqueue; exhausted or revoked allowance falls back to manual", async () => {
-      const x = await fixture(), prices = (await feeSettings(x.u.id, x.id)).prices;
-      const auth = (await setFeeAuthorization(x.u.id, x.id, { enabled: true, expectedVersion: 0, totalLimit: 7, allowSearch: false, turnPrice: prices.turn, searchPrice: null })).authorization!;
-      const first = await enqueueMessage(x.u.id, x.id, { ...x.input, autoAuthorizationId: auth.id }, randomUUID());
-      const second = await enqueueMessage(x.u.id, x.id, { ...x.input, expectedRevision: (await sessionSnapshot(x.u.id, x.id)).revision, message: "超出额度", autoAuthorizationId: auth.id }, randomUUID());
-      await advanceMessageQueue(x.u.id, x.id);
-      let snapshot = await sessionSnapshot(x.u.id, x.id); assert.equal(snapshot.queue!.entries[0]!.state, "submitted");
-      for (let i = 0; i < 4; i++) await advance(snapshot.turn!.runId);
-      snapshot = await sessionSnapshot(x.u.id, x.id);
-      assert.equal(snapshot.queue!.entries.find(e => e.id === second.entryId)!.state, "quoted"); assert.equal(await chargeCount(x.u.id), 1);
-      assert.match(snapshot.queue!.entries.find(e => e.id === second.entryId)!.error!, /授权|额度/);
-      await cancelQueuedMessage(x.u.id, x.id, second.entryId);
-      const nextInput = { ...x.input, expectedRevision: snapshot.revision, autoAuthorizationId: auth.id };
-      const third = await enqueueMessage(x.u.id, x.id, nextInput, randomUUID());
-      await setFeeAuthorization(x.u.id, x.id, { enabled: true, expectedVersion: auth.version, totalLimit: 200, allowSearch: false, turnPrice: prices.turn, searchPrice: null });
-      await advanceMessageQueue(x.u.id, x.id);
-      snapshot = await sessionSnapshot(x.u.id, x.id);
-      assert.equal(snapshot.queue!.entries.find(e => e.id === third.entryId)!.state, "quoted", "later replacement authorization is not retroactive");
-      assert.equal(await chargeCount(x.u.id), 1);
-      const prepared = snapshot.queue!.entries.find(e => e.id === third.entryId)!;
-      const manual = await approveQueuedMessage(x.u.id, x.id, third.entryId, { quoteId: prepared.quote!.quoteId });
-      assert(manual.turnId);
-      assert.equal((await sql`SELECT count(*)::int n FROM assistant_auto_charges WHERE turn_id=${manual.turnId!}`)[0]!.n, 0);
-      snapshot = await sessionSnapshot(x.u.id, x.id); await controlTurn(x.u.id, x.id, manual.turnId!, "stop", { generation: snapshot.turn!.generation });
-      assert(first.entryId);
+    await t.test("new queued tasks do not inherit legacy automatic authorization",async()=>{
+      const x=await fixture(),prices=(await feeSettings(x.u.id,x.id)).prices;
+      const auth=(await setFeeAuthorization(x.u.id,x.id,{enabled:true,expectedVersion:0,totalLimit:70,allowSearch:false,turnPrice:prices.turn,searchPrice:null})).authorization!;
+      const entry=await enqueueMessage(x.u.id,x.id,{...x.input,autoAuthorizationId:auth.id},randomUUID());
+      let state=await sessionSnapshot(x.u.id,x.id);assert.equal(state.queue!.entries[0]!.state,'quoted');assert.equal(await chargeCount(x.u.id),0);
+      const run=await approveQueuedMessage(x.u.id,x.id,entry.entryId,{quoteId:state.queue!.entries[0]!.quote!.quoteId});assert(run.turnId);
+      assert.equal((await sql`SELECT count(*)::int n FROM assistant_auto_charges WHERE turn_id=${run.turnId!}`)[0]!.n,0);
+      for(let i=0;i<4;i++)await advance((await sessionSnapshot(x.u.id,x.id)).turn!.runId);
+      assert.equal((await feeSettings(x.u.id,x.id)).authorization!.used,0);
+    });
+    await t.test("historical accepted queue retains its original automatic authorization and single-tool charge",async()=>{
+      const x=await fixture(),prices=(await feeSettings(x.u.id,x.id)).prices;
+      const auth=(await setFeeAuthorization(x.u.id,x.id,{enabled:true,expectedVersion:0,totalLimit:70,allowSearch:false,turnPrice:prices.turn,searchPrice:null})).authorization!;
+      await sql`UPDATE assistant_sessions SET queue_paused=true WHERE id=${x.id}`;
+      const entry=await enqueueMessage(x.u.id,x.id,{...x.input,autoAuthorizationId:auth.id},randomUUID());
+      const {candidates}=await import('@aihot/backend/assistant/catalog');
+      const historical=await candidates('creative',{actionId:'general-writing'},{'general-writing':'2'});
+      await sql`UPDATE assistant_message_queue SET admission_snapshot=jsonb_set(admission_snapshot,'{candidates}',${sql.json(historical as never)}) WHERE id=${entry.entryId}`;
+      await resumeMessageQueue(x.u.id,x.id);
+      const state=await sessionSnapshot(x.u.id,x.id);assert.equal(state.queue!.entries[0]!.state,'submitted');
+      const [charge]=await sql`SELECT pricing_snapshot FROM member_credit_charges WHERE root_run_id=${state.turn!.runId}`;assert.equal(charge!.pricing_snapshot.task,undefined);
+      assert.equal((await feeSettings(x.u.id,x.id)).authorization!.used,7);
+      await controlTurn(x.u.id,x.id,state.turn!.turnId,'stop',{generation:state.turn!.generation});
     });
     await t.test("stop and completion share session lock; queue stays paused until explicit continuation", async () => {
       const x = await fixture(), quote = await quoteTurn(x.u.id, x.id, x.input), run = await submitTurn(x.u.id, x.id, { ...x.input, quoteId: quote.quoteId }, randomUUID());
@@ -236,8 +243,8 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
       const entry = await enqueueMessage(x.u.id, x.id, { ...x.input, expectedRevision: 2, message: "下一条", autoAuthorizationId: auth.id }, randomUUID());
       for (let i = 0; i < 4; i++) await advance(first.runId);
       const prepared = (await sessionSnapshot(x.u.id, x.id)).queue!.entries.find(row => row.id === entry.entryId)!;
-      assert.equal(prepared.state, "submitted", "the queued successor was admitted automatically");
-      const second = { turnId: prepared.turnId };
+      assert.equal(prepared.state, "quoted");
+      const second = await approveQueuedMessage(x.u.id,x.id,entry.entryId,{quoteId:prepared.quote!.quoteId});
       await controlTurn(x.u.id, x.id, first.turnId, "stop", { generation: observed.turn!.generation });
       const stopped = await sessionSnapshot(x.u.id, x.id);
       assert.equal(stopped.turn!.turnId, second.turnId); assert.equal(stopped.turn!.status, "stopped"); assert(stopped.queue!.paused);
@@ -247,10 +254,10 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
       assert.equal(await chargeCount(x.u.id), 2);
     });
     await t.test("old stop cannot affect independent requests or a resumed generation", async () => {
-      const x = await fixture(), quote = await quoteTurn(x.u.id, x.id, x.input), first = await submitTurn(x.u.id, x.id, { ...x.input, quoteId: quote.quoteId }, randomUUID());
+      const x = await fixture(), quote = await legacyQuoteTurn(x.u.id, x.id, x.input), first = await submitTurn(x.u.id, x.id, { ...x.input, quoteId: quote.quoteId }, randomUUID());
       for (let i = 0; i < 4; i++) await advance(first.runId);
       const completed = await sessionSnapshot(x.u.id, x.id), nextInput = { ...x.input, expectedRevision: completed.revision, message: "独立新请求" };
-      const nextQuote = await quoteTurn(x.u.id, x.id, nextInput), second = await submitTurn(x.u.id, x.id, { ...nextInput, quoteId: nextQuote.quoteId }, randomUUID());
+      const nextQuote = await legacyQuoteTurn(x.u.id, x.id, nextInput), second = await submitTurn(x.u.id, x.id, { ...nextInput, quoteId: nextQuote.quoteId }, randomUUID());
       await assert.rejects(controlTurn(x.u.id, x.id, first.turnId, "stop", { generation: 0 }), /独立新回合/);
       let state = await sessionSnapshot(x.u.id, x.id);
       assert.equal(state.turn!.status, "active"); assert.equal(state.queue!.paused, false);
@@ -290,3 +297,9 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
 
   } finally { await app?.close(); await supplier.close(); await stopBoss(); await restore(); await closeDb(); }
 });
+
+/** Frozen pre-task quote fixture for the historical stop/resume contract only. */
+async function legacyQuoteTurn(userId:number,id:string,raw:unknown){
+ const {snapshotInput}=await import('@aihot/backend/assistant/sessions');const {quoteTool}=await import('@aihot/backend/users/credits');
+ const prepared=await snapshotInput(sql,userId,id,raw);return quoteTool(userId,prepared.intent);
+}

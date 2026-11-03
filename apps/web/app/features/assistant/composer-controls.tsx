@@ -1,51 +1,47 @@
 import { useRef, useState } from "react";
-import type { AssistantArtifact, AssistantFeeAuthorization, AssistantOptions, AssistantProfileDto } from "@aihot/contracts/assistant";
+import type { AssistantArtifact, AssistantFeeAuthorization, AssistantOptions, AssistantProfileDto, AssistantSkillSelection } from "@aihot/contracts/assistant";
 import { IconApps } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
+import { ComposerMenu } from "./composer-menu";
 
-export function AssistantComposerControls({ profile, actionId, onAction, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled, refreshOptions }: {
-  profile: AssistantProfileDto; actionId: string | null; onAction: (id: string | null) => void; disabled: boolean;
+export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled, refreshOptions, taskChoice, onTaskChoice }: {
+  taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice; onTaskChoice?: (choice: import("@aihot/contracts/assistant").AssistantTaskChoice | undefined)=>void;
+  profile: AssistantProfileDto; selection: AssistantSkillSelection | null; onSelection: (selection: AssistantSkillSelection | null) => void; disabled: boolean;
   addFiles: (files: File[]) => void; capabilities: AssistantOptions["inputCapabilities"];
   artifacts?: AssistantArtifact[]; onReference?: (artifact: AssistantArtifact) => void;
   feeAuthorization?: AssistantFeeAuthorization | null; configureFees: () => void; manualFees?: () => void;
   feeDisabled?: boolean; refreshOptions?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const menu = useRef<HTMLDetailsElement>(null);
-  const feeMenu = useRef<HTMLDetailsElement>(null);
+  const [openMenu, setOpenMenu] = useState<"add" | "skill" | "fee" | null>(null);
+  function changeMenu(owner: "add" | "skill" | "fee", open: boolean) {
+    // A previous menu can still observe focus while the next portal is mounting.
+    setOpenMenu((current) => open ? owner : current === owner ? null : current);
+  }
   const [pickArtifact, setPickArtifact] = useState(false);
-  const label = profile.actions.find((action) => action.actionId === actionId)?.label ?? (actionId ? "原技能不可用，请重新选择" : "自动选择技能");
+  const referenceableArtifacts = artifacts.filter((artifact) => artifact.kind !== "image");
+  const groups = [...new Map(profile.actions.map(action => [action.skillId, { skillId: action.skillId, name: action.skillName,
+    available: profile.actions.some(item => item.skillId === action.skillId && item.available) }])).values()];
+  const legacy = selection && "actionId" in selection ? profile.actions.find(action => action.actionId === selection.actionId) : null;
+  const selected = selection && "skillId" in selection ? groups.find(group => group.skillId === selection.skillId) : null;
+  const label = legacy ? `${legacy.skillName} · 本次：${legacy.label}` : selected?.name ?? (selection ? "原技能不可用，请重新选择" : "自动选择技能");
   return <div className="assistant-composer-controls">
     <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
-    <details className="assistant-add-menu" ref={menu}>
-      <summary aria-label="添加材料" title="添加材料" aria-disabled={disabled} onClick={(event) => { if (disabled) event.preventDefault(); }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></summary>
-      <div>
-        <button type="button" disabled={disabled} onClick={() => { menu.current?.removeAttribute("open"); input.current?.click(); }}>上传 TXT / MD 文件</button>
-        <button type="button" disabled={disabled || !artifacts.length} onClick={() => { menu.current?.removeAttribute("open"); setPickArtifact(true); }}>引用已保存稿件{!artifacts.length ? "（暂无）" : ""}</button>
-        <p>上传和读取文本不消耗积分。粘贴链接仅作为文字。</p>
-      </div>
-    </details>
-    <label className="assistant-skill-control" title={label}>
-      <span className="sr-only">选择技能，当前{label}</span>
-      <IconApps size={16} />
-      <select onFocus={refreshOptions} onPointerDown={refreshOptions} value={actionId && !profile.actions.some(action => action.actionId === actionId) ? "unavailable" : actionId ?? ""} disabled={disabled} aria-label={`选择技能，当前${label}`} onChange={(event) => onAction(event.target.value || null)}>
-        {actionId && !profile.actions.some(action => action.actionId === actionId) && <option value="unavailable" disabled>原技能不可用，请重新选择</option>}
-        <option value="">自动选择技能</option>
-        {profile.actions.filter(action => action.actionId !== "wechat").map((action) => <option key={action.actionId} value={action.actionId} disabled={!action.available}>{action.label}{!action.available ? " · 暂不可用" : ""}</option>)}
-      </select>
-    </label>
-    <details className="assistant-fee-menu" ref={feeMenu}>
-    <summary className="assistant-fee-control" aria-disabled={feeDisabled} onClick={(event) => { if (feeDisabled) event.preventDefault(); }} aria-label={`费用确认：${feeAuthorization?.enabled ? `额度内自动，剩余${feeAuthorization.remaining}积分` : "每次确认"}`}>
-      <span><span className="assistant-control-long">{feeAuthorization?.enabled ? "额度内自动" : "每次确认"}</span><span className="assistant-control-short">{feeAuthorization?.enabled ? "自动" : "费用确认"}</span><span aria-hidden="true"> ▾</span></span>
-      {feeAuthorization?.enabled && <span className="assistant-fee-remaining">剩余 {feeAuthorization.remaining} 积分</span>}
-    </summary>
-      <div className="assistant-fee-menu-options">
-        <button type="button" disabled={feeDisabled} aria-pressed={!feeAuthorization?.enabled} onClick={() => { feeMenu.current?.removeAttribute("open"); manualFees?.(); }}>每次确认</button>
-        <button type="button" disabled={feeDisabled} aria-pressed={!!feeAuthorization?.enabled} onClick={() => { feeMenu.current?.removeAttribute("open"); configureFees(); }}>额度内自动</button>
-
-      </div>
-    </details>
-    {pickArtifact && <ArtifactPicker artifacts={artifacts} close={() => setPickArtifact(false)} select={(artifact) => { onReference?.(artifact); setPickArtifact(false); }} />}
+    <ComposerMenu open={openMenu === "add"} setOpen={(open) => changeMenu("add", open)} disabled={disabled} label="添加材料" className="assistant-add-menu"
+      trigger={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>}>
+      <button role="menuitem" type="button" disabled={disabled} onClick={() => input.current?.click()}>上传 TXT / MD 文件</button>
+      <button role="menuitem" type="button" disabled={disabled || !referenceableArtifacts.length} onClick={() => setPickArtifact(true)}>引用已保存稿件{!referenceableArtifacts.length ? "（暂无）" : ""}</button>
+      <p>上传和读取文本不消耗积分。粘贴链接仅作为文字。</p>
+    </ComposerMenu>
+    <ComposerMenu open={openMenu === "skill"} setOpen={(open) => changeMenu("skill", open)} disabled={disabled} label={`选择技能，当前${label}`} className="assistant-skill-control" onOpen={refreshOptions}
+      trigger={<><IconApps size={16} /><span>{label}</span></>}>
+      {selection && !legacy && !selected && <button type="button" role="menuitemradio" aria-checked="true" disabled>原技能不可用，请重新选择</button>}
+      {legacy && <button type="button" role="menuitemradio" aria-checked="true" disabled>{legacy.skillName} · 本次：{legacy.label}</button>}
+      <button type="button" role="menuitemradio" aria-checked={!selection} disabled={disabled} onClick={() => onSelection(null)}>自动选择技能</button>
+      {groups.map((group) => <button type="button" key={group.skillId} role="menuitemradio" aria-checked={selected?.skillId === group.skillId} disabled={disabled || !group.available} onClick={() => onSelection({ skillId: group.skillId })}>{group.name}{!group.available ? " · 暂不可用" : ""}</button>)}
+    </ComposerMenu>
+    <span className="text-[11px] text-ink-3" title="每次任务确认一次上限，完成或停止后按实际交付结算">执行前确认费用</span>
+    {pickArtifact && <ArtifactPicker artifacts={referenceableArtifacts} close={() => setPickArtifact(false)} select={(artifact) => { onReference?.(artifact); setPickArtifact(false); }} />}
   </div>;
 }
 function ArtifactPicker({ artifacts, close, select }: { artifacts: AssistantArtifact[]; close: () => void; select: (artifact: AssistantArtifact) => void }) {
@@ -65,4 +61,11 @@ export function AssistantSkillNotice() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>
     <span>内容已保留。当前技能暂不可用，可稍后再试或更换技能。</span>
   </p>;
+}
+
+export function TaskClarification({profile,selection,disabled,confirm}:{profile:AssistantProfileDto;selection:AssistantSkillSelection|null;disabled:boolean;confirm:(choice:import("@aihot/contracts/assistant").AssistantTaskChoice)=>void}) {
+ const options=(profile.taskOptions??[]).filter(o=>!selection||('skillId' in selection?o.choice.skillId===selection.skillId:profile.actions.find(a=>a.actionId===selection.actionId)?.skillId===o.choice.skillId));
+ const [index,setIndex]=useState<number|null>(null),[size,setSize]=useState('');
+ const current=index===null?null:options[index];
+ return <section className="assistant-inline-notice" aria-label="确认本次交付内容"><p className="mb-2 text-[13px]">这次希望完成什么？</p><div className="space-y-2">{options.map((option,i)=><label key={JSON.stringify(option.choice)} className="flex items-start gap-2 text-[12px]"><input type="radio" name="assistant-task-choice" checked={index===i} disabled={disabled} onChange={()=>{setIndex(i);setSize(option.sizes[0]??'');}}/><span>{option.label}</span></label>)}</div>{current?.sizes.length ? <label className="mt-3 flex items-center gap-2 text-[12px]">图片比例<select className="rounded border border-line bg-surface px-2 py-1" aria-label="图片比例" value={size} disabled={disabled} onChange={e=>setSize(e.target.value)}>{current.sizes.map(s=><option key={s}>{s}</option>)}</select></label>:null}<Button className="mt-3" size="sm" disabled={disabled||!current} onClick={()=>current&&confirm({...current.choice,...(current.sizes.length?{size}:{})})}>继续获取费用</Button></section>;
 }

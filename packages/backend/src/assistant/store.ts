@@ -57,6 +57,10 @@ export async function saveArtifact(
     sourceSnapshot?: AssistantSource[];
   },
 ) {
+  if (input.artifactId) {
+    const [previous] = await tx`SELECT kind FROM assistant_artifact_versions WHERE session_id=${input.sessionId} AND artifact_id=${input.artifactId} LIMIT 1`;
+    if (previous && !["text-draft","xhs-note"].includes(previous.kind)) throw conflict("此作品不能作为普通文本稿件编辑");
+  }
   const content = Content.parse(input.content),
     id = input.artifactId ? uuid.parse(input.artifactId) : randomUUID();
   await tx`SELECT id FROM assistant_sessions WHERE id=${input.sessionId} FOR UPDATE`;
@@ -64,8 +68,6 @@ export async function saveArtifact(
     await tx`SELECT max(version)::int AS version FROM assistant_artifact_versions WHERE artifact_id=${id} AND session_id=${input.sessionId}`;
   if ((latest?.version ?? 0) !== input.baseVersion || (input.artifactId && !latest?.version))
     throw conflict("稿件版本已变化，请刷新");
-  if (input.kind === "xhs-note" && !content.tags.length)
-    throw conflict("小红书稿件需要标签");
   let sources = input.sourceSnapshot;
   if (!sources && input.artifactId) {
     const [previous] =

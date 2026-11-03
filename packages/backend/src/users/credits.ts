@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { ToolAuthorization } from "@aihot/contracts/credits";
+import type { ToolAuthorization, ToolCreditIntent } from "@aihot/contracts/credits";
 import { sql, type Tx } from "../db.ts";
 import { audit } from "../admin/auth.ts";
 import { AccountError, UserId } from "./accounts.ts";
@@ -21,6 +21,10 @@ export async function reserveForRun(tx: Tx, command: { actor: string; runId: num
   if (userId === null) return;
   if (!command.authorization) throw new AccountError(403, "quote_required", "请先确认本次任务的积分报价");
   const intent = parseCreditIntent(command.authorization.intent);
+  if (command.authorization.taskAllocation) {
+    await allocateTaskItem(tx, command.actor, command.runId, command.authorization);
+    return;
+  }
   const quoteId = QuoteId.parse(command.authorization.quoteId);
   await requireCreditUser(tx, userId, true);
   const [run] = await tx<CreditRunRow[]>`SELECT * FROM operation_runs WHERE id = ${command.runId} AND actor = ${command.actor}`;
@@ -51,8 +55,15 @@ export async function reserveForRun(tx: Tx, command: { actor: string; runId: num
   }
 
   if (quote.recovery_run_id !== null) throw new AccountError(409, "conflict", "此报价只能用于恢复原任务");
-  const currentPrice = await selectToolPrice(tx, intent);
-  if (currentPrice.id !== quote.price_id || currentPrice.version !== quote.price_version) throw new AccountError(409, "price_changed", "积分价格已变化，请重新确认报价");
+  if (quote.pricing_snapshot.task) {
+    for (const item of quote.pricing_snapshot.task.items) {
+      const price = await selectToolPrice(tx, item.intent);
+      if (price.id !== item.pricing.price.id || price.version !== item.pricing.price.version) throw new AccountError(409, "price_changed", "任务价格已变化，请重新确认报价");
+    }
+  } else {
+    const currentPrice = await selectToolPrice(tx, intent);
+    if (currentPrice.id !== quote.price_id || currentPrice.version !== quote.price_version) throw new AccountError(409, "price_changed", "积分价格已变化，请重新确认报价");
+  }
   Credits.parse(quote.amount);
   const wallet = await lockCreditWallet(tx, userId);
   if (wallet.available < quote.amount) throw new AccountError(409, "insufficient_credits", "可用积分不足，请联系管理员补充");
@@ -60,9 +71,39 @@ export async function reserveForRun(tx: Tx, command: { actor: string; runId: num
   await tx`INSERT INTO member_credit_charges(id, user_id, root_run_id, quote_id, amount, pricing_snapshot)
     VALUES (${chargeId}, ${userId}, ${run.id}, ${quote.id}, ${quote.amount}, ${tx.json(quote.pricing_snapshot as never)})`;
   await tx`INSERT INTO member_credit_run_links(run_id, charge_id) VALUES (${run.id}, ${chargeId})`;
+  for (const item of quote.pricing_snapshot.task?.items ?? []) {
+    for (let unit = 1; unit <= item.units; unit++) await tx`INSERT INTO member_credit_task_items(charge_id,item_key,unit,pricing_snapshot,intent,amount,run_id)
+      VALUES (${chargeId},${item.key},${unit},${tx.json(item.pricing as never)},${tx.json(item.intent as never)},${item.amount},${item.intent.kind === "assistant-turn" ? run.id : null})`;
+  }
   await appendCreditEntry(tx, wallet, { kind: "reserve", amount: quote.amount, availableDelta: -quote.amount, reservedDelta: quote.amount,
     actor: command.actor, commandKey: `reserve:${run.id}`, inputHash: quote.input_hash, reason: "确认任务报价，预占积分", chargeId, runId: run.id });
   await tx`UPDATE member_tool_quotes SET consumed_run_id = ${run.id} WHERE id = ${quote.id}`;
+}
+
+
+/** An allocation is server-created from a persisted proposal under the parent's execution lock. */
+async function allocateTaskItem(tx: Tx, actor: string, runId: number, authorization: ToolAuthorization) {
+  const allocation = authorization.taskAllocation!;
+  const [parent] = await tx`SELECT r.*,t.id AS turn_id FROM operation_runs r JOIN assistant_turns t ON t.parent_operation_run_id=r.id
+    WHERE r.id=${allocation.parentRunId} AND r.actor=${actor} FOR UPDATE OF r`;
+  if (!parent || !["active","waiting"].includes(parent.status) || parent.generation !== allocation.generation) throw new AccountError(409,"task_stopped","原任务已停止或授权已变化");
+  const charge = await chargeForRun(tx, parent.id, true);
+  if (!charge?.pricing_snapshot.task || charge.state !== "reserved" || charge.quote_id !== authorization.quoteId) throw new AccountError(409,"credits_finalized","任务授权不可执行");
+  const [call] = await tx`SELECT * FROM assistant_tool_calls WHERE id=${allocation.callId} AND turn_id=${parent.turn_id} FOR UPDATE`;
+  const intent = parseCreditIntent(authorization.intent);
+  const [child] = await tx`SELECT actor,provider FROM operation_runs WHERE id=${runId}`;
+  if (!child || child.actor !== actor || child.provider !== intent.provider) throw new AccountError(409,"task_scope_changed","子任务身份或供应商与授权不一致");
+  if (!call || call.child_run_id !== null || !["pending","proposed"].includes(call.state) || creditHash(call.result?.normalized?.intent) !== creditHash(intent)) throw new AccountError(409,"task_scope_changed","子任务不属于本次授权建议");
+  const items = await tx`SELECT * FROM member_credit_task_items WHERE charge_id=${charge.id} AND run_id IS NULL ORDER BY item_key,unit FOR UPDATE`;
+  const item = items.find(item => {
+    const frozen = item.intent as ToolCreditIntent;
+    return frozen.kind === intent.kind && frozen.provider === intent.provider && (frozen.model ?? "") === (intent.model ?? "") && (frozen.tier ?? "") === (intent.tier ?? "")
+      && (frozen.imageCount ?? 0) === (intent.imageCount ?? 0) && (frozen.videoSeconds ?? 0) === (intent.videoSeconds ?? 0) && (frozen.referenceCount ?? 0) === (intent.referenceCount ?? 0)
+      && Object.entries(item.pricing_snapshot.price.parameterMatch).every(([path,value]) => path.split(".").reduce((v:any,k) => v?.[k], intent.input) === value)
+      && Object.entries(frozen.input).every(([key,value]) => creditHash(intent.input[key]) === creditHash(value));
+  });
+  if (!item) throw new AccountError(409,"task_scope_exceeded","该能力、次数或规格不在本次任务冻结范围内，请结束当前任务后重新报价");
+  await tx`UPDATE member_credit_task_items SET run_id=${runId} WHERE charge_id=${charge.id} AND item_key=${item.item_key} AND unit=${item.unit}`;
 }
 
 /** Shared execution guard: refunded/finalized runs and superseded originals cannot call providers. */

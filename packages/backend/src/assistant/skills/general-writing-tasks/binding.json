@@ -1,0 +1,36 @@
+{
+  "formatVersion": 1,
+  "skillId": "general-writing",
+  "version": "3",
+  "name": "通用创作",
+  "modules": [
+    {
+      "moduleId": "write",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "general-writing",
+      "label": "通用文章草稿",
+      "entry": "write",
+      "capabilities": [
+        "save-writing@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "通用文章草稿",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

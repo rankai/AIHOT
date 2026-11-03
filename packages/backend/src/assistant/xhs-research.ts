@@ -86,8 +86,6 @@ export async function analyzeResearch(tx: Tx, turn: Record<string, any>, callId:
     ...(samples.some((s) => s.textTruncated) ? ["部分正文截断，仅分析可见片段"] : []),
     ...(samples.some((s) => Object.values(s.metrics).some((v) => v === null)) ? ["部分互动或评分未知，不能补算或声称数据排名"] : []),
   ])];
-  if (samples.every((s) => Object.values(s.metrics).every((v) => v === null)) && !/未知|未提供|缺失|未返回/.test(input.interactionPattern.observation))
-    throw conflict("缺少互动数据时分析必须明确未知，不能推导高互动排名");
   return { analysisCallId: callId, activationId: input.activationId, topic: input.topic, samples,
     patterns: { title: input.titlePattern, content: input.contentPattern, tags: input.tagPattern, interaction: input.interactionPattern },
     applicationPlan: input.applicationPlan, limitations };
@@ -108,8 +106,8 @@ export async function verifyResearchDelivery(tx: Tx, turn: Record<string, any>, 
   if (!same && !inherited) throw conflict("分析不属于当前激活或选定的已验证稿件版本");
   const ids = new Set(analysis.result.samples.map((s: any) => s.sourceId));
   const cited = sources.filter((s) => content.sources.includes(s.id) && ids.has(s.id));
-  if (cited.length < Math.min(2, ids.size) || content.titles.length < 3 || content.tags.length < 5 || content.intent !== "draft")
-    throw conflict("M1需要实际研究引用、3–6个标题、完整正文和5–10个标签");
+  if (cited.length < Math.min(2, ids.size))
+    throw conflict("研究稿需要引用实际分析样本");
   const { analysisCallId, ...applied } = application;
   const patterns = analysis.result.patterns;
   const references = analysis.result.samples.filter((sample: any) => cited.some((s) => s.id === sample.sourceId)).map((sample: any) =>

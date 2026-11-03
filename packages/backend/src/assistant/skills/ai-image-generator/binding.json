@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "skillId": "ai-image-generator",
+  "version": "1",
+  "name": "图片生成",
+  "modules": [
+    {
+      "moduleId": "generate",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "ai-image-generator",
+      "label": "图片生成",
+      "entry": "entry",
+      "capabilities": [
+        "generate_image@1"
+      ],
+      "inputContract": "image-input@1",
+      "deliveryContract": "image-delivery@1",
+      "references": [
+        "upstream-skill",
+        "platform-specs",
+        "integration-contract"
+      ],
+      "scriptBindings": []
+    }
+  ]
+}

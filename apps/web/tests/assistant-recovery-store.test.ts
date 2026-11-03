@@ -13,6 +13,15 @@ test("independent command records survive refresh, interleaved tabs, ordinary ed
   try {
     const scope = "member-a:session", a: Recovery = { kind: "turn", value: { commandKey: "turn-a", input, quoteId: quote.quoteId, hasUnknownResult: true, attachments: [{ id: "file", name: "local.txt", state: "ready", file: new File(["private"], "local.txt") }] } };
     const b: Recovery = { kind: "queue", value: { kind: "enqueue", key: "queue-b", input, unknown: true } };
+    for (const skillSelection of [{ skillId: "xiaohongshu-creator" }, { actionId: "xiaohongshu-rewrite" }]) {
+      const frozen = { ...input, skillSelection, taskHint: { actionId: "xiaohongshu-rewrite" } };
+      const record: Recovery = { kind: "turn", value: { commandKey: "selection-roundtrip", input: frozen, quoteId: quote.quoteId, hasUnknownResult: true } };
+      saveRecovery(scope, record);
+      assert.deepEqual(readRecoveries(scope)[0].value, record.value);
+      clearRecovery(scope, record);
+    }
+    for (const skillSelection of [{ skillId: "x", actionId: "y" }, { skillId: "x", moduleId: "M1" }, {}])
+      assert.throws(() => saveRecovery(scope, { kind: "turn", value: { commandKey: "invalid-selection", input: { ...input, skillSelection }, quoteId: quote.quoteId } } as Recovery));
     saveRecovery(scope, a);
     // A second module instance models a refreshed document with no module cache or draft memory.
     const tab = await import(new URL("../app/features/assistant/recovery-store.ts?second-tab", import.meta.url).href);
@@ -38,6 +47,14 @@ test("independent command records survive refresh, interleaved tabs, ordinary ed
     const q: Recovery = { kind: "quote", value: { commandKey: "quote-confirm", input, quote } };
     saveRecovery(scope, q);
     assert.deepEqual(tab.readRecoveries(scope).find((r: Recovery) => r.kind === "quote").value, q.value);
+    for (const additionalFeeKinds of [[], ["search"], ["image"], ["search", "image"]] as const) {
+      const scoped: Recovery = { ...q, value: { ...q.value, quote: { ...quote, additionalFeeKinds } } };
+      saveRecovery(scope, scoped);
+      assert.deepEqual(tab.readRecoveries(scope).find((r: Recovery) => r.kind === "quote").value, scoped.value);
+    }
+    for (const additionalFeeKinds of [null, "image", ["other"], ["image", "image"], ["search", "image", "image"]])
+      assert.throws(() => saveRecovery(scope, { ...q, value: { ...q.value, quote: { ...quote, additionalFeeKinds } } } as unknown as Recovery));
+    assert.throws(() => saveRecovery(scope, { ...q, value: { ...q.value, quote: { ...quote, untrusted: true } } } as unknown as Recovery));
     clearRecovery(scope, q);
     assert.equal(readDraft(scope).attachments![0]!.id, "new", "cancelling quote cannot merge its old material selection into the later draft");
     assert.equal(readDraft(scope).pendingQueue!.key, "queue-c");

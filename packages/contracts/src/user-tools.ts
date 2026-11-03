@@ -54,7 +54,10 @@ export interface ToolRunDetail extends ToolRunRow {
   originRunId: number | null;
   continuationRunId: number | null;
   recoveryKind: "images/query" | "videos/query" | "ai-search/query" | "transcriptions/query" | "xhs-comments/query" | null;
-  charge: { amount: number; state: "reserved" | "review" | "settled" | "released"; consumed: number; released: number } | null;
+  charge: ({ state: "reserved" | "review" | "settled" | "released" } & (
+    { taskRunId?: never; amount: number; consumed: number; released: number }
+    | { taskRunId: number; itemAmount: number; amount?: never; consumed?: never; released?: never }
+  )) | null;
 }
 export interface ToolRunPage { rows: ToolRunRow[]; nextCursor: number | null }
 export interface ToolAssetPage { items: ToolAsset[]; nextCursor: string | null }

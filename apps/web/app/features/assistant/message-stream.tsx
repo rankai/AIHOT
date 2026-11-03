@@ -45,7 +45,7 @@ export function AssistantMessageStream({
   readError: string | null;
   refresh: () => Promise<unknown>;
   control: (action: "stop" | "resume") => Promise<void>;
-  showArtifacts: () => void;
+  showArtifacts: (target?: { artifactId: string; version: number }) => void;
   setView: (view: "chat" | "artifacts") => void;
   view: "chat" | "artifacts";
 }) {
@@ -165,7 +165,7 @@ export function AssistantMessageStream({
                 {profile?.welcome ?? "此会话的助手当前不可用，请稍后重试。"}
               </p>
               <p className="mt-3 text-[12px] text-ink-4">
-                发送需求后按本会话费用模式确认；默认每次确认积分。
+                发送需求后确认任务费用上限，结束时按实际交付结算。
               </p>
             </div>
           )}

@@ -40,3 +40,6 @@ export interface PlatformOperationDescriptor {
   collectionCapabilities?: { sourceRequired?:boolean; detailEnrichment:boolean; detailOperations?: readonly {operationId:string;label:string;fields:readonly PlatformField[];price:{amount:number|null;currency:string;basis:"estimated"}|null}[] };
   schedulableType: null | "search" | "trend" | "list";
 }
+
+/** Local confirmed insufficient-balance observation; administrator-only. */
+export interface RedfoxBalanceObservation { observedAt: string; runId: number | null; parentTurnId: string | null }

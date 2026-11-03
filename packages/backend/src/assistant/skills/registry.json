@@ -1,0 +1,74 @@
+{
+  "formatVersion": 1,
+  "entries": [
+    {
+      "directory": "general-writing"
+    },
+    {
+      "directory": "xiaohongshu-creator"
+    },
+    {
+      "directory": "xiaohongshu-creator-v2"
+    },
+    {
+      "directory": "wechat-write"
+    },
+    {
+      "directory": "image-generator"
+    },
+    {
+      "directory": "claude-image-generation"
+    },
+    {
+      "directory": "ai-image-generator"
+    },
+    {
+      "directory": "xiaohongshu-creator-v4"
+    },
+    {
+      "directory": "general-writing-tasks"
+    },
+    {
+      "directory": "wechat-write-tasks"
+    },
+    {
+      "directory": "image-generator-tasks"
+    },
+    {
+      "directory": "claude-image-generation-tasks"
+    },
+    {
+      "directory": "ai-image-generator-tasks"
+    },
+    {
+      "directory": "xiaohongshu-creator-v4-tasks"
+    },
+    {
+      "directory": "general-writing-tasks-v2",
+      "currentVersion": "4"
+    },
+    {
+      "directory": "wechat-write-tasks-v2",
+      "currentVersion": "3"
+    },
+    {
+      "directory": "image-generator-tasks-v2",
+      "currentVersion": "3"
+    },
+    {
+      "directory": "claude-image-generation-tasks-v2",
+      "currentVersion": "3"
+    },
+    {
+      "directory": "ai-image-generator-tasks-v2",
+      "currentVersion": "3"
+    },
+    {
+      "directory": "xiaohongshu-creator-v4-tasks-v2"
+    },
+    {
+      "directory": "xiaohongshu-creator-v7",
+      "currentVersion": "7"
+    }
+  ]
+}

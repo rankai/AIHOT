@@ -1,3 +1,4 @@
+import { draftSelection, editDraftText, chooseDraftAction } from "../app/features/assistant/drafts.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -124,4 +125,15 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
   const other={...attempt,commandKey:"different",quoteId:"different"};
   const draft={...emptyDraft(),pendingTurn:other};
   assert.equal(failedTurn(draft,attempt,null),draft,"late failure cannot mark another pending attempt");
+});
+
+test("new shortcuts freeze skill scope and intent; editing clears only the unsent hint", () => {
+  const action = { actionId: "xiaohongshu-rewrite", skillId: "xiaohongshu-creator", skillName: "小红书创作", label: "改写", available: true, reason: null };
+  const selected = chooseDraftAction(emptyDraft(), action);
+  assert.deepEqual(draftSelection(selected), { skillId: "xiaohongshu-creator" });
+  assert.deepEqual(selected.taskHint, { actionId: "xiaohongshu-rewrite" }); assert(selected.text.includes("改写")); assert(selected.text.includes("\n主题或原文："));
+  const edited = editDraftText(selected, "我要研究后写笔记");
+  assert.equal(edited.taskHint, undefined); assert.deepEqual(draftSelection(edited), draftSelection(selected));
+  assert.deepEqual(draftSelection({ actionId: "xiaohongshu-rewrite" }), { actionId: "xiaohongshu-rewrite" });
+  assert.deepEqual(draftSelection({ actionId: "xiaohongshu-rewrite", skillSelection: { skillId: "xiaohongshu-creator" } }), { skillId: "xiaohongshu-creator" });
 });

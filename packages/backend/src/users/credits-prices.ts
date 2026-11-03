@@ -4,7 +4,7 @@ import type { ToolCreditIntent, ToolPrice, ToolQuote } from "@aihot/contracts/cr
 import { sql, type Db, type Tx } from "../db.ts";
 import { audit } from "../admin/auth.ts";
 import { AccountError, UserId } from "./accounts.ts";
-import { Credits, Kind, Reason, chargeForRun, creditHash, isRecoveryKind, parseCreditIntent, requireCreditUser, type PricingSnapshot, type CreditRunRow } from "./credits-core.ts";
+import { Credits, Kind, Reason, chargeForRun, creditHash, isRecoveryKind, parseCreditIntent, requireCreditUser, type PricingSnapshot, type TaskPricing, type CreditRunRow } from "./credits-core.ts";
 
 interface PriceRow {
   id: string; kind: ToolPrice["kind"]; provider: string; model: string; tier: string; parameter_match: ToolPrice["parameterMatch"];
@@ -82,7 +82,7 @@ export async function selectToolPrice(db: Db, intent: ToolCreditIntent): Promise
 }
 
 /** Pricing receives the same validated/normalized server intent used for submission. */
-export async function quoteTool(userId: number, raw: ToolCreditIntent, transaction?: Tx): Promise<ToolQuote> {
+export async function quoteTool(userId: number, raw: ToolCreditIntent, transaction?: Tx, task?: { label: string; scope: string; items: { key: string; label: string; units: number; intent: ToolCreditIntent }[] }): Promise<ToolQuote> {
   UserId.parse(userId);
   const intent = parseCreditIntent(raw);
   const create = async (tx: Tx): Promise<ToolQuote> => {
@@ -115,12 +115,28 @@ export async function quoteTool(userId: number, raw: ToolCreditIntent, transacti
       snapshot = { kind: intent.kind, provider: intent.provider, model: intent.model ?? "", tier: intent.tier ?? "", imageCount, videoSeconds, referenceCount, price };
       priceId = price.id; priceVersion = price.version;
     }
+    if (task) {
+      if (intent.kind !== "assistant-turn" || intent.recoveryRunId !== undefined || task.items.length < 1 || task.items.length > 20) throw new AccountError(400, "invalid_request", "任务收费范围无效");
+      const items: TaskPricing["items"] = [];
+      for (const item of task.items) {
+        const unitIntent = parseCreditIntent(item.intent);
+        if (unitIntent.recoveryRunId || isRecoveryKind(unitIntent.kind) || !Number.isInteger(item.units) || item.units < 1 || item.units > 20 || items.some(i => i.key === item.key)) throw new AccountError(400, "invalid_request", "任务收费项目无效");
+        const price = await selectToolPrice(tx, unitIntent);
+        const imageCount = unitIntent.imageCount ?? 0, videoSeconds = unitIntent.videoSeconds ?? 0, referenceCount = unitIntent.referenceCount ?? 0;
+        const unitAmount = Credits.parse(price.baseCredits + imageCount * price.imageCredits + videoSeconds * price.videoSecondCredits + referenceCount * price.referenceCredits);
+        items.push({ ...item, intent: unitIntent, amount: unitAmount, pricing: { kind: unitIntent.kind, provider: unitIntent.provider, model: unitIntent.model ?? "", tier: unitIntent.tier ?? "", imageCount, videoSeconds, referenceCount, price } });
+      }
+      if (items.filter(i => i.intent.kind === "assistant-turn").length !== 1 || items.find(i => i.intent.kind === "assistant-turn")!.units !== 1) throw new AccountError(400, "invalid_request", "任务必须包含一个主创作单位");
+      amount = Credits.parse(items.reduce((n, item) => n + item.amount * item.units, 0));
+      snapshot = { ...snapshot, task: { version: 1, label: task.label, scope: task.scope, items } };
+      priceId = null;
+    }
     const quoteId = randomUUID(), expiresAt = new Date(Date.now() + 10 * 60_000);
     await tx`INSERT INTO member_tool_quotes(id, user_id, price_id, price_version, input_hash, amount, pricing_snapshot, recovery_run_id, expires_at)
       VALUES (${quoteId}, ${userId}, ${priceId}, ${priceVersion}, ${creditHash(intent)}, ${amount}, ${tx.json(snapshot as never)}, ${intent.recoveryRunId ?? null}, ${expiresAt})`;
     const [wallet] = await tx`SELECT available FROM member_credit_accounts WHERE user_id = ${userId}`;
     const available = Number(wallet?.available ?? 0);
-    return { quoteId, amount, expiresAt: expiresAt.toISOString(), priceVersion, priceId, available, affordable: available >= amount, recoveryOfRunId: intent.recoveryRunId ?? null };
+    return { ...(snapshot.task ? { task: { label: snapshot.task.label, scope: snapshot.task.scope, items: snapshot.task.items.map(({key,label,units,amount}) => ({key,label,units,amount})) } } : {}), quoteId, amount, expiresAt: expiresAt.toISOString(), priceVersion, priceId, available, affordable: available >= amount, recoveryOfRunId: intent.recoveryRunId ?? null };
   };
   return transaction ? create(transaction) : sql.begin(create);
 }

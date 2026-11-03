@@ -1,0 +1,61 @@
+{
+  "formatVersion": 1,
+  "skillId": "image-generator",
+  "version": "2",
+  "name": "图片创作",
+  "description": "图片创作：优化主题、风格和构图提示词，人工批准后生成单张图片",
+  "source": {
+    "kind": "owned",
+    "license": "MIT",
+    "maintainer": "AIHOT",
+    "review": "single-image member capability adaptation"
+  },
+  "modules": [
+    {
+      "moduleId": "generate",
+      "version": "2",
+      "description": "图片创作：优化主题、风格和构图提示词，人工批准后生成单张图片",
+      "inputSchema": "image-input@1",
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "image-delivery@1",
+      "entryResource": "generate",
+      "resources": [
+        "generate"
+      ],
+      "tools": [
+        "generate_image"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#generate/success",
+        "fixtures#generate/missing-input",
+        "fixtures#generate/delivery"
+      ],
+      "hash": "5cecbfae8be6b0f43a199569cbb901baefc735c9938b74db32a4e82af9962a62"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "generate",
+      "path": "generate.md",
+      "type": "text/markdown",
+      "bytes": 1136,
+      "sha256": "147d6355dcd3fbf3d5bb2d89fb32384387374bdd54e5da48d364f9efa2e476bb"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 481,
+      "sha256": "a3a72ccb706c14ea41a77a815a58997c2bc491fb482bcaaa35d9cf5dcebfc549"
+    }
+  ],
+  "manifestHash": "0bd0eb5ab791fad7d68d1365465087f887553175462bda951f691c40e2a0592c",
+  "packageHash": "241aeeb19e8c5111e77518f569cc90a4a152242fce9f2aebba83b417f3dbb9be"
+}

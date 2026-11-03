@@ -22,7 +22,7 @@ const historySummaryFields = [
 export type MemberRunRow = {
   id: number; actor: string; provider: string; operation_key: string; status: ToolRunRow["status"];
   created_at: Date; step_version: number; generation: number; step_key: string; receipt_status: string | null;
-  assistant_session_id: string | null; category: ToolRunCategory; title: string; summary: string; origin_run_id: number | null; continuation_run_id: number | null;
+  assistant_child: boolean; assistant_session_id: string | null; category: ToolRunCategory; title: string; summary: string; origin_run_id: number | null; continuation_run_id: number | null;
 };
 export const memberRunDto = (row: MemberRunRow): ToolRunRow => ({ id: row.id, provider: row.provider, operationKey: row.operation_key,
   ...(row.assistant_session_id ? { assistantSessionId: row.assistant_session_id } : {}), category: row.category, title: row.title, summary: row.summary, status: row.status, createdAt: row.created_at.toISOString(), stepVersion: row.step_version, generation: row.generation });
@@ -51,7 +51,7 @@ export async function memberRunPresentation() {
   const modelLabels = Object.fromEntries(imageOptions().models.map(model => [model.model, model.label]));
   const engineLabels = Object.fromEntries(Object.entries(aiSearchEngines).map(([key, value]) => [key, value.label]));
   return { query: sql`SELECT r.id,r.actor,r.provider,r.operation_key,r.status,r.created_at,r.step_version,r.generation,r.step_key,
-    receipt.status AS receipt_status,origin.id AS origin_run_id,child.id AS continuation_run_id,
+    r.input ? 'assistantParentTurnId' AS assistant_child,receipt.status AS receipt_status,origin.id AS origin_run_id,child.id AS continuation_run_id,
     (SELECT s.id FROM assistant_sessions s JOIN assistant_turns t ON t.session_id=s.id
       WHERE ('user:' || s.owner_user_id::text)=r.actor AND s.deleted_at IS NULL AND
       (t.parent_operation_run_id=r.id OR EXISTS(SELECT 1 FROM assistant_tool_calls ac WHERE ac.turn_id=t.id AND ac.child_run_id=r.id)) LIMIT 1) AS assistant_session_id,

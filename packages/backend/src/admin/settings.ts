@@ -68,7 +68,7 @@ export async function listBudgetScopes() {
   (SELECT count(*)::int FROM receipt_attempts a WHERE a.service=b.service AND a.budget_scope=s.scope AND a.origin='live' AND a.started_at>now()-interval '1 hour') AS used_hour,
   (SELECT count(*)::int FROM receipt_attempts a WHERE a.service=b.service AND a.budget_scope=s.scope AND a.origin='live' AND a.started_at>now()-interval '1 day') AS used_day
  FROM budgets b CROSS JOIN (VALUES ('member'),('admin')) AS s(scope) LEFT JOIN budget_scopes c ON c.service=b.service AND c.scope=s.scope
- WHERE b.service LIKE 'redfox.%' OR b.service LIKE 'agentkey.%' OR b.service LIKE 'aliyun.wan.%' OR b.service='assistant.text' ORDER BY b.service,s.scope`;
+ WHERE b.service LIKE 'redfox.%' OR b.service LIKE 'agentkey.%' OR b.service LIKE 'aliyun.wan.%' OR b.service IN ('assistant.text','assistant.vision') ORDER BY b.service,s.scope`;
 }
 export async function updateBudget(service: string, raw: unknown, actor: string) {
  return saveBudget(service,raw,actor,null);

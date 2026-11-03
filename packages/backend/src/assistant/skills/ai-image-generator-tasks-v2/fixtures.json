@@ -1,0 +1,25 @@
+{
+  "generate/success": {
+    "moduleId": "generate",
+    "case": "success",
+    "expected": "image",
+    "prompt": "竖版海报：一只在窗边的橘猫，柔和自然光",
+    "size": "4:5",
+    "expectedTool": "generate_image",
+    "requiredEntryText": [
+      "用户提示词原样交给图片模型",
+      "2.35:1"
+    ]
+  },
+  "generate/missing-input": {
+    "moduleId": "generate",
+    "case": "missing-input",
+    "message": "做张图",
+    "expected": "ask_question"
+  },
+  "generate/delivery": {
+    "moduleId": "generate",
+    "case": "delivery",
+    "expected": "image"
+  }
+}

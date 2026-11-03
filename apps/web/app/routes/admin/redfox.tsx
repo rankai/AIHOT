@@ -1,3 +1,4 @@
+import type { RedfoxBalanceObservation } from "@aihot/contracts/redfox";
 import type { MemberPriceCatalog } from '@aihot/contracts/membership';
 import { ToolPricingProvider, ToolSubmit } from '../../features/tools/tool-submit';
 import { collectionSubscriptionsHref } from "../../features/admin/collection-subscription-data";
@@ -33,7 +34,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (url.searchParams.get("view") === "subscriptions") return redirect(collectionSubscriptionsHref(Number(url.searchParams.get("subscription")) || null));
   const after = url.searchParams.get("after");
   const key = url.searchParams.get("reference");
-  const [options, assets, reference, operations, transcriptionOptions, assetUploadOptions, aiSearchOptions, supplierUploadOptions, videoOptions, xhsCommentOptions, pricing] = await Promise.all([
+  const [options, assets, reference, operations, transcriptionOptions, assetUploadOptions, aiSearchOptions, supplierUploadOptions, videoOptions, xhsCommentOptions, pricing, balance] = await Promise.all([
     adminGet<ImageOptions>(request, "/api/admin/redfox/images/options"),
     adminGet<AssetPage>(request, `/api/admin/assets${after ? `?after=${encodeURIComponent(after)}` : ""}`),
     key ? adminGet<PrivateAsset>(request, `/api/admin/assets/${encodeURIComponent(key)}`).then(asset => ({ asset, error: null })).catch(() => ({ asset: null, error: "无法读取此参考素材，可能已删除或暂不可用。" })) : Promise.resolve({ asset: null, error: null }),
@@ -45,9 +46,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     adminGet<VideoOptions>(request, "/api/admin/redfox/videos/options"),
     adminGet<XhsCommentOptions>(request, "/api/admin/redfox/xiaohongshu/comments/options"),
     adminGet<MemberPriceCatalog>(request, "/api/admin/member-pricing"),
+    adminGet<{observation:RedfoxBalanceObservation|null}>(request, "/api/admin/redfox/balance-observation").catch(() => ({ observation: null })),
   ]);
   const approvedImages={...options,resolutions:["1k"],maxImages:1,models:options.models.map(model=>({...model,generationAvailable:model.model === "gptImage2",...(model.model === "gptImage2" ? {resolutions:["1k"]} : {})}))};
-  return { pricing, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options:approvedImages, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
+  return { balance: balance.observation, pricing, xhsCommentOptions, xhsCommentTaskId: url.searchParams.get("xhsCommentTaskId") ?? "", videoOptions, videoTaskId: url.searchParams.get("videoTaskId") ?? "", imageModel: url.searchParams.get("imageModel") ?? "gptImage2", referenceUploadResult: url.searchParams.get("referenceUploadResult") ?? "", aiSearchOptions, supplierUploadOptions, aiSearchFamily: url.searchParams.get("aiSearchFamily") ?? "", aiSearchTaskId: url.searchParams.get("aiSearchTaskId") ?? "", options:approvedImages, assets, operations, transcriptionOptions, assetUploadOptions, transcriptionTaskId: url.searchParams.get("transcriptionTaskId") ?? "", transcriptionPlatform: url.searchParams.get("transcriptionPlatform") ?? "", reference: reference.asset, referenceError: reference.error, initialView: url.searchParams.get("view") === "videos" ? "videos" : url.searchParams.get("view") === "ai-search" ? "ai-search" : url.searchParams.get("view") === "assets" ? "assets" : url.searchParams.get("view") === "tools" ? "tools" : url.searchParams.get("view") === "platforms" ? "platforms" : url.searchParams.get("view") === "images" || key || url.searchParams.has("taskId") ? "images" : "x", taskId: url.searchParams.get("taskId") ?? "" };
 }
 export const meta: Route.MetaFunction = () => [{ title: `数据工具 · ${SITE.name} 后台` }];
 export default function Redfox({ loaderData }: Route.ComponentProps) {
@@ -63,6 +65,7 @@ export default function Redfox({ loaderData }: Route.ComponentProps) {
   const [account, setAccount] = useState("");
   const [tweetId, setTweetId] = useState("");
   return <ToolPricingProvider catalog={loaderData.pricing} admin><AdminPage title="数据工具" subtitle="查询与创作提交后会自动进入对应执行记录，查看进度与结果；本地素材上传后在私有素材库查看。管理员不扣会员积分，但使用独立 admin 测试池并同时受全站总预算限制。定时采集在采集订阅中配置，已有信源的主订阅与公开权限仍在信源详情管理。" actions={<><ButtonLink tone="primary" to="/admin/operations">进度与结果</ButtonLink><ButtonLink to={collectionSubscriptionsHref()}>采集订阅</ButtonLink></>}>
+    {loaderData.balance && <Card title="Redfox 余额不足，请充值"><p className="text-sm">最后发生：{loaderData.balance.observedAt}；受影响父回合：{loaderData.balance.parentTurnId ?? "无助手父回合"}。先停止父回合及未结束子任务，分别核对创作和查询积分；充值后重新确认新报价，旧回执不会自动重发。</p><div className="mt-3 flex gap-2">{loaderData.balance.runId && <ButtonLink to={`/admin/operations/${loaderData.balance.runId}`}>查看执行记录</ButtonLink>}<ButtonLink to="/admin/tool-prices?tab=review">核对积分</ButtonLink></div></Card>}
     <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="数据工具工作区">{[["x", "X 查询"], ["platforms", "平台查询"], ["ai-search", "AI 搜索"], ["images", "图片创作"], ["videos", "视频创作"], ["tools", "辅助工具"], ["assets", "私有素材"]].map(([key, label]) => <Button key={key} tone={view === key ? "primary" : "secondary"} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
     <div hidden={view !== "ai-search"}><AiSearchForm options={loaderData.aiSearchOptions} initialFamily={loaderData.aiSearchFamily} initialTaskId={loaderData.aiSearchTaskId} /></div>
     <div hidden={view !== "assets"}><AssetLibrary supplierUploadOptions={loaderData.supplierUploadOptions} initialPage={loaderData.assets} uploadOptions={loaderData.assetUploadOptions} imageOptions={loaderData.options} updates={assetUpdates} onAssetChange={onAssetChange} /></div>

@@ -1,0 +1,186 @@
+{
+  "formatVersion": 1,
+  "skillId": "ai-image-generator",
+  "version": "3",
+  "name": "通用图片创作",
+  "description": "按用户原提示词直接生成单张图片，并按用途解析合法宽高比",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/chemny/ai-image-generator",
+    "commit": "90736de1c8f6b672a235e43113d7a90c86e73119",
+    "license": "MIT",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream chemny",
+    "review": "docs/reviews/2026-11-02-external-ai-image-generator-manifest.json"
+  },
+  "modules": [
+    {
+      "moduleId": "generate",
+      "version": "3",
+      "description": "Direct 模式通用图片创作；保持用户提示词并按用途解析合法图片比例",
+      "inputSchema": "image-input@1",
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "image-delivery@1",
+      "entryResource": "entry",
+      "resources": [
+        "entry",
+        "upstream-skill",
+        "platform-specs",
+        "integration-contract"
+      ],
+      "tools": [
+        "generate_image"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#generate/success",
+        "fixtures#generate/missing-input",
+        "fixtures#generate/delivery"
+      ],
+      "hash": "bcf48bb110089745baaa5996c5aefd2940d9130b0af802c442cce30694dfbed3"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "entry",
+      "path": "generate.md",
+      "type": "text/markdown",
+      "bytes": 2237,
+      "sha256": "92b8752a89ca002dc5a5d456b806359a64e6cec51eb1fe3bed7ee3791e55f015"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 594,
+      "sha256": "5a610e634898e9b61d8e39496e4c8ac18ac776db615992cbe6a178c08e2676d3"
+    },
+    {
+      "resourceId": "upstream-skill",
+      "path": "upstream/SKILL.md",
+      "type": "text/markdown",
+      "bytes": 9203,
+      "sha256": "b1dcb17267fc80996bed39e07809e4a18dbb9dfa343babccc9d8e28e6433ef35"
+    },
+    {
+      "resourceId": "upstream-license",
+      "path": "upstream/LICENSE",
+      "type": "text/plain",
+      "bytes": 1088,
+      "sha256": "d1bf94e2a34f8a920f49c194f05c4b462c1d1498c9c21c868cb2c0af7686cd3a"
+    },
+    {
+      "resourceId": "upstream-readme",
+      "path": "upstream/README.md",
+      "type": "text/markdown",
+      "bytes": 9285,
+      "sha256": "10bf45f262ffc9e47b9a6e942c7ca8b87aca9e78274220b68e213734b8747fd6"
+    },
+    {
+      "resourceId": "upstream-readme-en",
+      "path": "upstream/README.en.md",
+      "type": "text/markdown",
+      "bytes": 9724,
+      "sha256": "a0692828c16e03c16b67a66e5b2e4c21560424a5bf69664691c5f93923f7a2db"
+    },
+    {
+      "resourceId": "upstream-acceptance",
+      "path": "upstream/ACCEPTANCE.md",
+      "type": "text/markdown",
+      "bytes": 2103,
+      "sha256": "b8c89f873fa6c182196d258b23877f4d0c6bb651acae40ac652bd869183a62a0"
+    },
+    {
+      "resourceId": "upstream-changelog",
+      "path": "upstream/CHANGELOG.md",
+      "type": "text/markdown",
+      "bytes": 1133,
+      "sha256": "8f2862da335d5bc98ba753cf1f7a919f6860f8f6a15d3b50052a53cefd4bc89a"
+    },
+    {
+      "resourceId": "upstream-usage",
+      "path": "upstream/USAGE_EXAMPLES.md",
+      "type": "text/markdown",
+      "bytes": 1272,
+      "sha256": "c87f67bf5f964eea740efa7e6ac2ee5947b03050fb185a05bd4a92291a903999"
+    },
+    {
+      "resourceId": "upstream-release",
+      "path": "upstream/RELEASE_CHECKLIST.md",
+      "type": "text/markdown",
+      "bytes": 1772,
+      "sha256": "b22666b13880e30eeac51e7fb483861ffdbc6db8b16425e33884fae1fcba199b"
+    },
+    {
+      "resourceId": "upstream-env-example",
+      "path": "upstream/.env.example",
+      "type": "text/plain",
+      "bytes": 1420,
+      "sha256": "bb97c43c0f8109c476aeb6ee7ab4838094f7089ca7aa118827872db67ea213ee"
+    },
+    {
+      "resourceId": "upstream-ignore",
+      "path": "upstream/.gitignore",
+      "type": "text/plain",
+      "bytes": 390,
+      "sha256": "b34e76422285aa9a396aa17d4c73be7df09757b030b6556ee26a388941bd8dc9"
+    },
+    {
+      "resourceId": "integration-contract",
+      "path": "upstream/references/integration-contract.md",
+      "type": "text/markdown",
+      "bytes": 3855,
+      "sha256": "ad94e6ee232d9811d22602c3270f3bd0764b71d795145ba87b65b0bebcca3688"
+    },
+    {
+      "resourceId": "platform-specs",
+      "path": "upstream/references/platform-image-specs.json",
+      "type": "application/json",
+      "bytes": 5387,
+      "sha256": "46f84dc64fac4d5fe5c78334e530bf3cd255df3f31290ce8cc62bd37cdc0d741"
+    },
+    {
+      "resourceId": "platform-specs-doc",
+      "path": "upstream/references/platform-image-specs.md",
+      "type": "text/markdown",
+      "bytes": 2591,
+      "sha256": "8232a12e39a698a4994c0dd8760dd84a6dd0f992c7db6a55e99d8ef7f3ecd210"
+    },
+    {
+      "resourceId": "script-build-brief",
+      "path": "upstream/scripts/build-prompt-brief.sh",
+      "type": "text/plain",
+      "bytes": 7675,
+      "sha256": "9380eaffcaef8a1f1b6b29bcf985a3859c7ded12a177470361d4db01f4a218f6"
+    },
+    {
+      "resourceId": "script-check-config",
+      "path": "upstream/scripts/check-config.sh",
+      "type": "text/plain",
+      "bytes": 1574,
+      "sha256": "ba2c4bb51fb1b38f1e3b63bc53343b1347aee7144eb8bad4eaa98477aa81301d"
+    },
+    {
+      "resourceId": "script-generate-image",
+      "path": "upstream/scripts/generate-image.sh",
+      "type": "text/plain",
+      "bytes": 21622,
+      "sha256": "5d01c58f29505e83d725c330f6c678d567c13f4773a998a5879c0f30ef51f8ac"
+    },
+    {
+      "resourceId": "script-resolve-spec",
+      "path": "upstream/scripts/resolve-image-spec.sh",
+      "type": "text/plain",
+      "bytes": 4018,
+      "sha256": "2a1b03c319b820d36dc24d038a48d60aebb4ebeef4099196d6e1bba13a66d67e"
+    }
+  ],
+  "manifestHash": "72673b20b56403ab674721d6b6810739d8c2149199754eedb37181444015e094",
+  "packageHash": "388f886c9d3c287f414ebc39b1a74dc81eb70d13833c90e7916f488627be233c"
+}

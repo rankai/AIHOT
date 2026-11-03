@@ -46,7 +46,7 @@ export function registerUserAssistant(app: FastifyInstance) {
   }));
   app.post("/api/assistant/sessions/:id/queue/:entryId/quote", userHandler(async (req, _reply, u) => {
     const p = z.object({ id: z.string().uuid(), entryId: z.string().uuid() }).parse(req.params);
-    return refreshQueuedQuote(u.user.id, p.id, p.entryId);
+    return refreshQueuedQuote(u.user.id, p.id, p.entryId, req.body);
   }));
   app.post("/api/assistant/sessions/:id/queue/:entryId/cancel", userHandler(async (req, _reply, u) => {
     const p = z.object({ id: z.string().uuid(), entryId: z.string().uuid() }).parse(req.params);
@@ -58,7 +58,7 @@ export function registerUserAssistant(app: FastifyInstance) {
 
   app.get(
     "/api/assistant/options",
-    userHandler(async (_req, _reply, u) => assistantOptions(u.user.id)),
+    userHandler(async (req, _reply, u) => assistantOptions(u.user.id,req.query)),
   );
   app.post(
     "/api/assistant/sessions",

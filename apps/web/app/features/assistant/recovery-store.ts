@@ -1,7 +1,7 @@
-import type { ToolQuote } from "@aihot/contracts/credits";
+import type { AssistantTurnQuote } from "@aihot/contracts/assistant";
 import type { PendingTurn, TurnInput } from "./data";
 export type QueueAttempt = { key: string; kind: "enqueue"; input: TurnInput; unknown?: boolean } | { key: string; kind: "approve"; entryId: string; quoteId: string; unknown?: boolean };
-export type SavedQuote = { commandKey: string; input: TurnInput; quote: ToolQuote };
+export type SavedQuote = { commandKey: string; input: TurnInput; quote: AssistantTurnQuote };
 export type Recovery = { kind: "turn"; value: PendingTurn } | { kind: "queue"; value: QueueAttempt } | { kind: "quote"; value: SavedQuote };
 type Row = Recovery & { savedAt: number; writeVersion?: string };
 const cache = new Map<string, { raw: string; row: Row }>();
@@ -12,8 +12,10 @@ const string = (v: unknown, max = 200) => typeof v === "string" && v.length > 0 
 const object = (v: any) => v && typeof v === "object" && !Array.isArray(v);
 const keys = (v: any, allowed: string[]) => object(v) && Object.keys(v).every(k => allowed.includes(k));
 function input(v: any): boolean {
-  return keys(v, ["message", "expectedRevision", "skillSelection", "inputIds", "artifactVersions", "autoAuthorizationId"]) && string(v.message, 30000) && Number.isInteger(v.expectedRevision) && v.expectedRevision >= 0 &&
-    (v.skillSelection === null || keys(v.skillSelection, ["actionId"]) && string(v.skillSelection.actionId)) &&
+  return keys(v, ["message", "expectedRevision", "skillSelection", "inputIds", "artifactVersions", "autoAuthorizationId", "taskHint", "taskChoice"]) && string(v.message, 30000) && Number.isInteger(v.expectedRevision) && v.expectedRevision >= 0 &&
+    (v.skillSelection === null || keys(v.skillSelection, ["actionId"]) && string(v.skillSelection.actionId) || keys(v.skillSelection, ["skillId"]) && string(v.skillSelection.skillId)) &&
+    (v.taskChoice === undefined || keys(v.taskChoice,["skillId","moduleId","delivery","size"]) && string(v.taskChoice.skillId) && string(v.taskChoice.moduleId) && ["writing","plans-only","image"].includes(v.taskChoice.delivery) && (v.taskChoice.size===undefined || string(v.taskChoice.size))) &&
+    (v.taskHint === undefined || v.taskHint === null || keys(v.taskHint, ["actionId"]) && string(v.taskHint.actionId)) &&
     Array.isArray(v.inputIds) && v.inputIds.length <= 10 && v.inputIds.every((id: unknown) => string(id)) &&
     Array.isArray(v.artifactVersions) && v.artifactVersions.length <= 10 && v.artifactVersions.every((r: any) => keys(r, ["artifactId", "version"]) && string(r.artifactId) && Number.isInteger(r.version) && r.version > 0) &&
     (v.autoAuthorizationId === undefined || string(v.autoAuthorizationId));
@@ -24,7 +26,8 @@ function valid(row: any): row is Row {
   if (row.kind === "turn") return keys(v, ["commandKey", "input", "quoteId", "hasUnknownResult"]) && string(v.commandKey) && input(v.input) && string(v.quoteId) && (v.hasUnknownResult === undefined || typeof v.hasUnknownResult === "boolean");
   if (row.kind === "queue") return keys(v, ["key", "kind", "input", "entryId", "quoteId", "unknown"]) && string(v.key) && (v.unknown === undefined || typeof v.unknown === "boolean") && (v.kind === "enqueue" ? input(v.input) && v.entryId === undefined && v.quoteId === undefined : v.kind === "approve" && string(v.entryId) && string(v.quoteId) && v.input === undefined);
   const q = v?.quote;
-  return row.kind === "quote" && keys(v, ["commandKey", "input", "quote"]) && string(v.commandKey) && input(v.input) && keys(q, ["quoteId", "amount", "expiresAt", "priceVersion", "priceId", "available", "affordable", "recoveryOfRunId"]) && string(q.quoteId) && typeof q.affordable === "boolean" && string(q.expiresAt) && Number.isFinite(Date.parse(q.expiresAt)) && [q.amount, q.available, q.priceVersion].every(n => Number.isInteger(n) && n >= 0) && (q.priceId === null || string(q.priceId)) && (q.recoveryOfRunId === null || Number.isInteger(q.recoveryOfRunId));
+  return row.kind === "quote" && keys(v, ["commandKey", "input", "quote"]) && string(v.commandKey) && input(v.input) && keys(q, ["quoteId", "amount", "expiresAt", "priceVersion", "priceId", "available", "affordable", "recoveryOfRunId", "additionalFeeKinds", "task"]) && string(q.quoteId) && typeof q.affordable === "boolean" && string(q.expiresAt) && Number.isFinite(Date.parse(q.expiresAt)) && [q.amount, q.available, q.priceVersion].every(n => Number.isInteger(n) && n >= 0) && (q.priceId === null || string(q.priceId)) && (q.recoveryOfRunId === null || Number.isInteger(q.recoveryOfRunId)) &&
+    (q.additionalFeeKinds === undefined || Array.isArray(q.additionalFeeKinds) && q.additionalFeeKinds.length <= 3 && new Set(q.additionalFeeKinds).size === q.additionalFeeKinds.length && q.additionalFeeKinds.every((kind: unknown) => kind === "search" || kind === "image" || kind === "vision"));
 }
 export function readRecoveries(scope: string): Row[] {
   if (typeof window === "undefined") return [];

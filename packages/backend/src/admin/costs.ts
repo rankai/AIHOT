@@ -698,7 +698,7 @@ function baseSql(q: Query) {
         CASE
           WHEN a.service IN (
             'zhipu','deepseek','mimo','dashscope','embedding','llm',
-            'assistant.text','aliyun.wan.video','aliyun.wan.poll'
+            'assistant.text','assistant.vision','assistant.quote-preparation','aliyun.wan.video','aliyun.wan.poll'
           ) THEN a.model
         END
       ) AS model,

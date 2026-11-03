@@ -1,15 +1,17 @@
+import { selectedArtifactVersions } from "./cover-plan.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sql, type Tx } from "../db.ts";
 import { AccountError } from "../users/accounts.ts";
 import { requireCreditUser } from "../users/credits-core.ts";
-import { quoteTool } from "../users/credits.ts";
 import { lockMemberAdmission, StaleOperationError } from "../providers/operations/store.ts";
+import { taskChoices } from "./task-pricing.ts";
+import { TaskChoice } from "./task-contract.ts";
 import { TurnInput, accepting } from "./config.ts";
 import { taskHint } from "./catalog.ts";
 import { skillAdmission } from "./skill-policy.ts";
 import { assertSessionReceiptsReviewed } from "./fees.ts";
-import { snapshotInput, submitTurnTx } from "./sessions.ts";
+import { snapshotInput, submitTurnTx, quoteAssistantTurn } from "./sessions.ts";
 import { command, ownedSession, conflict, event } from "./store.ts";
 
 export async function enqueueMessage(userId: number, sessionId: string, raw: unknown, key: unknown) {
@@ -28,15 +30,12 @@ export async function enqueueMessage(userId: number, sessionId: string, raw: unk
     const [count] = await tx`SELECT count(*)::int n FROM assistant_message_queue WHERE session_id=${sessionId} AND state IN ('pending','quoted')`;
     if (count!.n >= 10) throw conflict("最多等待10条需求，请先处理或取消");
     taskHint(s.assistant_id, input.taskHint);
-    const admission = await skillAdmission(tx, s.assistant_id, input.skillSelection as never, true);
     const inputs = await tx`SELECT id FROM assistant_session_inputs WHERE session_id=${sessionId}`;
     const inputIds = input.inputIds ?? inputs.map(row => row.id);
     if (inputIds.some(id => !inputs.some(row => row.id === id))) throw conflict("选定材料不可访问");
-    const versions = input.artifactVersions ?? (await tx<{ artifactId: string; version: number }[]>`SELECT artifact_id AS "artifactId",max(version)::int AS version FROM assistant_artifact_versions WHERE session_id=${sessionId} GROUP BY artifact_id`);
-    for (const v of versions) {
-      const [owned] = await tx`SELECT artifact_id FROM assistant_artifact_versions WHERE session_id=${sessionId} AND artifact_id=${v.artifactId} AND version=${v.version}`;
-      if (!owned) throw conflict("选定稿件版本不可访问");
-    }
+    const versions = input.artifactVersions ?? (await tx<{ artifactId: string; version: number }[]>`SELECT artifact_id AS "artifactId",max(version)::int AS version FROM assistant_artifact_versions WHERE session_id=${sessionId} AND kind IN ('text-draft','xhs-note') GROUP BY artifact_id`);
+    const selected=await selectedArtifactVersions(tx,sessionId,versions);
+    const admission = await skillAdmission(tx, s.assistant_id, input.skillSelection as never, true,selected);
     if (input.autoAuthorizationId && !(await tx`SELECT id FROM assistant_fee_authorizations WHERE id=${input.autoAuthorizationId} AND session_id=${sessionId}`)[0]) throw conflict("费用授权不属于本会话");
     const id = randomUUID(), frozen = { ...input, inputIds, artifactVersions: versions };
     await tx`INSERT INTO assistant_message_queue(id,session_id,command_key,command_hash,input,admission_snapshot) VALUES (${id},${sessionId},${c.key},${c.hash},${tx.json(frozen as never)},${tx.json(admission as never)})`;
@@ -58,19 +57,33 @@ async function ready(tx: Tx, s: Record<string, any>) {
     await event(tx, s.id, "queue", s.id); return false;
   }
   await assertSessionReceiptsReviewed(tx, s.id);
-  const [review] = await tx`WITH runs AS (SELECT parent_operation_run_id id FROM assistant_turns WHERE session_id=${s.id} UNION SELECT c.child_run_id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id WHERE t.session_id=${s.id} AND c.child_run_id IS NOT NULL) SELECT c.id FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id IN (SELECT id FROM runs) AND c.state='review' LIMIT 1`;
+  const [review] = await tx`WITH runs AS (SELECT parent_operation_run_id id FROM assistant_turns WHERE session_id=${s.id} UNION SELECT c.child_run_id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id WHERE t.session_id=${s.id} AND c.child_run_id IS NOT NULL) SELECT c.id FROM member_credit_charges c JOIN member_credit_authorized_runs l ON l.charge_id=c.id WHERE l.run_id IN (SELECT id FROM runs) AND c.state='review' LIMIT 1`;
   if (review) throw conflict("原任务积分仍待核对，请处理后继续排队消息");
   return true;
 }
-async function prepare(tx: Tx, userId: number, s: Record<string, any>, entry: Record<string, any>, manual = false) {
-  // Stored exact selections remain fixed; revision, model, prices and capabilities are checked now.
-  const raw = { ...entry.input, expectedRevision: s.revision };
-  if (manual) delete raw.autoAuthorizationId;
-  const { intent } = await snapshotInput(tx, userId, s.id, raw, entry.id);
-  const quote = await quoteTool(userId, intent, tx);
-  await tx`UPDATE assistant_message_queue SET state='quoted',quote=${tx.json(quote as never)},prepared_input=${tx.json(raw)},error=NULL WHERE id=${entry.id}`;
-  await event(tx, s.id, "queue", entry.id);
-  return { ...entry, quote, prepared_input: raw, state: "quoted" };
+/** Preparation may call one bounded model: never hold a transaction open across that call. */
+async function prepareQueued(userId:number,sessionId:string,entryId?:string,choice?:unknown) {
+  const capture=await sql.begin(async tx=>{
+    await lockMemberAdmission(tx,`user:${userId}`);
+    const s=await ownedSession(tx,userId,sessionId,true),entry=await head(tx,sessionId);
+    if(!entry || (entryId&&entry.id!==entryId) || !await ready(tx,s))return null;
+    const raw={...entry.input,expectedRevision:s.revision,...(choice?{taskChoice:TaskChoice.parse(choice)}:{})};
+    // A new task always requires explicit confirmation; old quoted/queued records keep their mode.
+    return {s,entry,raw};
+  });
+  if(!capture)return null;
+  const prepared=await snapshotInput(sql,userId,sessionId,capture.raw,capture.entry.id);
+  if(taskChoices(prepared.snapshot.candidates).length){delete capture.raw.autoAuthorizationId;prepared.snapshot.autoAuthorizationId=null;}
+  const quote=await quoteAssistantTurn(userId,prepared);
+  if(quote.task)delete capture.raw.autoAuthorizationId;
+  return sql.begin(async tx=>{
+    await lockMemberAdmission(tx,`user:${userId}`);
+    const s=await ownedSession(tx,userId,sessionId,true),entry=await head(tx,sessionId);
+    if(!entry||entry.id!==capture.entry.id||s.revision!==capture.s.revision||!await ready(tx,s))throw conflict("排队内容已变化，请重新报价");
+    await tx`UPDATE assistant_message_queue SET state='quoted',quote=${tx.json(quote as never)},prepared_input=${tx.json(capture.raw)},error=NULL WHERE id=${entry.id}`;
+    await event(tx,s.id,"queue",entry.id);
+    return {...entry,quote,prepared_input:capture.raw,state:'quoted'};
+  });
 }
 async function submit(tx: Tx, userId: number, s: Record<string, any>, entry: Record<string, any>, manual: boolean) {
   // A manual confirmation does not replace the authorization bound at enqueue for subsequent searches.
@@ -81,30 +94,17 @@ async function submit(tx: Tx, userId: number, s: Record<string, any>, entry: Rec
   await event(tx, s.id, "queue", entry.id);
   return result;
 }
-export async function advanceMessageQueue(userId: number, sessionId: string) {
-  return sql.begin(async tx => {
-    await lockMemberAdmission(tx, `user:${userId}`);
-    const s = await ownedSession(tx, userId, sessionId, true), entry = await head(tx, sessionId);
-    if (!entry || entry.state === 'quoted' || entry.error) return;
-    try {
-      await tx.savepoint(async inner => {
-        if (!await ready(inner, s)) return;
-        const quoted = await prepare(inner, userId, s, entry);
-        if (!entry.input.autoAuthorizationId) return;
-        try { await inner.savepoint(admission => submit(admission, userId, s, quoted, false)); }
-        catch (error) {
-          if (!(error instanceof AccountError) && !(error instanceof StaleOperationError)) throw error;
-          await prepare(inner, userId, s, entry, true);
-          await inner`UPDATE assistant_message_queue SET error=${error.message} WHERE id=${entry.id}`;
-        }
-      });
-    } catch (error) {
-      if (!(error instanceof AccountError) && !(error instanceof StaleOperationError)) throw error;
-      // Admission failures belong to this locked head, never a replacement cancelled concurrently.
-      await tx`UPDATE assistant_message_queue SET error=${error.message} WHERE id=${entry.id}`;
-      await event(tx, sessionId, "queue", entry.id);
-    }
-  });
+export async function advanceMessageQueue(userId:number,sessionId:string) {
+ const [entry]=await sql`SELECT id,state,error FROM assistant_message_queue WHERE session_id=${sessionId} AND state IN ('pending','quoted') ORDER BY position LIMIT 1`;
+ if(!entry||entry.state==='quoted'||entry.error)return;
+ try {
+  const quoted=await prepareQueued(userId,sessionId,entry.id);
+  if(!quoted||quoted.quote.task||!quoted.prepared_input.autoAuthorizationId)return;
+  await sql.begin(async tx=>{await lockMemberAdmission(tx,`user:${userId}`);const s=await ownedSession(tx,userId,sessionId,true);if((await head(tx,sessionId))?.id===entry.id&&await ready(tx,s))await submit(tx,userId,s,quoted,false);});
+ }catch(error){
+  if(!(error instanceof AccountError)&&!(error instanceof StaleOperationError))throw error;
+  await sql.begin(async tx=>{await ownedSession(tx,userId,sessionId,true);await tx`UPDATE assistant_message_queue SET error=${error.message},prepared_input=CASE WHEN ${error instanceof AccountError && error.code==='assistant_task_selection_required'} THEN jsonb_build_object('taskSelectionRequired',true) ELSE prepared_input END WHERE id=${entry.id} AND state IN ('pending','quoted')`;await event(tx,sessionId,'queue',entry.id);});
+ }
 }
 export async function approveQueuedMessage(userId: number, sessionId: string, entryId: string, raw: unknown) {
   const input = z.object({ quoteId: z.string().uuid() }).strict().parse(raw);
@@ -119,20 +119,16 @@ export async function approveQueuedMessage(userId: number, sessionId: string, en
     try { return await tx.savepoint(inner => submit(inner, userId, s, entry, true)); }
     catch (error) {
       if (!(error instanceof AccountError) && !(error instanceof StaleOperationError)) throw error;
-      const refreshed = await prepare(tx, userId, s, entry, true);
       await tx`UPDATE assistant_message_queue SET error=${error.message} WHERE id=${entry.id}`;
-      return { requote: true, quote: refreshed.quote };
+      return { requote: true, quote: entry.quote };
     }
   });
 }
-export async function refreshQueuedQuote(userId: number, sessionId: string, entryId: string) {
-  return sql.begin(async tx => {
-    await lockMemberAdmission(tx, `user:${userId}`);
-    const s = await ownedSession(tx, userId, sessionId, true), entry = await head(tx, sessionId);
-    if (!entry || entry.id !== z.string().uuid().parse(entryId) || !await ready(tx, s)) throw conflict("当前需求不能报价");
-    const result = await prepare(tx, userId, s, entry, true);
-    return { quote: result.quote };
-  });
+export async function refreshQueuedQuote(userId:number,sessionId:string,entryId:string,raw?:unknown) {
+ const input=z.object({taskChoice:TaskChoice.optional()}).strict().parse(raw??{});
+ const result=await prepareQueued(userId,sessionId,z.string().uuid().parse(entryId),input.taskChoice);
+ if(!result)throw conflict("当前需求不能报价");
+ return {quote:result.quote};
 }
 export async function cancelQueuedMessage(userId: number, sessionId: string, entryId: string) {
   const result = await sql.begin(async tx => {

@@ -1,9 +1,10 @@
+import { TaskChoice } from "./task-contract.ts";
 import { z } from "zod";
 import { sql, type Db } from "../db.ts";
 import { credential } from "../config.ts";
 import { modelFor } from "../editorial/models.ts";
 import { MODELS } from "../providers/llm.ts";
-import { catalogError } from "./catalog.ts";
+import { catalogError, SkillSelection } from "./catalog.ts";
 const Extra = z.object({
   thinking: z.object({ type: z.enum(["enabled", "disabled"]), clear_thinking: z.boolean().optional() }).strict().optional(),
   reasoning_effort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]).optional(),
@@ -76,7 +77,8 @@ export const TurnInput = z
     message: z.string().trim().min(1).max(30000),
     expectedRevision: z.number().int().positive(),
     taskHint: z.unknown().optional(),
-    skillSelection: z.object({ actionId: z.string() }).strict().nullable().optional(),
+    taskChoice: TaskChoice.optional(),
+    skillSelection: SkillSelection.nullable().optional(),
     autoAuthorizationId: z.string().uuid().optional(),
     inputIds: z.array(z.string().uuid()).max(10).optional(),
     artifactVersions: z

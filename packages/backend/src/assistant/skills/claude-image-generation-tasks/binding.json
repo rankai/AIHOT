@@ -1,0 +1,42 @@
+{
+  "formatVersion": 1,
+  "skillId": "claude-image-generation",
+  "version": "2",
+  "name": "主题与风格图片",
+  "modules": [
+    {
+      "moduleId": "generate",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "claude-image-generation",
+      "label": "主题与风格图片",
+      "entry": "generate",
+      "capabilities": [
+        "generate_image@1"
+      ],
+      "inputContract": "image-input@1",
+      "deliveryContract": "image-delivery@1",
+      "references": [
+        "prompt-crafting"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "image",
+          "label": "主题与风格图片 · 一张1K图片",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "generate_image@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

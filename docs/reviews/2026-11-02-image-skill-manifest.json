@@ -1,0 +1,46 @@
+{
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/guinacio/claude-image-gen",
+    "commit": "9ae689d2f1163ccba1900fa58a75436ef4d8d75b",
+    "license": "MIT",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream guinacio",
+    "review": "docs/reviews/2026-11-02-image-skill-manifest.json"
+  },
+  "files": [
+    {
+      "resourceId": "prompt-crafting",
+      "path": "upstream/references/prompt-crafting.md",
+      "type": "text/markdown",
+      "bytes": 4032,
+      "sha256": "4a5b585814010ed7954f9ee6596e22973d52640e485ff31e51c1ee665f19cc34"
+    },
+    {
+      "resourceId": "archive-skill",
+      "path": "upstream/SKILL.md",
+      "type": "text/markdown",
+      "bytes": 6885,
+      "sha256": "0b043446708a5d4ad096efc0099a3f5d6fde097ab72dbf508827351c9d75c920"
+    },
+    {
+      "resourceId": "license",
+      "path": "upstream/LICENSE",
+      "type": "text/plain",
+      "bytes": 1074,
+      "sha256": "56f69ce1aba5e1edd4bf6dc1bcb97d24be1954b3acb5795bdd2674cf69e2dcbb"
+    }
+  ],
+  "mapping": {
+    "generate_image@1": "generate_image"
+  },
+  "unsupported": [
+    "other models and providers",
+    "reference images and masks",
+    "editing",
+    "transparent background and output format",
+    "CLI/MCP execution",
+    "batch generation"
+  ],
+  "delivery": "single local image, 1k, 300 credits, manual approval"
+}

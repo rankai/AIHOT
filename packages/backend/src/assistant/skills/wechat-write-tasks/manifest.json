@@ -1,0 +1,116 @@
+{
+  "formatVersion": 1,
+  "skillId": "wechat-write",
+  "version": "2",
+  "name": "wechat-write",
+  "description": "公众号研究写作受控适配",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/redfox-data/redfox-community/tree/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/wechat-write",
+    "commit": "d2e24f02340a440a73a96aa6ad6a65f681fba89f",
+    "license": "NOASSERTION",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream redfox-data/redfox-community",
+    "review": "docs/wechat-skill-integration-plan.md"
+  },
+  "modules": [
+    {
+      "moduleId": "write",
+      "version": "2",
+      "description": "真实公众号热文检索、六维规律分析与文章创作",
+      "inputSchema": "writing-input@1",
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "wechat-research-writing@1",
+      "entryResource": "write",
+      "resources": [
+        "write",
+        "trend-format"
+      ],
+      "tools": [
+        "save_draft",
+        "search_wechat_articles",
+        "analyze_wechat_research"
+      ],
+      "outputKinds": [
+        "text-draft"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#write/success",
+        "fixtures#write/missing-input",
+        "fixtures#write/delivery"
+      ],
+      "hash": "2a4b81c9c302dd4a3a565b6330ed5d07105001cdbe4061d56b6cb7d375932260"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "write",
+      "path": "write.md",
+      "type": "text/markdown",
+      "bytes": 10187,
+      "sha256": "865f584f826d51d28c2d778ccd4853347375503cbbabb2ced722ab5067aac68f"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 328,
+      "sha256": "3a245feafdfce2b605aec99dac10fbdb5bddece3d92488a0cbfbb46a4b7a76e9"
+    },
+    {
+      "resourceId": "trend-format",
+      "path": "upstream/references/gzh_trend_data_format.md",
+      "type": "text/markdown",
+      "bytes": 6040,
+      "sha256": "579ef2eeee09c85b0fa479704e405b05fe0b5ac71b9efcedecce4ec449db0ac0"
+    },
+    {
+      "resourceId": "archive-0",
+      "path": "upstream/README.en.md",
+      "type": "text/markdown",
+      "bytes": 6426,
+      "sha256": "d1d4f6a5115d8dbf6b2cf5d777bdc672dd7b5b53c39a5b5fe9b721dfb3888696"
+    },
+    {
+      "resourceId": "archive-1",
+      "path": "upstream/README.md",
+      "type": "text/markdown",
+      "bytes": 5232,
+      "sha256": "97cbca77a0294c272875d4035e6b8ef30d09c70b516af4ef21cce050570b46d5"
+    },
+    {
+      "resourceId": "archive-2",
+      "path": "upstream/SKILL.md",
+      "type": "text/markdown",
+      "bytes": 11478,
+      "sha256": "88519cbfcf6c0dedd4f464ca6fb4397ab0df741b5ff21081259e73100d607bbf"
+    },
+    {
+      "resourceId": "archive-3",
+      "path": "upstream/references/alipay-recharge.md",
+      "type": "text/markdown",
+      "bytes": 6399,
+      "sha256": "ba54e839ce3ce9a458196fd15b827a839ddd68276d03c470a7d26cee1998c694"
+    },
+    {
+      "resourceId": "archive-4",
+      "path": "upstream/references/gzh_trend_data_format.md",
+      "type": "text/markdown",
+      "bytes": 6040,
+      "sha256": "579ef2eeee09c85b0fa479704e405b05fe0b5ac71b9efcedecce4ec449db0ac0"
+    },
+    {
+      "resourceId": "archive-5",
+      "path": "upstream/scripts/fetch_gzh_trends.py",
+      "type": "text/plain",
+      "bytes": 14021,
+      "sha256": "8aedf6e3f9828ecb1151e34196694fd5b2afe5ed533eed129357748dbff993fc"
+    }
+  ],
+  "manifestHash": "f54bfabbe237ae2bfe45179c8e27dc5b6efa714a89d2fdbf519bed78e295c4bc",
+  "packageHash": "b938ad85b4d0c236690596672ae10cd6b450ec452493369dff4f73442fccd43e"
+}

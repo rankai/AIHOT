@@ -1,3 +1,7 @@
+import { bindings, currentSkillVersions } from "./bindings.ts";
+import { Size } from "../providers/redfox/image-models.ts";
+import { prepareTaskChoice, taskPriceDefinition, applyTaskChoice, taskChoices } from "./task-pricing.ts";
+import { selectedArtifactVersions, coverPlanImageAvailability } from "./cover-plan.ts";
 import { researchClock } from "./xhs-research.ts";
 import { contextTokens } from "./context.ts";
 import { readAssistantAttachment } from "./attachments.ts";
@@ -11,22 +15,33 @@ import { quoteTool } from "../users/credits.ts";
 import { creditHash, requireCreditUser } from "../users/credits-core.ts";
 import { createRun, lockMemberAdmission } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
-import { profile, profiles, profileActions, taskHint } from "./catalog.ts";
+import { profile, profiles, profileActions, taskHint, additionalFeeKinds, resolveCandidate, skillNames } from "./catalog.ts";
 import { skillAdmission, queuedSkillAdmission, readSkillPolicies, skillHealth } from "./skill-policy.ts";
 import { accepting, requireAvailable, modelPolicy, TurnInput } from "./config.ts";
 import { command, ownedSession, event, message, conflict, saveArtifact, Content } from "./store.ts";
-import type { AssistantSession, AssistantOptions } from "@aihot/contracts/assistant";
+import type {
+  AssistantImageParameters,
+  AssistantSession,
+  AssistantOptions,
+  AssistantTurnQuote,
+} from "@aihot/contracts/assistant";
 import type { ToolCreditIntent } from "@aihot/contracts/credits";
 import { selectToolPrice } from "../users/credits-prices.ts";
-export async function assistantOptions(userId: number): Promise<AssistantOptions> {
-  const policies = await readSkillPolicies(), health = await skillHealth();
+export async function assistantOptions(userId: number, raw:unknown={}): Promise<AssistantOptions> {
+  const input=z.object({sessionId:z.string().uuid().optional(),artifactVersions:z.preprocess(value=>{
+    if(typeof value!=="string")return value;
+    try{return JSON.parse(value);}catch{return null;}
+  },TurnInput.shape.artifactVersions)}).strict().refine(value=>!value.artifactVersions?.length||!!value.sessionId,"选定稿件需要所属会话").parse(raw);
+  await requireCreditUser(sql,userId,true);
+  if(input.sessionId)await ownedSession(sql,userId,input.sessionId);
+  const selected=input.sessionId?await selectedArtifactVersions(sql,input.sessionId,input.artifactVersions):[];
+  const policies = await readSkillPolicies(), health = await skillHealth(sql,selected);
   const availability = (action: ReturnType<typeof profileActions>[number]) => {
     const { skillId, actionId } = action;
     const policy = policies.find(p => p.skillId === skillId)!;
     const reason = policy.reason ?? (!policy.acceptingNew ? "已暂停新任务；已开始的任务可继续" : health.get(actionId)?.[0] ?? null);
     return { available: !reason, reason };
   };
-  await requireCreditUser(sql, userId, true);
   return {
     inputCapabilities: { fileTypes: [".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152 },
     assistants: Object.values(profiles).map((p) => ({
@@ -36,9 +51,9 @@ export async function assistantOptions(userId: number): Promise<AssistantOptions
       welcome: p.welcome,
       available: profileActions(p.id).some(a => availability(a).available),
       reason: profileActions(p.id).some(a => availability(a).available) ? null : profileActions(p.id).map(a => availability(a).reason).find(Boolean) ?? "暂无可用技能",
+      taskOptions: bindings.filter(b=>b.version===currentSkillVersions[b.skillId]).flatMap(b=>b.modules.filter(m=>m.profiles.includes(p.id)&&availability({actionId:m.actionId,skillId:b.skillId} as never).available).flatMap(m=>(m.tasks??[]).map(task=>({choice:{skillId:b.skillId,moduleId:m.moduleId,delivery:task.delivery},label:`${b.name} · ${task.label}`,sizes:task.delivery==='image'?(m.deliveryContract==='xhs-cover-delivery@1'?['3:4']:[...Size.options]):[]})))),
       actions: [
-        ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, label: a.label, ...availability(a) })),
-        { actionId: "wechat", label: "公众号创作", available: false, reason: "未开放" },
+        ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, skillId: a.skillId, skillName: skillNames[a.skillId]!, label: a.label, ...availability(a) })),
       ],
     })),
     limits: { modelCalls: 8, activeTurns: 2, inputCharacters: 30000 },
@@ -53,6 +68,8 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
         initialRequest: z.object({
           message: z.string().trim().min(1).max(30000),
           skillSelection: TurnInput.shape.skillSelection,
+          taskHint: TurnInput.shape.taskHint,
+          taskChoice: TurnInput.shape.taskChoice,
           attachments: z.array(z.object({ assetKey: z.string().min(1).max(300) }).strict()).max(10).default([]),
         }).strict().optional(),
       })
@@ -60,7 +77,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
       .parse(raw),
     c = command(key, input);
   const p = profile(input.assistantId);
-  return sql.begin(async (tx) => {
+  const created = await sql.begin(async (tx) => {
     await lockMemberAdmission(tx, `user:${userId}`);
     await requireCreditUser(tx, userId, true);
     const [old] =
@@ -91,13 +108,23 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
       }
       const session = await ownedSession(tx, userId, id);
       const turnInput = { message: input.initialRequest.message, skillSelection: input.initialRequest.skillSelection ?? null,
+        ...(input.initialRequest.taskHint !== undefined ? { taskHint: input.initialRequest.taskHint } : {}),
+        ...(input.initialRequest.taskChoice ? {taskChoice:input.initialRequest.taskChoice} : {}),
         expectedRevision: session.revision, inputIds, artifactVersions: [] };
-      const { intent } = await snapshotInput(tx, userId, id, turnInput, undefined, true);
-      initialRequest = { commandKey: randomUUID(), input: turnInput, quote: await quoteTool(userId, intent, tx) };
+      initialRequest = { commandKey: randomUUID(), input: turnInput, quote: null };
       await tx`UPDATE assistant_sessions SET initial_request=${tx.json(initialRequest as never)} WHERE id=${id}`;
     }
     return { sessionId: id, initialRequest };
   });
+  if (created.initialRequest && !created.initialRequest.quote) {
+    try {
+      created.initialRequest.quote = await quoteTurn(userId,created.sessionId,created.initialRequest.input);
+      await sql`UPDATE assistant_sessions SET initial_request=${sql.json(created.initialRequest as never)} WHERE id=${created.sessionId} AND active_turn_id IS NULL`;
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'assistant_task_selection_required')) throw error;
+    }
+  }
+  return created;
 }
 export async function snapshotInput(db: Tx | typeof sql, userId: number, sessionId: string, raw: unknown, queueEntryId?: string, lockPolicy = false) {
   const input = TurnInput.parse(raw),
@@ -107,15 +134,15 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
   const hint = taskHint(session.assistant_id, input.taskHint),
     p = profile(session.assistant_id),
     model = await modelPolicy(),
+    selected = await selectedArtifactVersions(db,sessionId,input.artifactVersions),
     admission = queueEntryId
-      ? await queuedSkillAdmission(db as Tx, sessionId, queueEntryId, p.id)
-      : await skillAdmission(db, p.id, input.skillSelection as never, lockPolicy),
+      ? await queuedSkillAdmission(db as Tx, sessionId, queueEntryId, p.id, selected)
+      : await skillAdmission(db, p.id, input.skillSelection as never, lockPolicy, selected),
     allowed = admission.candidates;
-  const selected: unknown[] = [];
   const history =
     await db`SELECT role,text FROM assistant_messages WHERE session_id=${sessionId} AND role IN ('user','assistant') AND text<>'' ORDER BY seq`;
   const previousArtifacts =
-    await db`SELECT DISTINCT ON (artifact_id) artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} ORDER BY artifact_id,version DESC`;
+    await db`SELECT DISTINCT ON (artifact_id) artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND kind IN ('text-draft','xhs-note') ORDER BY artifact_id,version DESC`;
   const explicitArtifacts = new Set((input.artifactVersions ?? []).map((a) => a.artifactId));
   if (input.artifactVersions === undefined) selected.push(...previousArtifacts.filter((a) => !explicitArtifacts.has(a.artifact_id)));
   if (input.inputIds === undefined)
@@ -127,16 +154,6 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
       await db`SELECT id,text,hash,source FROM assistant_session_inputs WHERE id=${id} AND session_id=${sessionId}`;
     if (!row) throw conflict("选定输入不存在");
     selected.push(row);
-  }
-  const selectedVersions = new Set<string>();
-  for (const a of input.artifactVersions ?? []) {
-    const key = `${a.artifactId}:${a.version}`;
-    if (selectedVersions.has(key)) continue;
-    const [row] =
-      await db`SELECT artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND artifact_id=${a.artifactId} AND version=${a.version}`;
-    if (!row) throw conflict("选定稿件不存在");
-    selected.push(row);
-    selectedVersions.add(key);
   }
   for (const item of selected as Record<string, any>[]) {
     if (item.source?.assetKey) {
@@ -160,6 +177,7 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     model,
     limits: { modelCalls: 8, childCalls: 20 },
     taskHint: hint,
+    ...(input.taskChoice ? {taskChoice:input.taskChoice} : {}),
     skillSelection: input.skillSelection ?? null,
     autoAuthorizationId: input.autoAuthorizationId ?? null,
     brief: session.brief,
@@ -170,7 +188,13 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     selected,
   };
   if (JSON.stringify(snapshot).length > 85000) throw conflict("选定材料过多，请缩小范围");
-  if (contextTokens(JSON.stringify(snapshot)) + 4096 > model.maxInputTokens) throw conflict("模型上下文超过上限，请缩小材料");
+  // Reserve space before charging for two bounded article queries, loaded rules,
+  // tool schemas and the subsequent analysis/draft exchange. Never trim user material.
+  const modules = await Promise.all(allowed.map(candidate => resolveCandidate(allowed, candidate.skillId, candidate.moduleId)));
+  const coverResearch=modules.some(({module})=>module.tools.includes("analyze_xhs_covers"));
+  const continuationReserve = coverResearch || modules.some(({ module }) => module.tools.includes("search_wechat_articles")) ? 20000 : 4096;
+  if (contextTokens(JSON.stringify(snapshot)) + continuationReserve > model.maxInputTokens)
+    throw conflict(coverResearch ? "模型上下文超过封面研究材料额度，请减少材料，或选择具体非封面技能后重试" : continuationReserve === 20000 ? "模型上下文超过上限，请减少材料；自动选择包含公众号研究，可明确选择其他不需要研究的技能后重试" : "模型上下文超过上限，请缩小材料");
   const intent: ToolCreditIntent = {
     kind: "assistant-turn",
     provider: "assistant",
@@ -181,7 +205,14 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
 }
 export async function quoteTurn(userId: number, id: string, raw: unknown) {
   await requireAvailable();
-  return quoteTool(userId, (await snapshotInput(sql, userId, id, raw)).intent);
+  return quoteAssistantTurn(userId, await snapshotInput(sql, userId, id, raw));
+}
+export async function quoteAssistantTurn(userId: number, prepared: Pick<Awaited<ReturnType<typeof snapshotInput>>, "intent" | "snapshot">, db?: Tx): Promise<AssistantTurnQuote> {
+  // Immutable queued legacy packages keep their original single-tool authorization contract.
+  if (!taskChoices(prepared.snapshot.candidates).length) return { ...await quoteTool(userId,prepared.intent,db),additionalFeeKinds:await additionalFeeKinds(prepared.snapshot.candidates) };
+  const choice = await prepareTaskChoice(userId, prepared.snapshot, (prepared.snapshot as Record<string,any>).taskChoice, !db);
+  const definition = await taskPriceDefinition(prepared.snapshot,choice);
+  return { ...await quoteTool(userId, prepared.intent, db, definition), additionalFeeKinds: [] };
 }
 export async function submitTurn(userId: number, id: string, raw: unknown, key: unknown) {
   return sql.begin(tx => submitTurnTx(tx, userId, id, raw, key));
@@ -192,6 +223,7 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
       message: z.unknown(),
       expectedRevision: z.unknown(),
       taskHint: z.unknown().optional(),
+      taskChoice: TurnInput.shape.taskChoice,
       skillSelection: z.unknown().optional(),
       autoAuthorizationId: z.string().uuid().optional(),
       inputIds: z.unknown().optional(),
@@ -220,11 +252,16 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
       await tx`SELECT id FROM operation_runs WHERE id=(SELECT parent_operation_run_id FROM assistant_turns WHERE id=${session.active_turn_id}) AND status IN ('active','waiting','needs_review')`;
     if (active) throw conflict("请先处理或停止当前回合");
     const [count] =
-      await tx`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${userId}`} AND provider='assistant' AND status IN ('active','waiting')`;
+      await tx`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${userId}`} AND provider='assistant' AND operation_key='assistant.turn' AND status IN ('active','waiting')`;
     if (count!.n >= 2) throw conflict("同时最多执行2个助手回合");
     const [usage] = await tx`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${id}`;
     if (usage!.n >= 100) throw conflict("单会话最多100个回合，请新建会话");
     const { input, snapshot, intent } = await snapshotInput(tx, userId, id, rest, queueEntryId, true);
+    const [frozenQuote] = await tx`SELECT pricing_snapshot FROM member_tool_quotes WHERE id=${quoteId} AND user_id=${userId}`;
+    if (frozenQuote?.pricing_snapshot.task) {
+      if (input.autoAuthorizationId) throw conflict("本次任务需要一次明确费用确认，不能使用旧会话自动授权");
+      await taskPriceDefinition(snapshot, JSON.parse(frozenQuote.pricing_snapshot.task.scope));
+    }
     const turnId = randomUUID();
     if(input.autoAuthorizationId) await checkAuto(tx,userId,id,input.autoAuthorizationId,quoteId,"turn");
     const run = await createRun(tx, {
@@ -256,17 +293,28 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     const artifacts =
       await tx`SELECT DISTINCT ON (artifact_id) * FROM assistant_artifact_versions WHERE session_id=${id} ORDER BY artifact_id,version DESC`;
     const [turn] = s.active_turn_id
-      ? await tx`SELECT t.id,t.parent_operation_run_id,t.phase,t.pending_question,r.status,r.generation,r.step_key,r.step_version FROM assistant_turns t JOIN operation_runs r ON r.id=t.parent_operation_run_id WHERE t.id=${s.active_turn_id}`
+      ? await tx`SELECT t.id,t.snapshot,t.parent_operation_run_id,t.phase,t.pending_question,r.status,r.generation,r.step_key,r.step_version FROM assistant_turns t JOIN operation_runs r ON r.id=t.parent_operation_run_id WHERE t.id=${s.active_turn_id}`
       : [];
+    if(turn?.pending_question?.coverPlan){
+      const context=turn.pending_question.coverPlan;
+      const [plan]=await tx`SELECT activation_id FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${context.artifactId} AND version=${context.version} AND kind='xhs-cover-plan'`;
+      const image=await coverPlanImageAvailability(tx,turn,plan?.activation_id??"");
+      turn.pending_question={...turn.pending_question,coverPlan:{...context,imageAvailable:image.available,imageUnavailableReason:image.reason}};
+    }
     const calls = turn
-      ? await tx`SELECT c.* FROM assistant_tool_calls c JOIN assistant_model_steps m ON m.id=c.model_step_id WHERE c.turn_id=${turn.id} AND c.name='search_xhs_notes' ORDER BY m.model_ordinal,c.ordinal`
+      ? await tx`SELECT c.*, CASE WHEN c.name='generate_image' THEN r.input ELSE NULL END AS child_input
+          FROM assistant_tool_calls c
+          JOIN assistant_model_steps m ON m.id=c.model_step_id
+          LEFT JOIN operation_runs r ON r.id=c.child_run_id
+          WHERE c.turn_id=${turn.id} AND c.name IN ('analyze_xhs_covers','search_xhs_covers','search_xhs_notes','search_wechat_articles','generate_image')
+          ORDER BY m.model_ordinal,c.ordinal`
       : [];
     const [water] =
       await tx`SELECT coalesce(max(seq),0)::int seq FROM assistant_events WHERE session_id=${id}`;
     const activitySnapshot = turn ? await readActivities(tx, turn as Parameters<typeof readActivities>[1]) : null;
-    const queued = await tx`SELECT id,position,input,state,quote,error,submitted_turn_id,command_key FROM (SELECT * FROM assistant_message_queue WHERE session_id=${id} AND (state IN ('pending','quoted') OR id IN (SELECT id FROM assistant_message_queue WHERE session_id=${id} ORDER BY position DESC LIMIT 50))) q ORDER BY position`;
+    const queued = await tx`SELECT id,position,input,state,quote,error,prepared_input,submitted_turn_id,command_key FROM (SELECT * FROM assistant_message_queue WHERE session_id=${id} AND (state IN ('pending','quoted') OR id IN (SELECT id FROM assistant_message_queue WHERE session_id=${id} ORDER BY position DESC LIMIT 50))) q ORDER BY position`;
     return {
-      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
+      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, taskSelectionRequired: q.prepared_input?.taskSelectionRequired === true, skillSelection:q.input.skillSelection??null, state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
       sessionId: s.id,
       initialRequest: !s.active_turn_id && !messages.length ? s.initial_request : null,
       feeAuthorization: await readFeeAuthorization(tx,id),
@@ -294,6 +342,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
       })),
       turn: turn
         ? {
+            credits: (await tx`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${turn.parent_operation_run_id} AND pricing_snapshot ? 'task'`)[0] ?? null,
             turnId: turn.id,
             runId: turn.parent_operation_run_id,
             phase: ["stopped", "needs_review", "completed"].includes(turn.status) ? turn.status : turn.phase,
@@ -310,10 +359,11 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
               quote: c.quote,
               approvalBlockedReason: c.result?.approvalBlockedReason ?? null,
               childRunId: c.child_run_id,
-              result: c.result,
+              imageParameters: imageParameters(c),
+              result: publicCallResult(c.name, c.result),
             })),
             canResume:
-              turn.status === "stopped" &&
+              !turn.snapshot.taskScope && turn.status === "stopped" &&
               !(await tx`SELECT id FROM assistant_model_steps m WHERE m.turn_id=${turn.id}
                 AND m.operation_step_version=${turn.step_version} AND m.decision IS NOT NULL
                 AND NOT EXISTS(SELECT 1 FROM assistant_tool_calls c WHERE c.model_step_id=m.id)`)[0] &&
@@ -329,6 +379,53 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     } as AssistantSession;
   });
 }
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+/** Only these display fields leave the session read model for image calls. */
+function imageParameters(call: Record<string, any>): AssistantImageParameters | null {
+  if (call.name !== "generate_image") return null;
+  const childInput = objectValue(call.child_input)?.parameters;
+  const normalized = objectValue(call.result)?.normalized;
+  const source =
+    objectValue(childInput) ??
+    objectValue(objectValue(normalized)?.commandInput);
+  if (
+    typeof source?.prompt !== "string" ||
+    typeof source.size !== "string" ||
+    typeof source.resolution !== "string" ||
+    !Number.isSafeInteger(source.n) ||
+    Number(source.n) < 1
+  )
+    return null;
+  return {
+    prompt: source.prompt,
+    size: source.size,
+    resolution: source.resolution,
+    count: Number(source.n),
+  };
+}
+
+function publicCallResult(name: string, value: unknown): unknown {
+  if (name !== "generate_image" && name !== "analyze_xhs_covers") return value;
+  const result = objectValue(value);
+  if (!result) return value;
+  const {
+    normalized: _normalized,
+    approvalBlockedReason: _approvalBlockedReason,
+    ...publicResult
+  } = result;
+  if(name === "analyze_xhs_covers") {
+    const selected=objectValue(objectValue(_normalized)?.commandInput)?.selections;
+    return {...(Array.isArray(selected)?{selectedCount:selected.length,maxImages:20,batchImages:5,maxBatches:4}:{}),...publicResult};
+  }
+  return publicResult;
+}
+
 export async function listSessions(userId: number, raw: unknown) {
   const q = z
     .object({

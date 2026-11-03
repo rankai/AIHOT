@@ -1,0 +1,49 @@
+{
+  "formatVersion": 1,
+  "skillId": "wechat-write",
+  "version": "3",
+  "name": "公众号创作",
+  "modules": [
+    {
+      "moduleId": "write",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "wechat-write",
+      "label": "公众号创作",
+      "entry": "write",
+      "capabilities": [
+        "save-writing@1",
+        "search-wechat-hot@1",
+        "analyze-wechat-research@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "wechat-research-writing@1",
+      "references": [
+        "trend-format"
+      ],
+      "scriptBindings": [
+        {
+          "path": "upstream/scripts/fetch_gzh_trends.py",
+          "capability": "search-wechat-hot@1"
+        }
+      ],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "公众号创作",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-wechat-hot@1",
+              "maximum": 2
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

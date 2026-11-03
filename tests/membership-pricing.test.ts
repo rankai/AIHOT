@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { sql, closeDb } from '@aihot/backend/db';
 import { config } from '@aihot/backend/config';
 import { confirmMembershipPayment, getMembership, nextMembershipMonth } from '@aihot/backend/users/membership';
-import { applyApprovedMemberPrices, assertMemberCostEligible, memberPriceCatalog } from '@aihot/backend/users/member-pricing';
+import { applyApprovedMemberPricesTx, applyApprovedMemberPrices, assertMemberCostEligible, memberPriceCatalog } from '@aihot/backend/users/member-pricing';
 import { getCreditPage, grantCredits, quoteTool, saveToolPrice, listToolPrices } from '@aihot/backend/users/credits';
 import { quoteUserTool, submitUserTool } from '@aihot/backend/users/tools';
 import { createSiteUser } from '@aihot/backend/users/accounts';
@@ -14,6 +14,8 @@ import { passwordLogin, sessionPrincipal } from '@aihot/backend/admin/auth';
 import { registerAdminCredits } from '../apps/api/src/routes/admin-credits.ts';
 import { registerUserTools } from '../apps/api/src/routes/user-tools.ts';
 import { registerUserCredits } from '../apps/api/src/routes/user-credits.ts';
+import { WECHAT_HOT_OPERATION } from '@aihot/backend/providers/redfox/wechat-hot-contract';
+import { platformToolCatalog } from '@aihot/backend/providers/redfox/catalog';
 const actor='test:membership';
 before(async () => { const [db] = await sql`SELECT current_database() AS name`; assertConfiguredTestDatabase(db!.name); });
 after(closeDb);
@@ -57,7 +59,7 @@ test('concurrent distinct receipts serialize renewal and reject duplicate cross-
  const page=await getMembership(id);assert.equal(page.payments.length,3);assert.equal((await getCreditPage(id)).balance.available,30000);
 });
 test('approved price action is idempotent and catalog uses live price rules',async()=>{
- const before=await memberPriceCatalog(true);assert.equal(before.offers.filter(offer=>offer.kind==='query').length,127);assert.ok(before.offers.every(offer=>offer.provider!=='agentkey'));
+ const before=await memberPriceCatalog(true);assert.equal(before.offers.filter(offer=>offer.kind==='query' && offer.model!==WECHAT_HOT_OPERATION).length,127);assert.ok(before.offers.every(offer=>offer.provider!=='agentkey'));
  const model=`independent-assistant-${tag()}`;
  const independent=await saveToolPrice({kind:'assistant-turn',provider:'assistant',model,baseCredits:7,enabled:true,reason:'Synthetic independent assistant price'},actor);
  const unrelated=await saveToolPrice({kind:'query',provider:'redfox',model,baseCredits:9,enabled:true,reason:'Synthetic legacy tool price'},actor);
@@ -73,6 +75,43 @@ test('approved price action is idempotent and catalog uses live price rules',asy
  await saveToolPrice({...input,expectedVersion:version+1,reason:'Restore synthetic price'},actor);
  const id=await member();assert.equal((await quoteUserTool(id,{kind:'ai-search',input:{engine:'kimiK3',inquiryText:'synthetic'}})).amount,60);
  assert.equal((await quoteUserTool(id,{kind:'transcriptions',input:{platform:'videoUrl',url:'https://example.test/video'}})).amount,30);
+});
+test('exact assistant WeChat offer survives approved price lifecycle without becoming a public tool',async()=>{
+ const costs=await sql`SELECT * FROM service_prices WHERE service='redfox.query' AND model=${WECHAT_HOT_OPERATION}`;
+ const prices=await sql`SELECT * FROM member_tool_prices WHERE kind='query' AND provider='redfox' AND model=${WECHAT_HOT_OPERATION}`;
+ const intent={kind:'query' as const,provider:'redfox',model:WECHAT_HOT_OPERATION,input:{operationId:WECHAT_HOT_OPERATION,parameters:{keyword:'synthetic',startDate:'2026-01-01',endDate:'2026-01-01'}}};
+ try {
+  await sql`DELETE FROM service_prices WHERE service='redfox.query' AND model=${WECHAT_HOT_OPERATION}`;
+  assert(!(await memberPriceCatalog()).offers.some(o=>o.model===WECHAT_HOT_OPERATION));
+  await assert.rejects(assertMemberCostEligible(intent),/成本尚未核定/);
+  await sql`INSERT INTO service_prices(service,model,currency,per_request,source_url) VALUES ('redfox.query',${WECHAT_HOT_OPERATION},'CNY',0.06,'http://localhost/synthetic-m4-cost')`;
+  await sql`UPDATE member_tool_prices SET enabled=false WHERE kind='query' AND provider='redfox' AND model=${WECHAT_HOT_OPERATION}`;
+  const offer=(await memberPriceCatalog(true)).offers.find(o=>o.model===WECHAT_HOT_OPERATION)!;
+  assert.equal(offer.credits,20);assert.match(offer.costBasis!,/0.06/);
+  await assert.rejects(assertMemberCostEligible(intent));
+  const catalog={...await memberPriceCatalog(true),version:`synthetic-wechat-${tag()}`};
+  const rollback=new Error('rollback price lifecycle fixture');
+  for(const create of [true,false]) await assert.rejects(sql.begin(async tx=>{
+   // Preserve referenced IDs; roll back all price and application writes after checking both branches.
+   if(create) await tx`UPDATE member_tool_prices SET model=${`archived-${tag()}`} WHERE kind='query' AND model=${WECHAT_HOT_OPERATION}`;
+   else await tx`UPDATE member_tool_prices SET enabled=false,base_credits=99 WHERE kind='query' AND model=${WECHAT_HOT_OPERATION}`;
+   assert.equal((await applyApprovedMemberPricesTx(tx,actor,catalog)).applied,true);
+   const [exact]=await tx`SELECT enabled,base_credits FROM member_tool_prices WHERE kind='query' AND model=${WECHAT_HOT_OPERATION} AND tier='' AND parameter_match='{}'::jsonb`;
+   assert.equal(exact!.enabled,true);assert.equal(Number(exact!.base_credits),20);
+   assert.equal((await applyApprovedMemberPricesTx(tx,actor,catalog)).applied,false);
+   throw rollback;
+  }),error=>error===rollback);
+  const exact=prices.find(p=>p.tier==='' && JSON.stringify(p.parameter_match)==='{}');
+  await saveToolPrice({...(exact?{id:exact.id,expectedVersion:exact.version}:{}),kind:'query',provider:'redfox',model:WECHAT_HOT_OPERATION,baseCredits:20,enabled:true,reason:'Synthetic exact price eligibility'},actor);
+  await assertMemberCostEligible(intent);
+  assert(!(await platformToolCatalog()).some(o=>o.id===WECHAT_HOT_OPERATION));
+  await assert.rejects(quoteUserTool(await member(),{kind:'query',input:intent.input}),/不对前台用户开放/);
+ } finally {
+  await sql`DELETE FROM service_prices WHERE service='redfox.query' AND model=${WECHAT_HOT_OPERATION}`;
+  for(const row of costs)await sql`INSERT INTO service_prices ${sql(row)}`;
+  await sql`UPDATE member_tool_prices SET enabled=false WHERE kind='query' AND provider='redfox' AND model=${WECHAT_HOT_OPERATION}`;
+  for(const row of prices)await sql`UPDATE member_tool_prices SET enabled=${row.enabled},base_credits=${row.base_credits},version=${row.version},updated_at=${row.updated_at} WHERE id=${row.id}`;
+ }
 });
 test('unknown specs cannot quote or submit through broad prices or stale quotes; no reservations or tasks',async()=>{
  const id=await member();await grantCredits(id,{amount:20000,reason:'Synthetic credits'},actor,tag());

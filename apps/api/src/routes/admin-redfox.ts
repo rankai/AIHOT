@@ -1,3 +1,4 @@
+import { redfoxBalanceObservation } from "@aihot/backend/providers/redfox/balance-observation";
 import { AssetError } from "@aihot/backend/operations/assets";
 import { createWanGeneration } from "@aihot/backend/providers/aliyun/wan";
 import { wanOptions } from "@aihot/backend/providers/aliyun/wan-contract";
@@ -39,6 +40,7 @@ import { z } from "zod";
 import { sendProblem } from "../http/respond.ts";
 import { adminHandler } from "./admin-auth.ts";
 export function registerAdminRedfox(app: FastifyInstance) {
+  app.get("/api/admin/redfox/balance-observation",adminHandler(async()=>({observation:await redfoxBalanceObservation()})));
   app.get("/api/admin/redfox/xiaohongshu/comments/options",adminHandler(async()=>xhsCommentOptions()));
   app.post("/api/admin/redfox/xiaohongshu/comments",adminHandler(async(req,reply,admin)=>{const run=await createXhsComments(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));
   app.post("/api/admin/redfox/xiaohongshu/comments/query",adminHandler(async(req,reply,admin)=>{const run=await createXhsCommentQuery(req.body,actorOf(admin),req.headers["idempotency-key"]);return reply.code(202).send({runId:run.id,status:run.status});}));

@@ -1,3 +1,5 @@
+import { additionalFeeKinds } from "@aihot/backend/assistant/catalog";
+import { quoteTool } from "@aihot/backend/users/credits";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -6,7 +8,7 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice, reconcileCreditCharge } from "@aihot/backend/users/credits";
-import { createSession,quoteTurn,submitTurn } from "@aihot/backend/assistant/sessions";
+import { createSession,snapshotInput,submitTurn } from "@aihot/backend/assistant/sessions";
 import { prepareSearch,autoApproveSearch,decideCall,refreshCallQuote } from "@aihot/backend/assistant/tools";
 import { command } from "@aihot/backend/assistant/store";
 import { ownedTurn } from "@aihot/backend/assistant/controls";
@@ -21,7 +23,7 @@ test("strict skill selection and explicit empty selections",async()=>{
  assert.deepEqual(manual.map(c=>c.moduleId),["M2"]);
  await assert.rejects(()=>resolveCandidate(manual,"xiaohongshu-creator","M1"));
  await assert.rejects(()=>candidates("xiaohongshu",{actionId:"general-writing"}));
- assert.equal((await candidates("creative")).length,3);
+ assert.equal((await candidates("creative")).length,8);
  const base={message:"材料",expectedRevision:1};
  assert.equal(TurnInput.parse(base).inputIds,undefined);
  assert.deepEqual(TurnInput.parse({...base,inputIds:[],artifactVersions:[]}).inputIds,[]);
@@ -31,11 +33,11 @@ test("strict skill selection and explicit empty selections",async()=>{
 test("automatic fee admission freezes input, serializes replay, counts all versions and releases",async()=>{
  const [db]=await sql`SELECT current_database() name,inet_server_port() port`;
  assertConfiguredTestDatabase(db!.name,db!.port);
- const restore=await allowTestBudgetScope(["assistant.text"],"member");
+ const restore=await allowTestBudgetScope(["assistant.text","redfox.query"],"member");
  const unique=tag(),model=`input-fees-${unique}`;
  Object.assign(process.env,{REDFOX_CALLS_ENABLED:"true",REDFOX_API_KEY:"synthetic-no-network",ASSISTANT_ENABLED:"true",ASSISTANT_CALLS_ENABLED:"true",ASSISTANT_MODEL_VERIFIED:"true",ASSISTANT_MODEL:"default",LLM_MODEL:model,LLM_BASE_URL:"http://127.0.0.1:1/v1",LLM_API_KEY:"synthetic-no-network",ASSISTANT_TOKENIZER:"cl100k_base",MODEL_CALLS_ENABLED:"true"});
  try{
- await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service='assistant.text'`;
+ await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('assistant.text','redfox.query')`;
  await saveToolPrice({kind:"assistant-turn",provider:"assistant",model,baseCredits:200,enabled:true,reason:"Input fee fixture"},"test");
  const user=await createSiteUser({username:`inputfee_${unique}`,displayName:"Input fee",password:"synthetic-input-fee-password"},"test");
  await grantCredits(user.id,{amount:2000,reason:"Input fee fixture"},"test",randomUUID());
@@ -109,7 +111,7 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  const candidate=(await candidates("xiaohongshu")).find(c=>c.moduleId==="M1")!;
  await sql`INSERT INTO assistant_activations(id,turn_id,model_step_id,identity_hash,candidate) VALUES (${activationId},${searchRun.turnId},${stepId},'synthetic',${sql.json(candidate as never)})`;
  const newCall=async(ordinal:number)=>{
- const call={id:randomUUID(),turn_id:searchRun.turnId,proposal_revision:1,input:{activationId,keyword:"预算回归",startDate:searchTurn!.snapshot.researchClock.defaultStartDate,endDate:searchTurn!.snapshot.researchClock.latestDate}};
+ const call={name:"search_xhs_notes",id:randomUUID(),turn_id:searchRun.turnId,proposal_revision:1,input:{activationId,keyword:"预算回归",startDate:searchTurn!.snapshot.researchClock.defaultStartDate,endDate:searchTurn!.snapshot.researchClock.latestDate}};
  const proposal=await prepareSearch(searchTurn!,call);
  await sql`INSERT INTO assistant_tool_calls(id,turn_id,model_step_id,ordinal,upstream_id,name,input,state,quote,result) VALUES (${call.id},${searchRun.turnId},${stepId},${ordinal},${`synthetic-${ordinal}`},'search_xhs_notes',${sql.json(call.input)},'proposed',${sql.json(proposal.quote as never)},${sql.json({normalized:proposal.normalized} as never)})`;
  return {call,proposal};
@@ -214,3 +216,10 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  assert.equal((await setFeeAuthorization(user.id,sessionId,{enabled:false,expectedVersion:3})).authorization!.enabled,false);
  }finally{await restore();await stopBoss();await closeDb();}
 });
+
+/** Historical single-tool quote fixture. Current task entry is covered in assistant-task-entry.test.ts. */
+async function quoteTurn(userId:number,id:string,raw:unknown) {
+ await (await import("@aihot/backend/assistant/config")).requireAvailable();
+ const prepared=await snapshotInput(sql,userId,id,raw);
+ return {...await quoteTool(userId,prepared.intent),additionalFeeKinds:await additionalFeeKinds(prepared.snapshot.candidates)};
+}

@@ -4,6 +4,8 @@ import type {
   AssistantId,
   AssistantMessage,
   AssistantSession,
+  AssistantSkillSelection,
+  AssistantTaskHint,
 } from "@aihot/contracts/assistant";
 import type { ThreadMessageLike } from "@assistant-ui/react";
 
@@ -20,7 +22,9 @@ export interface SessionPage {
 export interface TurnInput {
   message: string;
   expectedRevision: number;
-  skillSelection: { actionId: string } | null;
+  skillSelection: AssistantSkillSelection | null;
+  taskHint?: AssistantTaskHint | null;
+  taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice;
   inputIds: string[];
   artifactVersions: { artifactId: string; version: number }[];
   autoAuthorizationId?: string;
@@ -42,19 +46,19 @@ export const sessionApi = (id: string) =>
 export const PHASE_LABELS: Record<string, string> = {
   executing: "正在处理你的创作需求",
   waiting_question: "等待你的回答",
-  waiting_approval: "等待检索批准",
-  waiting_child: "正在获取参考资料",
+  waiting_approval: "等待费用确认",
+  waiting_child: "正在等待外部服务返回",
   completed: "已处理完成",
   stopped: "已停止",
   needs_review: "本次结果需要核对",
 };
 export const SEARCH_STATE_LABELS: Record<string, string> = {
   proposed: "等待批准",
-  running: "已批准，检索中",
-  completed: "检索结果已保存",
-  rejected: "你已拒绝检索",
-  failed: "检索失败",
-  needs_review: "检索需要核对",
+  running: "已批准，处理中",
+  completed: "处理结果已保存",
+  rejected: "你已拒绝请求",
+  failed: "请求失败",
+  needs_review: "请求需要核对",
 };
 export function turnActive(session: AssistantSession): boolean {
   return (
@@ -87,6 +91,21 @@ export function safeSourceHref(raw: string | null): string | null {
   }
 }
 export function artifactText(content: AssistantArtifactContent): string {
+  if (content.coverPlan) {
+    const plan = content.coverPlan;
+    return [
+      content.title,
+      content.body,
+      content.body === plan.summary ? "" : plan.summary,
+      ...plan.schemes.map((scheme, index) => [
+        `方案 ${index + 1} · ${scheme.name}（${scheme.aspectRatio}）`,
+        `布局：${scheme.layout}`,
+        `配色：${scheme.palette}`,
+        `提示词：\n${scheme.prompt}`,
+      ].join("\n\n")),
+      `分析范围：${plan.evidence.scope}`,
+    ].filter(Boolean).join("\n\n");
+  }
   return [
     content.title,
     content.body,
@@ -163,15 +182,19 @@ export const isAssistantPath = (pathname: string) =>
 export function makeTurnInput(
   message: string,
   expectedRevision: number,
-  actionId: string | null,
+  selection: AssistantSkillSelection | string | null,
   references: ReadonlyArray<{ artifactId: string; version: number }> = [],
   inputIds: readonly string[] = [],
   autoAuthorizationId?: string,
+  taskHint?: AssistantTaskHint | null,
+  taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice,
 ): TurnInput {
   return {
     message: message.trim(),
     expectedRevision,
-    skillSelection: actionId ? { actionId } : null,
+    skillSelection: typeof selection === "string" ? { actionId: selection } : selection,
+    ...(taskHint !== undefined ? { taskHint } : {}),
+    ...(taskChoice ? {taskChoice} : {}),
     inputIds: [...inputIds],
     artifactVersions: references.map(({ artifactId, version }) => ({ artifactId, version })),
     ...(autoAuthorizationId ? { autoAuthorizationId } : {}),
@@ -181,6 +204,7 @@ export function makeTurnInput(
 /** Labels describe only persisted action evidence, never inferred thinking or vendor details. */
 export function activityLabel(activity: AssistantActivity, activities?: readonly AssistantActivity[]): string {
   const { kind, state } = activity;
+  if (activity.failureMessage) return activity.failureMessage;
   if (kind === "request_received") return "已收到请求";
   if (kind === "model_request" && state === "completed" && activities) {
     const index = activities.findIndex((item) => item.id === activity.id);
@@ -194,26 +218,44 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
       const [tool] = tools;
       if (tool) return {
         load_skill: "已选择创作技能",
+        save_xhs_cover_plan: "封面方案内容已返回",
         save_draft: "稿件内容已返回",
         ask_question: "已提出需要补充的问题",
+        analyze_xhs_covers: "已提出封面视觉分析需求",
+        search_xhs_covers: "已提出封面查询需求",
+        search_wechat_articles: "已提出公众号查询需求",
+        generate_image: "已提出图片生成需求",
+        analyze_wechat_research: "公众号规律分析已返回",
         search_xhs_notes: "已提出笔记检索需求",
         analyze_xhs_research: "爆款规律分析已返回",
-        read_skill_reference: "已选择创作参考",
+        read_skill_reference: "已提出读取资料需求",
       }[tool];
     }
   }
   const action = {
     model_request: "调用创作接口", load_skill: "加载创作技能",
-    read_skill_reference: "读取创作参考", ask_question: "补充信息",
+    read_skill_reference: "读取技能资料", ask_question: "补充信息",
     search_xhs_notes: `查询${activity.keyword ? `“${activity.keyword}”` : "参考笔记"}`,
     analyze_xhs_research: "整理爆款规律",
+    analyze_xhs_covers: "分析真实封面图片",
+    search_xhs_covers: "查询爆款封面",
+    search_wechat_articles: "查询公众号热文",
+    generate_image: "生成图片",
+    analyze_wechat_research: "分析爆款规律",
+    save_xhs_cover_plan: "保存封面方案",
     save_draft: "保存稿件",
   }[kind];
   if (state === "completed") return {
     model_request: "创作接口已返回", load_skill: "已加载创作技能",
-    read_skill_reference: "已读取创作参考", ask_question: "已提出补充问题",
-    search_xhs_notes: `${action} · 查询结果已返回`, save_draft: "稿件已保存",
+    read_skill_reference: "已读取技能资料", ask_question: "已提出补充问题",
+    save_xhs_cover_plan: "封面方案已保存",
+    search_xhs_notes: `${action} · 查询结果已返回`, save_draft: activity.artifactLabel ? `已保存${activity.artifactLabel}` : "稿件已保存",
     analyze_xhs_research: "已保存爆款规律分析",
+    analyze_xhs_covers: "封面视觉报告已保存",
+    search_xhs_covers: "封面候选查询结果已返回",
+    search_wechat_articles: "公众号热文查询结果已返回",
+    generate_image: "图片已保存，可在作品栏查看和下载",
+    analyze_wechat_research: "已保存公众号规律分析",
   }[kind];
   if (state === "running") return `正在${action}`;
   if (state === "preparing") return `准备${action}`;

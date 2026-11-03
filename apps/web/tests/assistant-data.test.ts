@@ -117,6 +117,26 @@ test("waiting and review phases block new turns and artifact editing until handl
   assert.equal(turnActive({ turn: null } as AssistantSession), false);
 });
 
+test("cover copying keeps all saved scheme prompts and evidence scope", () => {
+  const content: AssistantArtifactContent = {
+    title: "封面方案", body: "真实封面研究总结", intent: "draft", titles: [], tags: [], sources: [], partial: true, scope: "仅观察1张",
+    coverPlan: {
+      summary: "真实封面研究总结",
+      schemes: [1, 2, 3].map((index) => ({ schemeId: `scheme-${index}`, name: `方向${index}`, layout: `布局${index}`, palette: `配色${index}`, prompt: `完整提示词${index}\n第二行`, aspectRatio: "3:4", sourceIds: [] })),
+      evidence: { queryRunId: 1, visionRunId: 2, reportId: 3, candidateCount: 3, selectedCount: 2, downloadedCount: 1, analyzedCount: 1, observedCount: 1, keyword: "AI", startDate: "2026-10-01", scope: "仅限本次真实观察样本", failed: [], unreadable: [], samples: [] },
+    },
+  };
+  const copied = artifactText(content);
+  assert.equal((copied.match(/真实封面研究总结/g) ?? []).length, 1);
+  for (const index of [1, 2, 3]) {
+    assert(copied.includes(`方案 ${index} · 方向${index}（3:4）`));
+    assert(copied.includes(`布局：布局${index}`));
+    assert(copied.includes(`配色：配色${index}`));
+    assert(copied.includes(`提示词：\n完整提示词${index}\n第二行`));
+  }
+  assert(copied.includes("分析范围：仅限本次真实观察样本"));
+});
+
 test("research result cards only project saved results and safe source links", () => {
   assert.deepEqual(
     researchResults({ normalized: { commandInput: "not public" } }),
