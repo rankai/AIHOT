@@ -1,3 +1,5 @@
+import { additionalFeeKinds } from "@aihot/backend/assistant/catalog";
+import { quoteTool } from "@aihot/backend/users/credits";
 import { catalog } from "@aihot/backend/assistant/catalog";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
@@ -7,7 +9,7 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
-import { assistantOptions, createSession, quoteTurn, submitTurn, sessionSnapshot } from "@aihot/backend/assistant/sessions";
+import { assistantOptions, createSession, snapshotInput, submitTurn, sessionSnapshot } from "@aihot/backend/assistant/sessions";
 import { answerTurn, controlTurn } from "@aihot/backend/assistant/controls";
 import { decideCall, prepareSearch, activeTools, sourceCandidates } from "@aihot/backend/assistant/tools";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
@@ -597,7 +599,7 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
         assert.equal(final.turn!.activities!.find((a) => a.callId === draft.id)?.state, "failed");
       }
     });
-    await t.test("M2 saves its single primary title without alternative titles; missing tags still reject", async () => {
+    await t.test("M2 saves its primary title without imposing alternative-title or tag counts", async () => {
       for (const missingTags of [false, true]) {
         mode = missingTags ? "m2-no-tags" : "m2-single-title";
         const before = redfox.hits();
@@ -605,16 +607,14 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
         for (let i = 0; i < 4; i++) await advance(x.runId);
         const snapshot = await sessionSnapshot(x.user.id, x.sessionId);
         assert.equal(redfox.hits(), before, "M2 does not query research");
-        assert.equal(snapshot.turn?.status, missingTags ? "needs_review" : "completed");
-        assert.equal(snapshot.artifacts.length, missingTags ? 0 : 1);
-        if (!missingTags) {
-          assert.equal(snapshot.artifacts[0]!.content.title, "测试改写✨");
-          assert.deepEqual(snapshot.artifacts[0]!.content.titles, []);
-          assert.deepEqual(snapshot.artifacts[0]!.content.tags, ["改写", "材料"]);
-          const [charge] = await sql`SELECT state,consumed FROM member_credit_charges WHERE root_run_id=${x.runId}`;
-          assert.equal(charge.state, "settled");
-          assert.equal(charge.consumed, 7);
-        }
+        assert.equal(snapshot.turn?.status, "completed");
+        assert.equal(snapshot.artifacts.length, 1);
+        assert.equal(snapshot.artifacts[0]!.content.title, "测试改写✨");
+        assert.deepEqual(snapshot.artifacts[0]!.content.titles, []);
+        assert.deepEqual(snapshot.artifacts[0]!.content.tags, missingTags ? [] : ["改写", "材料"]);
+        const [charge] = await sql`SELECT state,consumed FROM member_credit_charges WHERE root_run_id=${x.runId}`;
+        assert.equal(charge.state, "settled");
+        assert.equal(charge.consumed, 7);
       }
     });
     await t.test("assistant search cannot bypass cost eligibility at quote or approval; completed approval still replays", async () => {
@@ -695,3 +695,10 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
     await closeDb();
   }
 });
+
+/** Historical single-tool quote fixture. Current task entry is covered in assistant-task-entry.test.ts. */
+async function quoteTurn(userId:number,id:string,raw:unknown) {
+ await (await import("@aihot/backend/assistant/config")).requireAvailable();
+ const prepared=await snapshotInput(sql,userId,id,raw);
+ return {...await quoteTool(userId,prepared.intent),additionalFeeKinds:await additionalFeeKinds(prepared.snapshot.candidates)};
+}

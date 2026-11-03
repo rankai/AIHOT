@@ -1,3 +1,7 @@
+import { XHS_COVER_OPERATION, XhsCoverOperationId, XhsCoverInput, LegacyXhsCoverReceiptInput } from "./xhs-cover-contract.ts";
+import { queryXhsCovers } from "./xhs-covers.ts";
+import { WECHAT_HOT_OPERATION, WechatHotOperationId, WechatHotInput } from "./wechat-hot-contract.ts";
+import { queryWechatHot } from "./wechat-hot.ts";
 import type { ToolAuthorization } from "../../users/credits.ts";
 import {lockOriginResult} from "../../operations/result-retention.ts";
 import { accountDetailOrigin, applyAccountDetailOrigin, AccountDetailTargets } from "./account-detail-origin.ts";
@@ -56,6 +60,8 @@ import { WeiboOperationId,weiboOperations } from "./weibo-contract.ts";
 import { queryWeibo } from "./weibo.ts";
 import type { PaidRequestOptions } from "../receipts.ts";
 function selectQuery(id:unknown,origin?:unknown){
+ if(id===XHS_COVER_OPERATION)return {platform:"xiaohongshu",schema:XhsCoverInput,query:queryXhsCovers};
+ if(id===WECHAT_HOT_OPERATION)return {platform:"wechat",schema:WechatHotInput,query:queryWechatHot};
  const media=MediaToolOperationId.safeParse(id);
  if(media.success)return {platform:mediaToolOperations[media.data].platform,schema:mediaToolOperations[media.data].schema,query:(p:Record<string,unknown>,w:string,o:PaidRequestOptions)=>queryMediaTool(media.data,p,w,o)};
  const social=SocialResearchOperationId.safeParse(id);
@@ -101,7 +107,7 @@ function selectQuery(id:unknown,origin?:unknown){
   return {platform:"weibo",schema:weiboOperations[wb].schema,query:(p:Record<string,unknown>,w:string,o:PaidRequestOptions)=>queryWeibo(wb,p,w,"query",o)};
 }
 export function parseSynchronousQuery(raw: unknown) {
-  const request=z.object({operationId:z.union([MediaToolOperationId,SocialResearchOperationId,WeiboOperationId,WechatOperationId,DouyinOperationId,XiaohongshuOperationId,TiktokOperationId,BilibiliOperationId,YoutubeOperationId,InstagramOperationId,ShipinhaoOperationId,KuaishouOperationId,ToutiaoOperationId,QichezhijiaOperationId,DongchediOperationId,YicheOperationId,BaijiahaoOperationId,XResearchOperationId,HotResearchOperationId,RedfoxAccountOperationId,ZhihuOperationId]),parameters:z.record(z.string(),z.unknown()),sourceResultId:z.number().int().positive().safe().optional()}).strict().parse(raw);
+  const request=z.object({operationId:z.union([XhsCoverOperationId,WechatHotOperationId,MediaToolOperationId,SocialResearchOperationId,WeiboOperationId,WechatOperationId,DouyinOperationId,XiaohongshuOperationId,TiktokOperationId,BilibiliOperationId,YoutubeOperationId,InstagramOperationId,ShipinhaoOperationId,KuaishouOperationId,ToutiaoOperationId,QichezhijiaOperationId,DongchediOperationId,YicheOperationId,BaijiahaoOperationId,XResearchOperationId,HotResearchOperationId,RedfoxAccountOperationId,ZhihuOperationId]),parameters:z.record(z.string(),z.unknown()),sourceResultId:z.number().int().positive().safe().optional()}).strict().parse(raw);
   const selected=selectQuery(request.operationId),parameters=selected.schema.parse(request.parameters);
   return { request, parameters, selected };
 }
@@ -110,6 +116,17 @@ export async function createSynchronousQuery(raw:unknown,actor:string,key:unknow
 }
 export async function createSynchronousQueryTx(tx:Tx,raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
+  // Replaying an accepted cover command is not new admission. Preserve its original
+  // normalized identity even if the supplier has since narrowed the outbound limit.
+  if(raw && typeof raw==='object' && 'operationId' in raw && raw.operationId===XHS_COVER_OPERATION){
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
+    const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
+    if(existing){
+      const replay=z.object({operationId:XhsCoverOperationId,parameters:LegacyXhsCoverReceiptInput,sourceResultId:z.number().int().positive().safe().optional()}).strict().parse(raw);
+      if(existing.provider!=='redfox'||existing.operation_key!=='redfox.sync.query'||stableJson(existing.input.commandIntent)!==stableJson(replay))throw new StaleOperationError("Command key reused with different input");
+      return existing;
+    }
+  }
   const { request, parameters, selected } = parseSynchronousQuery(raw);
   const intent={operationId:request.operationId,parameters,...(request.sourceResultId!==undefined?{sourceResultId:request.sourceResultId}:{})};
   {
@@ -120,7 +137,7 @@ export async function createSynchronousQueryTx(tx:Tx,raw:unknown,actor:string,ke
     if(request.sourceResultId!==undefined)await lockOriginResult(tx,request.sourceResultId);
     const origin=request.sourceResultId===undefined?undefined:AccountDetailTargets.includes(request.operationId)?await accountDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):(WeiboCarDetailTargets as readonly string[]).includes(request.operationId)?await weiboCarDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):(WorkDetailTargets as readonly string[]).includes(request.operationId)?await workDetailOrigin(tx,request.sourceResultId,request.operationId,parameters):["OE4KUEUO","UOM99OQI"].includes(request.operationId)?await manualWorkOrigin(tx,request.sourceResultId,request.operationId,parameters):request.operationId==="PAB6Z75Y"?await toutiaoOrigin(tx,request.sourceResultId,parameters):request.operationId==="Z9M88QI8"?await instagramOrigin(tx,request.sourceResultId,parameters):await youtubeOrigin(tx,request.sourceResultId,request.operationId,parameters);
     // One command snapshot: retries reuse it; a new explicit query may request fresh provider data.
-    const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:"redfox.sync.query",contractVersion:1,stepKey:"redfox.sync.query",input:{...(origin?{origin}:{}),commandIntent:intent,operationId:request.operationId,parameters,window:`query:${actor}:${commandKey}`,mode:"query",platform:selected.platform},limits:{steps:1,retries:3}});
+    const run=await createRun(tx,{actor,authorization,commandKey,provider:"redfox",operationKey:"redfox.sync.query",contractVersion:1,stepKey:"redfox.sync.query",input:{...(origin?{origin}:{}),commandIntent:intent,operationId:request.operationId,parameters,window:`query:${actor}:${commandKey}`,mode:"query",platform:selected.platform},limits:{steps:1,retries:[WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(request.operationId)?0:3}});
     await queueOperationStep(tx,run.id);return run;
   }
 }

@@ -1,0 +1,44 @@
+{
+  "formatVersion": 1,
+  "skillId": "ai-image-generator",
+  "version": "2",
+  "name": "图片生成",
+  "modules": [
+    {
+      "moduleId": "generate",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "ai-image-generator",
+      "label": "图片生成",
+      "entry": "entry",
+      "capabilities": [
+        "generate_image@1"
+      ],
+      "inputContract": "image-input@1",
+      "deliveryContract": "image-delivery@1",
+      "references": [
+        "upstream-skill",
+        "platform-specs",
+        "integration-contract"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "image",
+          "label": "图片生成 · 一张1K图片",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "generate_image@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

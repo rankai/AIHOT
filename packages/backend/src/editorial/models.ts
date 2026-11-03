@@ -15,6 +15,7 @@ export interface Capability {
 }
 
 export const CAPABILITIES = {
+  assistantCoverVision: { label: "小红书封面图像分析", env: "ASSISTANT_COVER_VISION_MODEL", default: "default", purposes: ["assistant.coverVision"], vision: true },
   assistant: { label: "创作助手（工具调用与草稿）", env: "ASSISTANT_MODEL", default: "default", purposes: ["assistant.turn"] },
   prefilter: { label: "精选预筛（是否属于这个行业，宽召回）", env: "PREFILTER_MODEL", default: "default", purposes: ["prefilter_article"] },
   score: { label: "精选评分（两次独立评分，按信源分级门槛）", env: "SCORE_MODEL", default: "default", purposes: ["score_article"] },

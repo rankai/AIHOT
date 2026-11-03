@@ -12,13 +12,24 @@ import { config } from "@aihot/backend/config";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
 import { passwordLogin, sessionPrincipal, SESSION_COOKIE } from "@aihot/backend/admin/auth";
-import { createSession, quoteTurn, submitTurn, submitTurnTx, assistantOptions, sessionSnapshot, editArtifact, artifactVersions } from "@aihot/backend/assistant/sessions";
-import { answerTurn, controlTurn } from "@aihot/backend/assistant/controls";
+import { createSession, quoteTurn, submitTurn, submitTurnTx, assistantOptions, sessionSnapshot, editArtifact, artifactVersions, sessionEvents } from "@aihot/backend/assistant/sessions";
+import { answerTurn, controlTurn, handoff, archiveSession } from "@aihot/backend/assistant/controls";
 import { enqueueMessage, approveQueuedMessage, refreshQueuedQuote, cancelQueuedMessage } from "@aihot/backend/assistant/message-queue";
-import { lockSkillPolicies, skillAdmission, readSkillPolicies, updateAssistantSkill, listAssistantSkills } from "@aihot/backend/assistant/skill-policy";
+import { capabilityActions, lockSkillPolicies, skillAdmission, readSkillPolicies, updateAssistantSkill, listAssistantSkills } from "@aihot/backend/assistant/skill-policy";
+import { saveArtifact } from "@aihot/backend/assistant/store";
+import { shouldReadSnapshot } from "../apps/web/app/features/assistant/snapshot-poll.ts";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { buildApp } from "../apps/api/src/app.ts";
 const completion = (name: string, input: unknown) => ({ id: "policy-fixture", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: [{ id: "call_0", type: "function", function: { name, arguments: JSON.stringify(input) } }] }, finish_reason: "tool_calls" }] });
+test("dependency recipients follow current capability bindings across action IDs", () => {
+  const packages = [{skillId:"one",version:"1",modules:[{actionId:"first",capabilities:["search-wechat-hot@1" as const]}]},
+    {skillId:"two",version:"2",modules:[{actionId:"second",capabilities:["search-wechat-hot@1" as const]},{actionId:"xhs",capabilities:["search-xhs-notes@1" as const]}]},
+    {skillId:"two",version:"1",modules:[{actionId:"retired",capabilities:["search-wechat-hot@1" as const]}]}];
+  assert.deepEqual(capabilityActions("search-wechat-hot@1",packages,{one:"1",two:"2"}),["first","second"]);
+  assert.deepEqual(capabilityActions("search-xhs-notes@1",packages,{one:"1",two:"2"}),["xhs"]);
+  assert.deepEqual(capabilityActions("search-wechat-hot@1"),["wechat-write"]);
+  assert.deepEqual(capabilityActions("search-xhs-notes@1"),["xiaohongshu-write"]);
+});
 test("skill policy admission, administration, concurrency and grandfathered work", async t => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`; assertConfiguredTestDatabase(db.name, db.port);
   const prior = await sql`SELECT * FROM settings WHERE key LIKE 'assistant.skills.%'`;
@@ -44,6 +55,35 @@ test("skill policy admission, administration, concurrency and grandfathered work
     const fresh = async () => ({ ...(await createSession(user.id, { assistantId: "creative" }, randomUUID())), input: { message: "写一篇用户材料稿", expectedRevision: 1, skillSelection: { actionId: "general-writing" } } });
     const change = async (acceptingNew: boolean, id = "general-writing") => updateAssistantSkill(id, { acceptingNew, expectedRevision: (await readSkillPolicies()).find(p => p.skillId === id)!.revision, reason: "测试运营调整" }, "test:policy");
     const charges = async () => (await sql`SELECT count(*)::int n FROM member_credit_charges WHERE user_id=${user.id}`)[0]!.n;
+    await t.test("handoff replays its accepted target after closure but rejects a new paused target", async () => {
+      const source = await fresh();
+      const saved = await sql.begin(tx => saveArtifact(tx, { sessionId: source.sessionId, baseVersion: 0, kind: "text-draft",
+        content: { title: "转交测试", body: "用户提供的材料", intent: "draft", titles: [], tags: [], sources: ["current-message"], partial: false, scope: "用户材料" },
+        sourceSnapshot: [{ id: "current-message", kind: "user-material", label: "本次材料", url: null }] }));
+      const input = { targetAssistantId: "xiaohongshu", artifactId: saved.artifactId, version: saved.version }, key = randomUUID();
+      const target = await handoff(user.id, source.sessionId, input, key);
+      const before = (await sql`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${user.id}`)[0]!.n;
+      const credits = await charges();
+      const [originalPolicy] = await sql`SELECT value FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+      await change(false, "xiaohongshu-creator");
+      try {
+        assert.deepEqual(await handoff(user.id, source.sessionId, input, key), target);
+        await assert.rejects(handoff(user.id, source.sessionId, input, randomUUID()), /暂停/);
+        assert.equal((await sql`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${user.id}`)[0]!.n, before);
+        assert.equal(await charges(), credits);
+        assert((await skillAdmission(sql, "creative")).candidates.some(candidate => candidate.skillId === "general-writing"));
+      } finally { await sql`UPDATE settings SET value=${sql.json(originalPolicy!.value)} WHERE key='assistant.skills.xiaohongshu-creator'`; }
+    });
+    await t.test("archive emits an event that refreshes another idle window's owned snapshot", async () => {
+      const source = await fresh(), otherWindow = await sessionSnapshot(user.id, source.sessionId);
+      assert.equal(shouldReadSnapshot(otherWindow.turn, false, false), false);
+      await archiveSession(user.id, source.sessionId, false);
+      const page = await sessionEvents(user.id, source.sessionId, { after: otherWindow.eventSeq });
+      assert(page.events.some(event => event.type === "session" && event.entityId === source.sessionId));
+      assert.equal(shouldReadSnapshot(otherWindow.turn, page.events.length > 0, false), true);
+      const refreshed = await sessionSnapshot(user.id, source.sessionId);
+      assert(refreshed.archived); assert(refreshed.queue?.paused); assert(refreshed.eventSeq > otherWindow.eventSeq);
+    });
     await t.test("admin authentication, CSRF, stale revision, unknown id and audit without external work", async () => {
       config.devAdmin = null; config.adminPassword = "synthetic-admin-policy-password";
       const login = await passwordLogin(config.adminPassword, "/admin", "policy-test"), cookie = `${SESSION_COOKIE}=${login.token}`;
@@ -71,7 +111,7 @@ test("skill policy admission, administration, concurrency and grandfathered work
         const text = "首次材料，不产生模型调用", file = path.join(directory, "fixture.md");
         await writeFile(file, text);
         const asset = await publishUpload({ actor: `user:${user.id}`, key: uploadKey(`user:${user.id}`, randomUUID()), file, filename: "fixture.md", mime: "text/markdown", bytes: Buffer.byteLength(text), sha256: createHash("sha256").update(text).digest("hex") });
-        const raw = { assistantId: "creative", initialRequest: { message: "用材料写稿", skillSelection: { actionId: "general-writing" }, attachments: [{ assetKey: asset.key }] } };
+        const raw = { assistantId: "creative", initialRequest: { message: "用材料写稿", skillSelection: { skillId: "general-writing" }, taskHint: { actionId: "general-writing" }, attachments: [{ assetKey: asset.key }] } };
         const counts = async () => (await sql`SELECT (SELECT count(*) FROM assistant_sessions WHERE owner_user_id=${user.id})::int sessions, (SELECT count(*) FROM member_tool_quotes WHERE user_id=${user.id})::int quotes, (SELECT count(*) FROM member_credit_charges WHERE user_id=${user.id})::int charges, (SELECT count(*) FROM receipts)::int receipts`)[0];
         const before = await counts(), hits = supplier.hits();
         await change(false);
@@ -85,6 +125,9 @@ test("skill policy admission, administration, concurrency and grandfathered work
         assert.equal((await sql`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${other.id}`)[0].n, 0);
         const key = randomUUID(), created = await createSession(user.id, raw, key);
         assert(created.initialRequest);
+        assert.deepEqual(created.initialRequest.input.skillSelection, { skillId: "general-writing" });
+        assert.deepEqual(created.initialRequest.input.taskHint, { actionId: "general-writing" });
+        assert.deepEqual(created.initialRequest.quote.additionalFeeKinds, []);
         assert.equal(created.initialRequest.input.expectedRevision, 2);
         assert.equal(created.initialRequest.input.inputIds.length, 1);
         assert.equal((await sessionSnapshot(user.id, created.sessionId)).inputs[0].text, text);
@@ -106,7 +149,7 @@ test("skill policy admission, administration, concurrency and grandfathered work
         const expired = await createSession(user.id, raw, randomUUID()), expiredKey = randomUUID();
         const expiry = await createSession(user.id, raw, expiredKey);
         await sql`UPDATE member_tool_quotes SET expires_at=now()-interval '1 second' WHERE id=${expiry.initialRequest!.quote.quoteId}`;
-        await quoteTurn(user.id, expired.sessionId, expired.initialRequest!.input);
+        assert.deepEqual((await quoteTurn(user.id, expired.sessionId, expired.initialRequest!.input)).additionalFeeKinds, []);
         assert.equal((await sql`SELECT id FROM member_tool_quotes WHERE id=${expiry.initialRequest!.quote.quoteId}`).length, 0);
         assert.deepEqual(await createSession(user.id, raw, expiredKey), expiry);
       } finally { config.dataDir = originalDir; await rm(directory, { recursive: true, force: true }); }
@@ -161,8 +204,11 @@ test("skill policy admission, administration, concurrency and grandfathered work
       const [run] = await sql`SELECT generation FROM operation_runs WHERE id=${accepted.runId}`; await controlTurn(user.id, f.sessionId, accepted.turnId, "stop", { generation: run.generation });
       await change(true);
     });
-    await t.test("accepted queue continues through load, question, answer, stop/resume and saved artifact after closure", async () => {
+    await t.test("historical accepted general-writing v2 queue continues through closure and stop/resume", async () => {
       const f = await fresh(), key = randomUUID(), queued = await enqueueMessage(user.id, f.sessionId, f.input, key);
+      const {candidates}=await import('@aihot/backend/assistant/catalog');
+      const legacy=await candidates('creative',f.input.skillSelection,{'general-writing':'2'});
+      await sql`UPDATE assistant_message_queue SET admission_snapshot=${sql.json({version:1,candidates:legacy,policies:[],unavailableSkills:[]} as never)} WHERE id=${queued.entryId}`;
       await change(false); assert.equal((await enqueueMessage(user.id, f.sessionId, f.input, key)).entryId, queued.entryId);
       const quote = await refreshQueuedQuote(user.id, f.sessionId, queued.entryId);
       const submitted = await approveQueuedMessage(user.id, f.sessionId, queued.entryId, { quoteId: quote.quote.quoteId });
@@ -181,6 +227,14 @@ test("skill policy admission, administration, concurrency and grandfathered work
       await editArtifact(user.id, f.sessionId, artifact.artifactId, { baseVersion: artifact.version, kind: artifact.kind, content: { ...artifact.content, title: "手工修改" } });
       assert.equal((await artifactVersions(user.id, f.sessionId, artifact.artifactId)).versions.length, 2); assert.equal(await charges(), count);
       await change(true);
+    });
+    await t.test("unconfirmed current task queue cannot execute after its skill closes",async()=>{
+      const f=await fresh(),before=await charges(),entry=await enqueueMessage(user.id,f.sessionId,f.input,randomUUID());
+      const quote=await refreshQueuedQuote(user.id,f.sessionId,entry.entryId);assert(quote.quote.task);
+      await change(false);
+      await assert.rejects(refreshQueuedQuote(user.id,f.sessionId,entry.entryId),/暂停/);
+      const result=await approveQueuedMessage(user.id,f.sessionId,entry.entryId,{quoteId:quote.quote.quoteId});assert('requote' in result);assert.equal(await charges(),before);
+      await cancelQueuedMessage(user.id,f.sessionId,entry.entryId);await change(true);
     });
     await t.test("migration-marked queue freezes explicit legacy scope once, even after closing", async () => {
       const f = await fresh();
@@ -221,7 +275,7 @@ test("skill policy admission, administration, concurrency and grandfathered work
     });
     await t.test("policy scope, action health, absent/bad settings and forged queued scope fail safely", async () => {
       await change(false, "xiaohongshu-creator");
-      const scope = await skillAdmission(sql, "creative"); assert(scope.candidates.every(c => c.skillId === "general-writing")); assert.equal(scope.unavailableSkills[0]!.skillId, "xiaohongshu-creator");
+      const scope = await skillAdmission(sql, "creative"); assert(scope.candidates.every(c => c.skillId === "general-writing")); assert(scope.unavailableSkills.some(s => s.skillId === "xiaohongshu-creator"));
       await assert.rejects(skillAdmission(sql, "xiaohongshu"), /暂停/);
       const options = await assistantOptions(user.id); assert(options.assistants.every(a => !a.actions.some(action => action.actionId.startsWith("xiaohongshu-")))); assert.equal(options.assistants.find(a => a.id === "xiaohongshu")!.available, false);
       await sql`UPDATE settings SET value='{"acceptingNew":true,"revision":20}'::jsonb WHERE key='assistant.skills.xiaohongshu-creator'`;
@@ -234,7 +288,15 @@ test("skill policy admission, administration, concurrency and grandfathered work
       await assert.rejects(refreshQueuedQuote(user.id, f.sessionId, entry.entryId), /受理范围/); await cancelQueuedMessage(user.id, f.sessionId, entry.entryId);
       await sql`DELETE FROM settings WHERE key='assistant.skills.general-writing'`;
       const count = (await sql`SELECT count(*)::int n FROM settings`)[0]!.n;
-      await listAssistantSkills(); assert.equal((await sql`SELECT count(*)::int n FROM settings`)[0]!.n, count);
+      const listed = (await listAssistantSkills()).skills;
+      assert.equal((await sql`SELECT count(*)::int n FROM settings`)[0]!.n, count);
+      for (const skillId of ["image-generator", "claude-image-generation", "ai-image-generator"]) {
+        const dependencies = listed.find(skill => skill.skillId === skillId)!.dependencies.join(" ");
+        assert.match(dependencies, /gptImage2/); assert.match(dependencies, /redfox\.image/); assert.match(dependencies, /redfox\.poll/);
+        assert.deepEqual(listed.find(skill => skill.skillId === skillId)!.capabilities,["generate_image@1"]);
+        assert.match(listed.find(skill => skill.skillId === skillId)!.openScope.join(" "),/1K、单张、无参考图.*本地图片作品/);
+      }
+      assert.match(listed.find(skill => skill.skillId === "wechat-write")!.dependencies.join(" "), /wechat\.hotArticleNew/);
       await assert.rejects(skillAdmission(sql, "creative", { actionId: "general-writing" }), /暂停/);
       await updateAssistantSkill("general-writing", { acceptingNew: true, expectedRevision: 0, reason: "首次建立配置" }, "test");
       await sql`UPDATE settings SET value='{"acceptingNew":"yes","revision":99}'::jsonb WHERE key='assistant.skills.general-writing'`;

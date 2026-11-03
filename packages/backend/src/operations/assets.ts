@@ -10,7 +10,7 @@ import { describeVideoMedia, inputMediaOptions, inspectAsset, declaredMediaLimit
 import {inspectTextAttachment,attachmentTextTypes,inputTextFormat,ATTACHMENT_TEXT_BYTES,type AttachmentTextFormat} from "./attachment-text.ts";
 import { audit } from "../admin/auth.ts";
 import { config } from "../config.ts";
-import { sql, type Tx } from "../db.ts";
+import { sql, type Tx, type Db } from "../db.ts";
 
 export const OUTPUT_IMAGE_BYTES = 64 * 1024 * 1024;
 export const OUTPUT_IMAGE_PIXELS = 64_000_000;
@@ -45,7 +45,7 @@ export function assetPath(key: string): string {
   if (!/^uploads\/redfox\/[a-f0-9]{64}$/.test(key)) throw new AssetError(400, "Invalid asset key.");
   return path.join(config.dataDir, key);
 }
-export interface AssetRow { key: string; content_type: string; bytes: number; purpose: string; status: string; sha256: string; created_at?: Date; expires_at?: Date | null; metadata: { filename: string; origin?: "subscription-video"; kind?: "image"|"audio"|"video"|"text"; validation?: string; width?: number; height?: number; pages?: number }; }
+export interface AssetRow { key: string; content_type: string; bytes: number; purpose: string; status: string; sha256: string; created_at?: Date; expires_at?: Date | null; metadata: { filename: string; origin?: "subscription-video"|"assistant-cover-reference"; kind?: "image"|"audio"|"video"|"text"; validation?: string; width?: number; height?: number; pages?: number }; }
 export async function prepareUpload(maxBytes = IMAGE_BYTES) {
   if (uploads >= 2) throw new AssetError(503, "Two uploads are already in progress. Try again shortly.");
   uploads++;
@@ -85,7 +85,7 @@ async function imageFormat(file:string) {
   if(!format)throw new AssetError(415,"Only PNG, JPEG and WebP image bytes are supported.");
   return format;
 }
-export async function publishUpload(input: { actor: string; key: string; file: string; filename: string; mime: string; bytes: number; sha256: string; purpose?: "operation-input"|"operation-output"; origin?: "subscription-video" }, tx?:Tx) {
+export async function publishUpload(input: { actor: string; key: string; file: string; filename: string; mime: string; bytes: number; sha256: string; purpose?: "operation-input"|"operation-output"; origin?: "subscription-video"|"assistant-cover-reference" }, tx?:Tx) {
   let inspected: Awaited<ReturnType<typeof inspectAsset>> | Awaited<ReturnType<typeof inspectTextAttachment>>;
   try {
     const ext=path.extname(input.filename).slice(1) as AttachmentTextFormat;
@@ -97,7 +97,7 @@ export async function publishUpload(input: { actor: string; key: string; file: s
     }else inspected=await inspectAsset(input.file,input.filename,input.mime,input.purpose==="operation-output",input.purpose==="operation-output"?OUTPUT_IMAGE_PIXELS:IMAGE_PIXELS,OUTPUT_IMAGE_BYTES); }
   catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);if(inputTextFormat(input.filename,input.mime)||(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,path.extname(input.filename).slice(1))))throw new AssetError(input.bytes>2*1024*1024?413:422,error instanceof Error?error.message:"Invalid text attachment");throw error;}
   if(inspected.bytes!==input.bytes)throw new AssetError(422,"File size changed before publication.");
-  if(input.origin && (input.purpose!=="operation-output" || inspected.metadata.kind!=="video"))throw new AssetError(422,"Subscription video publication requires a validated video output");
+  if(input.origin && (input.purpose!=="operation-output" || inspected.metadata.kind!==(input.origin==="assistant-cover-reference"?"image":"video")))throw new AssetError(422,input.origin==="assistant-cover-reference"?"Cover reference publication requires a validated image output":"Subscription video publication requires a validated video output");
   const mime=inspected.mime;
   const metadata = { filename: path.posix.basename(input.filename.replaceAll("\\","/")).replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200), ...inspected.metadata, ...(input.origin ? {origin:input.origin} : {}) };
   const publish=async (tx:Tx) => {
@@ -126,7 +126,7 @@ export async function publishUpload(input: { actor: string; key: string; file: s
     }
     if(existing)return existing;
     const [asset] = await tx<AssetRow[]>`INSERT INTO stored_files(key,content_type,bytes,purpose,sha256,metadata,expires_at,owner_actor)
-      VALUES (${input.key},${mime},${input.bytes},${input.purpose??'operation-input'},${input.sha256},${tx.json(metadata)},CASE WHEN ${input.origin==='subscription-video'} THEN now()+interval '30 days' ELSE NULL END,${owner}) RETURNING *`;
+      VALUES (${input.key},${mime},${input.bytes},${input.purpose??'operation-input'},${input.sha256},${tx.json(metadata)},CASE WHEN ${!!input.origin} THEN now()+interval '30 days' ELSE NULL END,${owner}) RETURNING *`;
     await audit(input.actor,input.purpose==="operation-output"?"asset.save":"asset.upload",input.key,null,null,{bytes:input.bytes,contentType:mime,sha256:input.sha256,...inspected.metadata},undefined,tx);
     return asset!;
   };
@@ -143,12 +143,12 @@ export async function lockAssetInputs(tx: Tx, input: unknown): Promise<void> {
     if (!row || row.status !== "available" || assetExpired(row)) throw new AssetError(409, "An input asset is missing or unavailable.");
   }
 }
-export function assetExpired(asset: AssetRow, now = new Date()) { return asset.metadata.origin === "subscription-video" && !!asset.expires_at && new Date(asset.expires_at).getTime() <= now.getTime(); }
+export function assetExpired(asset: AssetRow, now = new Date()) { return ["subscription-video","assistant-cover-reference"].includes(asset.metadata.origin??"") && !!asset.expires_at && new Date(asset.expires_at).getTime() <= now.getTime(); }
 export async function getAsset(key: string): Promise<AssetRow> {
   assetPath(key);
   const [asset] = await sql<AssetRow[]>`SELECT * FROM stored_files WHERE key=${key}`;
   if (!asset) throw new AssetError(404, "Asset not found.");
-  if(assetExpired(asset))throw new AssetError(410,"Automatically saved video has expired.");
+  if(assetExpired(asset) && !await liveCoverReference(sql,key))throw new AssetError(410,asset.metadata.origin==="assistant-cover-reference"?"Cover reference has expired.":"Automatically saved video has expired.");
   return asset;
 }
 /** Metadata stays inspectable after expiry; content and new inputs still use getAsset's gate. */
@@ -174,7 +174,14 @@ export async function listAssets(after?: string) {
 // Fixed cross-process lock, shared by dump+tar and every formal unlink. New immutable
 // publications and temporary cleanup don't take it. Backup holds the session version.
 export const ASSET_BACKUP_LOCK = 741904201;
+export async function liveCoverReference(db:Db,key:string):Promise<boolean> {
+ const [row]=await db`SELECT 1 FROM operation_results z JOIN assistant_tool_calls c ON c.child_run_id=z.run_id
+ JOIN assistant_turns t ON t.id=c.turn_id JOIN operation_runs parent ON parent.id=t.parent_operation_run_id
+ WHERE z.file_key=${key} AND z.kind='assistant_cover_reference' AND parent.status IN ('active','waiting','needs_review','stopped') LIMIT 1`;
+ return !!row;
+}
 async function hasActiveInput(tx: Tx, key: string): Promise<boolean> {
+  if(await liveCoverReference(tx,key))return true;
   const [row] = await tx`SELECT 1 FROM operation_runs WHERE status IN ('active','waiting','needs_review','stopped')
     AND (input->'fileKeys' @> ${tx.json([key])} OR (step_key IN ('redfox.image.save','redfox.video.save','aliyun.wan.save','subscription.video.save') AND progress->>'expectedFileKey'=${key}))
     AND NOT (operation_key='subscription.video.download' AND EXISTS (SELECT 1 FROM stored_files f WHERE f.key=${key} AND f.metadata->>'origin'='subscription-video' AND f.expires_at<=now())) LIMIT 1`;
@@ -270,7 +277,7 @@ async function runAssetCleanup(now: Date) {
   const [cursor]=await sql`SELECT value FROM settings WHERE key=${cursorKey}`;
   const last=typeof cursor?.value === "string" ? cursor.value : "";
   const eligible=sql`key LIKE 'uploads/redfox/%'
-    AND (status='deleting' OR (status='available' AND metadata->>'origin'='subscription-video' AND expires_at<=${now}))`;
+    AND (status='deleting' OR (status='available' AND metadata->>'origin' IN ('subscription-video','assistant-cover-reference') AND expires_at<=${now}))`;
   const [boundary]=await sql<{key:string|null}[]>`SELECT max(key) AS key FROM stored_files WHERE ${eligible}`;
   const upper=boundary?.key??"";
   // Finish one finite sweep, resuming at the persisted cursor then wrapping once.
@@ -285,6 +292,7 @@ async function runAssetCleanup(now: Date) {
       if(!pending.length)break;
       for(const {key,status} of pending){
         try{
+          if(await liveCoverReference(sql,key))continue;
           if(status==='available'){
             // Close expired automatic saves before normal deletion; unrelated manual input protection stays intact.
             await sql`UPDATE operation_runs SET status='stopped',generation=generation+1,wait_reason='Automatically saved video expired',next_attempt_at=NULL,job_id=NULL WHERE operation_key='subscription.video.download' AND progress->>'expectedFileKey'=${key} AND status IN ('active','waiting','needs_review')`;

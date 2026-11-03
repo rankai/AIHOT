@@ -15,6 +15,7 @@ test("assistant HTTP identity, quote hint binding and cross-entry admission", as
   assertConfiguredTestDatabase(db.name, db.port);
   const assistantScopes = (await listBudgetScopes()).filter((row) => row.service === "assistant.text");
   assert.deepEqual(assistantScopes.map((row) => row.scope).sort(), ["admin", "member"]);
+  const [priorXhsPolicy] = await sql`SELECT value FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
   const restoreBudgetScope = await allowTestBudgetScope(["assistant.text"], "member");
   const unique = tag(),
     model = `api-${unique}`;
@@ -22,6 +23,7 @@ test("assistant HTTP identity, quote hint binding and cross-entry admission", as
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
   const prior = config.devAdmin;
   try {
+    await sql`INSERT INTO settings(key,value,updated_by) VALUES ('assistant.skills.xiaohongshu-creator','{"acceptingNew":true,"revision":1}'::jsonb,'test') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
     config.devAdmin = null;
     Object.assign(process.env, {
       ASSISTANT_ENABLED: "true",
@@ -290,6 +292,9 @@ test("assistant HTTP identity, quote hint binding and cross-entry admission", as
     assert.equal(adminResume.json().code, "conflict");
     assert.equal(supplier.hits(), 0);
   } finally {
+    if (priorXhsPolicy) await sql`UPDATE settings SET value=${sql.json(priorXhsPolicy.value)} WHERE key='assistant.skills.xiaohongshu-creator'`;
+    else await sql`DELETE FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+
     config.devAdmin = prior;
     await app?.close();
     await supplier.close();

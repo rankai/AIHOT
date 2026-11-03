@@ -8,14 +8,15 @@ import { readCreditCharge } from "./credits-read.ts";
 
 type Outcome = "completed" | "failed" | "needs_review" | "stopped";
 interface DeliveryFacts {
-  assistantDeliveries: number; images: number; videos: number; answers: number; transcriptions: number; commentCompletions: number; uploads: number; genericResults: number;
+  visionReports: number; assistantDeliveries: number; images: number; videos: number; answers: number; transcriptions: number; commentCompletions: number; uploads: number; genericResults: number;
   successTasks: number; failedTasks: number; incompleteVideo: boolean; pendingReceipts: number; unknownReceipts: number; receivedReceipts: number;
   otherExecutableRuns: number;
 }
 
 /** Only persisted normalized result metadata is inspected, never provider raw responses. */
-async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): Promise<DeliveryFacts> {
+async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number, itemRuns?: number[]): Promise<DeliveryFacts> {
   const [facts] = await tx`SELECT
+      count(*) FILTER (WHERE r.kind='assistant_vision_report' AND r.data->>'complete'='true' AND (r.data->>'observedCount')::integer>0) AS vision_reports,
       count(*) FILTER (WHERE r.kind = 'assistant_delivery' AND EXISTS (SELECT 1 FROM assistant_artifact_versions a WHERE a.turn_id::text = r.data->>'turnId' AND a.artifact_id::text = r.data->>'artifactId' AND a.version = (r.data->>'version')::integer)) AS assistant_deliveries,
       count(DISTINCT r.file_key) FILTER (WHERE r.kind = 'image' AND f.status = 'available' AND f.content_type LIKE 'image/%') AS images,
       count(DISTINCT r.file_key) FILTER (WHERE r.kind = 'video' AND f.status = 'available' AND f.content_type LIKE 'video/%') AS videos,
@@ -28,16 +29,26 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): P
       count(*) FILTER (WHERE r.kind IN ('image_task','video_task','ai_search_task','transcription_task','xhs_comment_task')
         AND (r.data->>'status' = 'failed' OR (r.kind = 'ai_search_task' AND length(trim(coalesce(r.data->>'failReason', ''))) > 0))) AS failed_tasks,
       coalesce(bool_or(r.data->>'lastFrameMissing' = 'true'), false) AS incomplete_video
-    FROM member_credit_run_links l JOIN operation_results r ON r.run_id = l.run_id LEFT JOIN stored_files f ON f.key = r.file_key WHERE l.charge_id = ${charge.id}`;
-  const [receipts] = await tx`WITH linked AS (SELECT run_id FROM member_credit_run_links WHERE charge_id = ${charge.id}), ids AS (
+    FROM member_credit_authorized_runs l JOIN operation_results r ON r.run_id = l.run_id LEFT JOIN stored_files f ON f.key = r.file_key WHERE l.charge_id = ${charge.id} AND (${!itemRuns} OR l.run_id = ANY(${itemRuns ?? []}::bigint[]))`;
+  const [receipts] = await tx`WITH linked AS (SELECT run_id FROM member_credit_authorized_runs WHERE charge_id = ${charge.id} AND (${!itemRuns} OR run_id = ANY(${itemRuns ?? []}::bigint[]))), ids AS (
       SELECT current_receipt_id AS id FROM operation_runs WHERE id IN (SELECT run_id FROM linked) AND current_receipt_id IS NOT NULL
       UNION SELECT receipt_id AS id FROM operation_results WHERE run_id IN (SELECT run_id FROM linked) AND receipt_id IS NOT NULL
       UNION SELECT jsonb_array_elements_text(coalesce(progress->'retainedReceiptIds', '[]'))::bigint AS id FROM operation_runs WHERE id IN (SELECT run_id FROM linked)
     ) SELECT count(*) FILTER (WHERE status = 'pending') AS pending, count(*) FILTER (WHERE status = 'unknown') AS unknown,
-      count(*) FILTER (WHERE status IN ('received','completed')) AS received FROM receipts WHERE id IN (SELECT id FROM ids)`;
-  const [other] = await tx`SELECT count(*) AS n FROM member_credit_run_links l JOIN operation_runs r ON r.id = l.run_id
-    WHERE l.charge_id = ${charge.id} AND l.run_id <> ${currentRunId} AND r.status IN ('active','waiting')`;
-  return { assistantDeliveries: Number(facts!.assistant_deliveries), images: Number(facts!.images), videos: Number(facts!.videos), answers: Number(facts!.answers), transcriptions: Number(facts!.transcriptions),
+      count(*) FILTER (WHERE status IN ('received','completed') AND NOT (
+        ${!!itemRuns} AND status='completed'
+        AND NOT EXISTS (SELECT 1 FROM operation_runs o WHERE o.id IN (SELECT run_id FROM linked)
+          AND (o.current_receipt_id=receipts.id OR coalesce(o.progress->'retainedReceiptIds','[]') @> to_jsonb(ARRAY[receipts.id])))
+        AND EXISTS (SELECT 1 FROM operation_results z JOIN assistant_model_steps s ON s.id::text=z.data->>'stepId'
+          JOIN assistant_turns t ON t.id=s.turn_id AND t.parent_operation_run_id=z.run_id
+          WHERE z.run_id IN (SELECT run_id FROM linked) AND z.receipt_id=receipts.id AND z.kind='assistant_model'
+            AND s.receipt_id=receipts.id AND s.decision IS NOT NULL
+            AND EXISTS (SELECT 1 FROM assistant_tool_calls c WHERE c.model_step_id=s.id)
+            AND NOT EXISTS (SELECT 1 FROM assistant_tool_calls c WHERE c.model_step_id=s.id AND c.state NOT IN ('completed','rejected','failed')))
+      )) AS received FROM receipts WHERE id IN (SELECT id FROM ids)`;
+  const [other] = await tx`SELECT count(*) AS n FROM member_credit_authorized_runs l JOIN operation_runs r ON r.id = l.run_id
+    WHERE l.charge_id = ${charge.id} AND l.run_id <> ${currentRunId} AND r.status IN ('active','waiting') AND (${!itemRuns} OR l.run_id = ANY(${itemRuns ?? []}::bigint[]))`;
+  return { visionReports:Number(facts!.vision_reports), assistantDeliveries: Number(facts!.assistant_deliveries), images: Number(facts!.images), videos: Number(facts!.videos), answers: Number(facts!.answers), transcriptions: Number(facts!.transcriptions),
     commentCompletions: Number(facts!.comment_completions), uploads: Number(facts!.uploads), genericResults: Number(facts!.generic_results),
     successTasks: Number(facts!.success_tasks), failedTasks: Number(facts!.failed_tasks), incompleteVideo: facts!.incomplete_video,
     pendingReceipts: Number(receipts!.pending), unknownReceipts: Number(receipts!.unknown), receivedReceipts: Number(receipts!.received), otherExecutableRuns: Number(other!.n) };
@@ -45,6 +56,7 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number): P
 
 function delivered(charge: ChargeRow, facts: DeliveryFacts): boolean {
   switch (charge.pricing_snapshot.kind) {
+    case "assistant-vision": return facts.visionReports >= 1;
     case "assistant-turn": return facts.assistantDeliveries >= 1;
     case "images": return facts.images >= Math.max(1, charge.pricing_snapshot.imageCount);
     case "videos": return facts.videos >= 1 && !facts.incompleteVideo;
@@ -89,6 +101,10 @@ export async function settleForRun(tx: Tx, input: { runId: number; outcome: Outc
   const charge = await chargeForRun(tx, run.id, true);
   if (!charge) throw new AccountError(403, "quote_required", "用户任务缺少积分授权");
   if (["settled", "released"].includes(charge.state)) return;
+  if (charge.pricing_snapshot.task) {
+    await settleTask(tx, charge, input);
+    return;
+  }
   const facts = await deliveryFacts(tx, charge, run.id);
   const evidence = { runId: run.id, outcome: input.outcome, facts };
   if (input.outcome === "completed" && delivered(charge, facts) && !facts.pendingReceipts && !facts.unknownReceipts && !facts.otherExecutableRuns) {
@@ -110,6 +126,34 @@ export async function settleForRun(tx: Tx, input: { runId: number; outcome: Outc
   await markReview(tx, charge, reason, evidence);
 }
 
+/** Child completion records item evidence only; the root coordinates one final ledger mutation. */
+async function settleTask(tx: Tx, charge: ChargeRow, input: { runId: number; outcome: Outcome }) {
+  const items = await tx`SELECT * FROM member_credit_task_items WHERE charge_id=${charge.id} ORDER BY item_key,unit FOR UPDATE`;
+  let consumed = 0, unresolved = false;
+  for (const item of items) {
+    const ids = [item.run_id,item.recovery_run_id].filter((id): id is number => id !== null);
+    if (!ids.length) continue;
+    const facts = await deliveryFacts(tx, charge, -1, ids);
+    const complete = delivered({ ...charge, pricing_snapshot: item.pricing_snapshot }, facts);
+    // A receipt without delivery may require saving its response; never turn that into an automatic refund.
+    const uncertain = facts.pendingReceipts > 0 || facts.unknownReceipts > 0 || facts.otherExecutableRuns > 0
+      || (!complete && (facts.successTasks > 0 || (facts.receivedReceipts > 0 && facts.failedTasks === 0)));
+    const amount = complete && !uncertain ? Number(item.amount) : 0;
+    unresolved ||= uncertain;
+    consumed += amount;
+    await tx`UPDATE member_credit_task_items SET consumed=${uncertain ? null : amount},evidence=${tx.json({ facts, delivered: complete } as never)}
+      WHERE charge_id=${charge.id} AND item_key=${item.item_key} AND unit=${item.unit}`;
+  }
+  const [root] = await tx`SELECT status FROM operation_runs WHERE id=${charge.root_run_id}`;
+  if (["active","waiting"].includes(root!.status)) return;
+  const facts = await deliveryFacts(tx, charge, -1);
+  if (unresolved || facts.pendingReceipts || facts.unknownReceipts || facts.otherExecutableRuns || root!.status === "needs_review") {
+    await markReview(tx, charge, "已停止后续执行，费用核对中", { task: true, ...input, facts });
+    return;
+  }
+  await finalizeCharge(tx, charge, consumed, "system:member-credits", "按任务实际交付项目结算，释放未执行额度", { task: true, ...input, facts });
+}
+
 /** Manual review never edits historical entries; it appends one final consumption/release. */
 export async function reconcileCreditCharge(id: string, raw: unknown, actor: string, rawKey: unknown): Promise<CreditCharge> {
   z.string().uuid().parse(id);
@@ -126,7 +170,7 @@ export async function reconcileCreditCharge(id: string, raw: unknown, actor: str
     if (!snapshot) throw new AccountError(404, "not_found", "积分任务不存在");
     // Match the operation lock order. Locking the original also prevents a new recovery link.
     await tx`SELECT id FROM operation_runs WHERE id = ${snapshot.root_run_id} FOR UPDATE`;
-    const runs = await tx<CreditRunRow[]>`SELECT r.* FROM operation_runs r JOIN member_credit_run_links l ON l.run_id = r.id WHERE l.charge_id = ${id} ORDER BY r.id FOR UPDATE OF r`;
+    const runs = await tx<CreditRunRow[]>`SELECT r.* FROM operation_runs r JOIN member_credit_authorized_runs l ON l.run_id = r.id WHERE l.charge_id = ${id} ORDER BY r.id FOR UPDATE OF r`;
     const [charge] = await tx<ChargeRow[]>`SELECT * FROM member_credit_charges WHERE id = ${id} FOR UPDATE`;
     if (["settled", "released"].includes(charge!.state)) throw new AccountError(409, "credits_finalized", "该任务已经结算；如需纠错请新增积分调整记录");
     if (input.consume > charge!.amount) throw new AccountError(400, "invalid_request", "结算积分不能超过本次占用");

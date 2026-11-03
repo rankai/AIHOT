@@ -1,0 +1,276 @@
+{
+  "date": "2026-11-02",
+  "status": "local-stub-accepted; uncommitted; not-deployed",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/chemny/ai-image-generator",
+    "commit": "90736de1c8f6b672a235e43113d7a90c86e73119",
+    "license": "MIT",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream chemny",
+    "review": "docs/reviews/2026-11-02-external-ai-image-generator-manifest.json"
+  },
+  "upstreamVersion": "0.4.2",
+  "registry": {
+    "directory": "ai-image-generator",
+    "currentVersion": "1"
+  },
+  "scope": "Complete default Direct single-image core flow within the existing platform contract; not full upstream feature compatibility.",
+  "coreFlow": [
+    "Load immutable Direct rules and platform size references",
+    "Keep the original user prompt unchanged",
+    "Resolve supported aspect ratio using explicit caller value > explicit prompt value > platform/use-case spec > platform default 1:1",
+    "Prepare a single 1K gptImage2 quote",
+    "Require dedicated manual approval before dispatch",
+    "Reuse existing operation submission, task polling, receipt, local asset persistence and image artifact delivery"
+  ],
+  "mapping": [
+    {
+      "upstream": "SKILL.md Direct Mode; references/integration-contract.md Core Contract",
+      "necessity": "required",
+      "platform": "generate.md instructions + existing generate_image@1 input normalization",
+      "evidence": "original Chinese prompt equals tool call input and local HTTP submission input; no rewriting",
+      "status": "covered by stub; real model interpretation pending"
+    },
+    {
+      "upstream": "scripts/resolve-image-spec.sh; references/platform-image-specs.json",
+      "necessity": "required size semantics",
+      "platform": "immutable platform-specs resource and generate.md priority; existing image-input@1 size enum",
+      "evidence": "vertical social card spec is 4:5; model stub returns 4:5; stored call and HTTP submission preserve 4:5",
+      "difference": "No shell resolver execution or new deterministic size parser. Unsupported ratios rejected/explained; pixel sizes are semantic input; 2.35:1 maps to 21:9 per upstream spec; no-match uses platform default 1:1. Real-model coverage of all size rules is unverified.",
+      "status": "supported ratio path covered; full semantic inference unverified"
+    },
+    {
+      "upstream": "scripts/generate-image.sh provider dispatch and output parsing/download helpers",
+      "necessity": "required generation and file delivery; upstream API transport optional when native host capability exists",
+      "platform": "generate_image@1 -> existing redfox.image.generate operation -> image-delivery@1",
+      "evidence": "one submission/one poll/one download, actual local PNG equals stub bytes, artifact linked to owned stored file; parent 7 and child 300 fixture credits settled",
+      "difference": "Host fixes gptImage2, 1k, n=1; persistent operation/receipts replace shell curl, provider fallback and raw JSON paths; unknown submission retains original task without resending",
+      "status": "covered by local stub"
+    },
+    {
+      "upstream": "scripts/check-config.sh and generate-image.sh load_env_file",
+      "necessity": "optional API-provider configuration",
+      "platform": "existing server-owned credentials, gates, service budgets, member prices and costs",
+      "difference": "No package-specific credentials or endpoints; no .env loading; scripts archived only",
+      "status": "not exposed"
+    },
+    {
+      "upstream": "scripts/build-prompt-brief.sh and SKILL.md Pro Mode",
+      "necessity": "optional",
+      "platform": "none",
+      "difference": "Pro mode and its helper are not exposed; archived only",
+      "status": "not supported"
+    }
+  ],
+  "capabilities": [
+    "generate_image@1"
+  ],
+  "inputContract": "image-input@1",
+  "deliveryContract": "image-delivery@1",
+  "unsupported": [
+    "reference image input",
+    "image editing",
+    "mask",
+    "transparent background",
+    "Pro mode/prompt checking",
+    "script execution",
+    "multi-provider or user API configuration",
+    "batch generation"
+  ],
+  "pricing": {
+    "singleImageCredits": 300,
+    "basis": "existing member price fixture; not a new skill-specific production tariff",
+    "assistantParentFixtureCredits": 7,
+    "manualApprovalRequired": true,
+    "realSupplierCost": "unverified"
+  },
+  "scripts": {
+    "execution": "archive-only; not executed",
+    "scriptBindings": [],
+    "runtimeDependenciesInstalled": false
+  },
+  "hashes": {
+    "manifestHash": "3d46f4832c7bd75c3529185402b2aca54cdc279512c7c5c6a658ed4012d39636",
+    "packageHash": "b282991345bd920416518677ce4853c857351caf47137c9221766bc38b760ea9",
+    "files": [
+      {
+        "path": "binding.json",
+        "bytes": 608,
+        "sha256": "b875726ff934ffd5032871ecb4763c16bd3d6530bb2d0809ebf234c95b77eb74",
+        "kind": "integration-package"
+      },
+      {
+        "path": "fixtures.json",
+        "bytes": 594,
+        "sha256": "5a610e634898e9b61d8e39496e4c8ac18ac776db615992cbe6a178c08e2676d3",
+        "kind": "integration-package"
+      },
+      {
+        "path": "generate.md",
+        "bytes": 2208,
+        "sha256": "4e0bf79b17bb36cffa215cef51df7f38d23fbc2dd3e20226ca251debe4187662",
+        "kind": "integration-package"
+      },
+      {
+        "path": "manifest.json",
+        "bytes": 6079,
+        "sha256": "8dc187fc48303159026ffc6b446b81b2d62acda9c715d0d98f300578dca52568",
+        "kind": "integration-package"
+      },
+      {
+        "path": "upstream/.env.example",
+        "bytes": 1420,
+        "sha256": "bb97c43c0f8109c476aeb6ee7ab4838094f7089ca7aa118827872db67ea213ee",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/.gitignore",
+        "bytes": 390,
+        "sha256": "b34e76422285aa9a396aa17d4c73be7df09757b030b6556ee26a388941bd8dc9",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/ACCEPTANCE.md",
+        "bytes": 2103,
+        "sha256": "b8c89f873fa6c182196d258b23877f4d0c6bb651acae40ac652bd869183a62a0",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/CHANGELOG.md",
+        "bytes": 1133,
+        "sha256": "8f2862da335d5bc98ba753cf1f7a919f6860f8f6a15d3b50052a53cefd4bc89a",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/LICENSE",
+        "bytes": 1088,
+        "sha256": "d1bf94e2a34f8a920f49c194f05c4b462c1d1498c9c21c868cb2c0af7686cd3a",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/README.en.md",
+        "bytes": 9724,
+        "sha256": "a0692828c16e03c16b67a66e5b2e4c21560424a5bf69664691c5f93923f7a2db",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/README.md",
+        "bytes": 9285,
+        "sha256": "10bf45f262ffc9e47b9a6e942c7ca8b87aca9e78274220b68e213734b8747fd6",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/RELEASE_CHECKLIST.md",
+        "bytes": 1772,
+        "sha256": "b22666b13880e30eeac51e7fb483861ffdbc6db8b16425e33884fae1fcba199b",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/SKILL.md",
+        "bytes": 9203,
+        "sha256": "b1dcb17267fc80996bed39e07809e4a18dbb9dfa343babccc9d8e28e6433ef35",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/USAGE_EXAMPLES.md",
+        "bytes": 1272,
+        "sha256": "c87f67bf5f964eea740efa7e6ac2ee5947b03050fb185a05bd4a92291a903999",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/references/integration-contract.md",
+        "bytes": 3855,
+        "sha256": "ad94e6ee232d9811d22602c3270f3bd0764b71d795145ba87b65b0bebcca3688",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/references/platform-image-specs.json",
+        "bytes": 5387,
+        "sha256": "46f84dc64fac4d5fe5c78334e530bf3cd255df3f31290ce8cc62bd37cdc0d741",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/references/platform-image-specs.md",
+        "bytes": 2591,
+        "sha256": "8232a12e39a698a4994c0dd8760dd84a6dd0f992c7db6a55e99d8ef7f3ecd210",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/scripts/build-prompt-brief.sh",
+        "bytes": 7675,
+        "sha256": "9380eaffcaef8a1f1b6b29bcf985a3859c7ded12a177470361d4db01f4a218f6",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/scripts/check-config.sh",
+        "bytes": 1574,
+        "sha256": "ba2c4bb51fb1b38f1e3b63bc53343b1347aee7144eb8bad4eaa98477aa81301d",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/scripts/generate-image.sh",
+        "bytes": 21622,
+        "sha256": "5d01c58f29505e83d725c330f6c678d567c13f4773a998a5879c0f30ef51f8ac",
+        "kind": "upstream-archive"
+      },
+      {
+        "path": "upstream/scripts/resolve-image-spec.sh",
+        "bytes": 4018,
+        "sha256": "2a1b03c319b820d36dc24d038a48d60aebb4ebeef4099196d6e1bba13a66d67e",
+        "kind": "upstream-archive"
+      }
+    ]
+  },
+  "businessFreeze": {
+    "baselinePath": "/private/tmp/aihot-generic-skill-m3/business-before.json",
+    "baselineHead": "67a9a561cea9301ae86bd0ff410a7cdaf430c06e",
+    "baselineFileSha256": "551d8169104693dea53411f4d79e9b6c9bd8d9dbf1b53a037067a8b93b2e349a",
+    "fileCount": 932,
+    "beforeAggregateSha256": "c2a5d247c789627052cf5dbe77a8afecc52b7aca1c0f6d0de6349a23ecce67ea",
+    "afterAggregateSha256": "c2a5d247c789627052cf5dbe77a8afecc52b7aca1c0f6d0de6349a23ecce67ea",
+    "aggregateAlgorithm": "SHA256(JSON.stringify(sorted array of {path,sha256} records)); original baseline ordering retained",
+    "changedFiles": [],
+    "scope": "932 pre-frozen TS/TSX/SQL/package manifests across apps/packages/database/scripts/industry; skill directories excluded. Existing feature work predates this M2 baseline.",
+    "dedicatedSkillBusinessBranches": false,
+    "addedFiles": [],
+    "missingFiles": []
+  },
+  "validation": {
+    "node": "24.11.1",
+    "database": "127.0.0.1:56504/aihot_generic_skill_test",
+    "backend": {
+      "files": [
+        "tests/assistant-images.test.ts",
+        "tests/assistant-catalog.test.ts",
+        "tests/assistant-input-fees.test.ts",
+        "tests/assistant-skill-policy.test.ts"
+      ],
+      "pass": 21,
+      "fail": 0,
+      "durationMs": 10155.509625
+    },
+    "web": {
+      "files": [
+        "apps/web/tests/assistant-images.test.ts"
+      ],
+      "pass": 1,
+      "fail": 0,
+      "durationMs": 234.469166
+    },
+    "attempts": [
+      "Initial sandbox run could not connect to local test database: EPERM (environment restriction).",
+      "First local-network-enabled run: 20/21; old poll/download count expected 2 after adding third image package.",
+      "After changing count to ids.length and adding prompt/ratio/file/cost assertions: 21/21."
+    ],
+    "network": "env -i; no real credentials; model and Redfox gates initially false, enabled only inside isolated tests pointing to loopback synthetic-key stubs",
+    "realPaidCalls": 0,
+    "typecheckBuildMigrationCI": "not performed by this M2 task; separate M3 evidence required"
+  },
+  "limitations": [
+    "No real model or supplier acceptance",
+    "No runtime import or unchanged application-image proof",
+    "No unsupported optional upstream features",
+    "No comparable old-method work hours or saving ratio; unknown"
+  ]
+}

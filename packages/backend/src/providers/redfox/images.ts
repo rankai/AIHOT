@@ -6,7 +6,7 @@ import { ImageInput, ImageModel, assertImageGenerationAvailable, imageGeneration
 export {ImageInput};
 export type {ImageParameters};
 import { z } from "zod";
-import { sql } from "../../db.ts";
+import { sql, type Tx } from "../../db.ts";
 import { stableJson } from "../../lib/ids.ts";
 import { assetPath, getAsset, IMAGE_BYTES, IMAGE_PIXELS, OUTPUT_IMAGE_BYTES, OUTPUT_IMAGE_PIXELS, lockAssetInputs } from "../../operations/assets.ts";
 import { createRun, lockMemberAdmission, StaleOperationError, type RunRow } from "../operations/store.ts";
@@ -27,9 +27,12 @@ export function imageLimits(run:RunRow):typeof IMAGE_LIMITS {
 export function createImageGeneration(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){return imageCommand(ImageInput.parse(raw),actor,key,false,authorization);}
 export function createImageQuery(raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){return imageCommand(z.object({model:ImageModel.optional(),taskId:NewTaskId}).strict().parse(raw),actor,key,true,authorization);}
 async function imageCommand(parameters:Record<string,unknown>,actor:string,key:unknown,query:boolean,authorization?:ToolAuthorization){
+  return sql.begin(tx => imageCommandTx(tx,parameters,actor,key,query,authorization));
+}
+export function createImageGenerationTx(tx:Tx,raw:unknown,actor:string,key:unknown,authorization?:ToolAuthorization){return imageCommandTx(tx,ImageInput.parse(raw),actor,key,false,authorization);}
+async function imageCommandTx(tx:Tx,parameters:Record<string,unknown>,actor:string,key:unknown,query:boolean,authorization?:ToolAuthorization){
   const commandKey=z.string().regex(/^[A-Za-z0-9._:-]{8,160}$/).parse(key);
   const operation=query?"redfox.image.query":"redfox.image.generate",intent={operation,parameters};
-  return sql.begin(async tx=>{
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`operation:${actor}:${commandKey}`}))`;
     const [existing]=await tx<RunRow[]>`SELECT * FROM operation_runs WHERE actor=${actor} AND command_key=${commandKey}`;
     if(existing){if(stableJson(existing.input.commandIntent)!==stableJson(intent))throw new StaleOperationError("Command key reused with different input");return existing;}
@@ -50,7 +53,6 @@ async function imageCommand(parameters:Record<string,unknown>,actor:string,key:u
       stepKey:query?"redfox.image.poll":fileKeys.length?"redfox.image.upload":"redfox.image.submit",limits:{...IMAGE_LIMITS,...(newer?{steps:80,saveAttempts:30}:{})}});
     await tx`UPDATE operation_runs SET progress=${tx.json({referenceImages:[],uploadIndex:0,pollSequence:0,...(query?{taskId:parameters.taskId}: {})} as never)} WHERE id=${run.id}`;
     await queueOperationStep(tx,run.id);return run;
-  });
 }
 export async function uploadReference(key:string,identity:string,paid:PaidRequestOptions,model:ImageModel="gptImage2"){
   if(model!=="gptImage2")return uploadMediaReference(key,identity,paid);

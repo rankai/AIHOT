@@ -13,7 +13,7 @@ import { Button } from "../admin/ui";
 import { usePrivateAccount } from "../account/use-private-account";
 import { useToolCommand } from "../tools/client";
 import { sessionHref, type SessionPage } from "./data";
-import { draftKey, rememberDraft, useAssistantDraft } from "./drafts";
+import { draftKey, rememberDraft, useAssistantDraft, draftSelection, editDraftText, chooseDraftAction } from "./drafts";
 import { AssistantWorkspace } from "./workspace";
 import { AssistantComposer } from "./composer";
 import { AssistantComposerControls, AssistantSkillNotice } from "./composer-controls";
@@ -49,9 +49,7 @@ export function AssistantActions({
           }
         >
           {action.label}
-          {!action.available
-            ? ` · ${action.actionId === "wechat" ? "未开放" : "暂不可用"}`
-            : ""}
+          {!action.available ? " · 暂不可用" : ""}
         </Button>
       ))}
     </div>
@@ -119,50 +117,56 @@ function EntryContent({
       !ready ||
       command.pending ||
       creating.current ||
-      (!draft.pendingCreate && !configureFees && (!profile?.available || unavailableSelection(profile, draft.actionId))) ||
+      (!draft.pendingCreate && !configureFees && (!profile?.available || unavailableSelection(profile, draftSelection(draft)))) ||
       (!draft.text.trim() && !draft.pendingCreate && !configureFees) ||
       (!draft.pendingCreate && !attachmentsReady(draft.attachments))
     )
       return;
     creating.current = true;
-    const frozen = draft.pendingCreate ?? {
+    const frozen = { ...(draft.pendingCreate ?? {
       text: draft.text.trim(),
       actionId: draft.actionId,
+      skillSelection: draftSelection(draft),
+      ...(draft.taskHint !== undefined ? { taskHint: draft.taskHint } : {}),
+      ...(draft.taskChoice ? {taskChoice:draft.taskChoice}:{}),
       attachments: draft.attachments,
       configureFees,
       unknown: false,
-    };
-    if (!draft.pendingCreate)
+    }), creationKey: draft.pendingCreate?.creationKey ?? crypto.randomUUID() };
+    if (!draft.pendingCreate?.creationKey)
       update((previous) => ({
         ...previous,
         text: "",
         actionId: null,
+        skillSelection: null,
+        taskHint: undefined,
         attachments: [],
         pendingCreate: frozen,
       }));
     const result = await command.run<{ sessionId: string; initialRequest: AssistantInitialRequest | null }>(
       "/api/assistant/sessions",
       { assistantId, title: Array.from(frozen.text.replace(/\s+/g, " ")).slice(0, 60).join("") || "新创作",
-        ...(!frozen.configureFees ? { initialRequest: { message: frozen.text, skillSelection: frozen.actionId ? { actionId: frozen.actionId } : null, attachments: (frozen.attachments ?? []).map(row => ({ assetKey: row.assetKey })) } } : {}) },
+        ...(!frozen.configureFees ? { initialRequest: { message: frozen.text, skillSelection: draftSelection(frozen), ...(frozen.taskHint !== undefined ? { taskHint: frozen.taskHint } : {}), ...(frozen.taskChoice ? {taskChoice:frozen.taskChoice}:{}), attachments: (frozen.attachments ?? []).map(row => ({ assetKey: row.assetKey })) } } : {}) },
+      "POST", undefined, frozen.creationKey,
     );
     creating.current = false;
     if (!result) {
       const status = command.failure.current?.status;
       if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => !previous.text && !previous.attachments?.length
-        ? { ...previous, pendingCreate: undefined, text: frozen.text, actionId: frozen.actionId, attachments: frozen.attachments }
+        ? { ...previous, pendingCreate: undefined, text: frozen.text, actionId: frozen.actionId, skillSelection: draftSelection(frozen), taskHint: frozen.taskHint, attachments: frozen.attachments }
         : { ...previous, pendingCreate: { ...frozen, rejected: true } });
       else update(previous => ({ ...previous, pendingCreate: { ...frozen, unknown: true } }));
       return;
     }
-    if (result.initialRequest) {
-      try { saveRecovery(draftKey(identity, result.sessionId), { kind: "quote", value: result.initialRequest }); }
+    if (result.initialRequest?.quote) {
+      try { saveRecovery(draftKey(identity, result.sessionId), { kind: "quote", value: {...result.initialRequest,quote:result.initialRequest.quote} }); }
       catch { /* The session retains an explicit recovery action if browser storage fails. */ }
     }
     rememberDraft(draftKey(identity, result.sessionId), {
-      ...(frozen.configureFees ? frozen : { text: "", actionId: null, attachments: [] }),
+      ...(frozen.configureFees || !result.initialRequest?.quote ? {...frozen,attachments:[],inputIds:result.initialRequest?.input.inputIds??[]} : { text: "", actionId: null, attachments: [] }),
     });
     update((previous) =>
-      previous.pendingCreate === frozen
+      previous.pendingCreate?.creationKey === frozen.creationKey
         ? { ...previous, pendingCreate: undefined }
         : previous,
     );
@@ -190,13 +194,13 @@ function EntryContent({
                   {profile?.welcome ?? "此助手尚未开放。"}
                 </p>
                 <p className="mt-4 text-[12px] leading-relaxed text-ink-4">
-                  描述要写什么、给谁看，或粘贴材料。发送后免费建立会话，再确认本次创作积分；额外检索单独批准。
+                  描述要写什么、给谁看，或粘贴材料。发送后确认任务费用上限，完成或停止后按实际交付结算。
                 </p>
                 {profile && (
                   <div className="mt-6">
                     <AssistantActions
                       profile={profile}
-                      actionId={draft.actionId}
+                      actionId={draft.taskHint?.actionId ?? draftSelection(draft)?.actionId ?? null}
                       disabled={
                         !profile.available ||
                         command.pending ||
@@ -204,7 +208,7 @@ function EntryContent({
                         !!draft.pendingCreate
                       }
                       onChange={(actionId) =>
-                        update((previous) => ({ ...previous, actionId }))
+                        update((previous) => chooseDraftAction(previous, profile.actions.find(row => row.actionId === actionId) ?? null))
                       }
                     />
                   </div>
@@ -221,9 +225,9 @@ function EntryContent({
             </div>
             <AssistantComposer
               text={draft.text}
-              onChange={(text) => update((previous) => ({ ...previous, text }))}
+              onChange={(text) => update((previous) => editDraftText(previous, text))}
               onSend={() => void send()}
-              disabled={!ready || !profile?.available || unavailableSelection(profile, draft.actionId) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
+              disabled={!ready || !profile?.available || unavailableSelection(profile, draftSelection(draft)) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
               busy={command.pending}
               maxLength={options.limits.inputCharacters}
               hint={
@@ -231,11 +235,11 @@ function EntryContent({
                   ? "正在免费建立会话，随后确认本次费用…"
                   : undefined
               }
-              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} actionId={draft.actionId} onAction={(actionId) => update((previous) => ({ ...previous, actionId }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} configureFees={() => void send(true)} />}
+              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskChoice={draft.taskChoice} onTaskChoice={taskChoice=>update(previous=>({...previous,taskChoice}))} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} configureFees={() => void send(true)} />}
               attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
               {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
-              {unavailableSelection(profile, draft.actionId) && <AssistantSkillNotice />}
+              {unavailableSelection(profile, draftSelection(draft)) && <AssistantSkillNotice />}
               {draft.pendingCreate && (
                 <div className="assistant-inline-notice" role="status">
                   <p>
@@ -252,7 +256,7 @@ function EntryContent({
                       重试原建会话命令
                     </Button>
                   )}
-                  {draft.pendingCreate.rejected && <><Button size="sm" disabled={!!draft.text || !!draft.attachments?.length} onClick={() => update(previous => previous.pendingCreate ? { ...previous, text: previous.pendingCreate.text, actionId: previous.pendingCreate.actionId, attachments: previous.pendingCreate.attachments, pendingCreate: undefined } : previous)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
+                  {draft.pendingCreate.rejected && <><Button size="sm" disabled={!!draft.text || !!draft.attachments?.length} onClick={() => update(previous => previous.pendingCreate ? { ...previous, text: previous.pendingCreate.text, actionId: previous.pendingCreate.actionId, skillSelection: draftSelection(previous.pendingCreate), taskHint: previous.pendingCreate.taskHint, attachments: previous.pendingCreate.attachments, pendingCreate: undefined } : previous)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
                   <p className="mt-2 text-[11px] text-ink-4">
                     本次页面会话内可按原命令恢复；刷新或重新登录后先核对历史，不自动重发。
                   </p>

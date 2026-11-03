@@ -1,0 +1,21 @@
+{
+  "generate/success": {
+    "moduleId": "generate",
+    "case": "success",
+    "expected": "image",
+    "prompt": "一只在窗边的橘猫，柔和自然光",
+    "size": "1:1",
+    "expectedTool": "generate_image"
+  },
+  "generate/missing-input": {
+    "moduleId": "generate",
+    "case": "missing-input",
+    "message": "做张图",
+    "expected": "ask_question"
+  },
+  "generate/delivery": {
+    "moduleId": "generate",
+    "case": "delivery",
+    "expected": "image"
+  }
+}

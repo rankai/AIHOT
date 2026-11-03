@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -7,11 +8,11 @@ import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, quoteTool, saveToolPrice, reconcileCreditCharge } from "@aihot/backend/users/credits";
 import { createRun } from "@aihot/backend/providers/operations/store";
-import { createSession, quoteTurn, submitTurn } from "@aihot/backend/assistant/sessions";
+import { createSession } from "@aihot/backend/assistant/sessions";
 import { controlTurn } from "@aihot/backend/assistant/controls";
 import { feeSettings, setFeeAuthorization } from "@aihot/backend/assistant/fees";
 
-test("unreconciled stopped requests fence new manual and automatic turns but preserve command replay", async t => {
+test("historical general-writing v2 unreconciled stopped requests fence new manual and automatic turns but preserve command replay", async t => {
  const [database] = await sql`SELECT current_database() name,inet_server_port() port`;
  assertConfiguredTestDatabase(database!.name,database!.port);
  const restore = await allowTestBudgetScope(["assistant.text"],"member");
@@ -28,10 +29,10 @@ test("unreconciled stopped requests fence new manual and automatic turns but pre
      const {sessionId}=await createSession(user.id,{assistantId:"creative"},randomUUID());
      const prices=(await feeSettings(user.id,sessionId)).prices;
      const auth=(await setFeeAuthorization(user.id,sessionId,{enabled:true,expectedVersion:0,totalLimit:100,allowSearch:false,turnPrice:prices.turn,searchPrice:null})).authorization!;
-     const input={message:"原请求",expectedRevision:1,autoAuthorizationId:auth.id};
+     const input={message:"原请求",expectedRevision:1,skillSelection:{actionId:"general-writing"},autoAuthorizationId:auth.id};
      const quote=await quoteTurn(user.id,sessionId,input),key=randomUUID();
      const original=await submitTurn(user.id,sessionId,{...input,quoteId:quote.quoteId},key);
-     const next={message:"原请求",expectedRevision:2};
+     const next={message:"原请求",expectedRevision:2,skillSelection:{actionId:"general-writing"}};
      // Valid quotes obtained before the old request becomes uncertain must still be fenced at admission.
      const manualQuote=await quoteTurn(user.id,sessionId,next);
      const autoQuote=await quoteTurn(user.id,sessionId,{...next,autoAuthorizationId:auth.id});
@@ -77,3 +78,5 @@ test("unreconciled stopped requests fence new manual and automatic turns but pre
   }
  } finally {await restore();await stopBoss();await closeDb();}
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"general-writing": "2"});

@@ -1,0 +1,40 @@
+{
+  "formatVersion": 1,
+  "skillId": "image-generator",
+  "version": "2",
+  "name": "图片创作 · 帮我完善描述",
+  "modules": [
+    {
+      "moduleId": "generate",
+      "profiles": [
+        "creative"
+      ],
+      "actionId": "image-generator",
+      "label": "图片创作 · 帮我完善描述",
+      "entry": "generate",
+      "capabilities": [
+        "generate_image@1"
+      ],
+      "inputContract": "image-input@1",
+      "deliveryContract": "image-delivery@1",
+      "references": [],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "image",
+          "label": "图片创作 · 帮我完善描述 · 一张1K图片",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "generate_image@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

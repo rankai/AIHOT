@@ -1,9 +1,13 @@
+import { CoverVisionInput } from "../assistant/cover-vision-contract.ts";
+import { XHS_COVER_OPERATION } from "../providers/redfox/xhs-cover-contract.ts";
+import { WECHAT_HOT_OPERATION } from "../providers/redfox/wechat-hot-contract.ts";
+import { selectToolPrice } from "./credits-prices.ts";
 import { knownNonVideoCost } from '../providers/tool-cost-policy.ts';
 import { randomUUID } from 'node:crypto';
 import type { MemberPriceCatalog, MemberPriceOffer } from '@aihot/contracts/membership';
 import type { ToolCreditIntent } from '@aihot/contracts/credits';
 import { listToolPrices } from './credits-prices.ts';
-import { sql } from '../db.ts';
+import { sql, type Tx } from '../db.ts';
 import { audit } from '../admin/auth.ts';
 import { platformToolCatalog } from '../providers/redfox/catalog.ts';
 import { aiSearchEngines } from '../providers/redfox/ai-search-contract.ts';
@@ -11,18 +15,20 @@ import { transcriptionPairs } from '../providers/redfox/transcription-contract.t
 import { WAN_MODEL } from '../providers/aliyun/wan-contract.ts';
 import { AccountError } from './accounts.ts';
 
-export const MEMBER_PRICE_VERSION = '2026-10-30-v2';
+export const MEMBER_PRICE_VERSION = '2026-11-02-v3';
 const approvedQueryIds = new Set(["047JJ3UA", "0OT1E306", "0W27H3O6", "0ZB9S2FW", "0ZIWOO8P", "1LDQ7E1C", "20060016", "20060017", "27DQ6SF9", "28CFGF5I", "384C6W6B", "3BXWEB6Y", "3X8FGEEM", "3YJT69FL", "439NFLBD", "4BOZ9DLE", "4IVIDHEN", "4QS1F8DE", "5K5EG87P", "5QY3G5TY", "5Y84NI1D", "609DF2IR", "6C4A77XR", "6SE9WIHJ", "774OBKK0", "7UW1PT1F", "8IQD0BJC", "9KFOB9M2", "9Q2PQBKU", "9Y4EX7RW", "ABJQXHUE", "AEA6YE0J", "API_1789095347662", "API_1789097000710", "API_1789097000761", "API_1789097000814", "API_1789097000858", "API_1789097000885", "API_1789098514899", "API_1789098515117", "API_1789098515245", "API_1789637464311", "API_1790063277084", "API_1790149158205", "API_1790149281139", "API_1790577699794", "API_1790581450500", "API_1790581645603", "API_1791446025175", "API_1791793668086", "API_1791881343238", "API_1792051516512", "API_1792053861083", "API_1792651427872", "API_1792651427970", "API_1792651512423", "API_1792651658984", "AWUTFI4V", "CI7VW144", "CWX77QIH", "D52IUEIM", "DL4YNCTQ", "DNVPQZEZ", "E7G00COY", "EH53TOT7", "FK67XDVQ", "FVQ8D4W5", "GC5SC5HS", "GM0TISWI", "GU17EVLV", "HUCIASU", "I3CIBRI2", "I8P3HTVH", "IE0887SO", "JBGBKQ4B", "KR1LPTBF", "KUQYSQNX", "L6OUNUN1", "LBYLC5AK", "LEN9QXR3", "LLCI8QTE", "MH5YA9DL", "MQMDU19Q", "NL4I3533", "OE4KUEUO", "OFFSPQ0U", "OVUTOTCV", "OWIBYU1V", "P3W2W18P", "P5CHB3BZ", "PAB6Z75Y", "PW97QFBS", "PXZXY8KQ", "QEQLCKD6", "QPNFJRG1", "QQ5E3EZ9", "QSL2ZSXM", "R1IGR09H", "R473NUE9", "S28Q6HUD", "TE6AGWAF", "TIN1NMTZ", "TXQPVGJG", "U1SGKF2G", "U2NJ13MW", "UAQ90A1F", "UOM99OQI", "UUSP1G1P", "VBBTYLMV", "VPA67I98", "VYSP68M2", "W86F8SSK", "W94P1QH1", "WD6UT8DQ", "WULKP6JP", "X16I71WV", "XEO0QQNF", "XN3ULENA", "XNV30XZ3", "XUT4CECZ", "YGYYT0G0", "YIGCY5US", "Z9M88QI8", "ZIGAGYYT", "ZMFVK589", "ZWR31P2A", "ZXJLJQ21"]);
 const unavailable = ['GPT Image 2 多张或高分辨率、GPT Image 2.5、Gemini、Seedream：成本尚未核定，暂不开放付费', 'Seedance 除 8 秒 / 480p / 有声 / 3 张参考图外：成本尚未核定', '小红书异步评论、AgentKey：成本尚未核定，暂不开放付费'];
 export async function memberPriceCatalog(admin = false): Promise<MemberPriceCatalog> {
  const offers: MemberPriceOffer[] = [];
- const costs = await sql`SELECT model,per_request,source_url FROM service_prices WHERE service IN ('redfox.query','redfox.media','redfox.transcript') AND currency='CNY' AND per_request IS NOT NULL AND per_request >= 0 AND source_url IS NOT NULL`;
+ const costs = await sql`SELECT service,model,per_request,source_url FROM service_prices WHERE service IN ('redfox.query','redfox.media','redfox.transcript') AND currency='CNY' AND per_request IS NOT NULL AND per_request >= 0 AND source_url IS NOT NULL`;
  const add = (kind: string, model: string, label: string, credits: number, costBasis: string, tier = '', restriction = '', provider = 'redfox', unit = '次') => offers.push({kind,provider,model,tier,label,credits,unit,restriction,...(admin ? {costBasis} : {})});
  for (const operation of await platformToolCatalog()) {
   const cost = costs.find(row => row.model === operation.id);
   if (operation.platform === 'redfox-account' || !approvedQueryIds.has(operation.id) || !cost) continue;
   add('query',operation.id,operation.label,operation.id === '9Q2PQBKU' ? 30 : 20,`文档基价 ¥${cost.per_request}/次；${cost.source_url}`);
  }
+ const wechatCost = costs.find(row => row.service === 'redfox.query' && row.model === WECHAT_HOT_OPERATION);
+ if (wechatCost) add('query',WECHAT_HOT_OPERATION,'公众号热文查询（助手研究）',20,`M4 核定基价 ¥${wechatCost.per_request}/次；${wechatCost.source_url}`);
  add('x-account','','X 账号查询',20,'Redfox 固定平台接口文档基价');
  add('x-tweet','','X 推文查询',20,'Redfox 固定平台接口文档基价');
  for (const [id, engine] of Object.entries(aiSearchEngines)) add('ai-search',id,engine.label,id === 'kimiK3' ? 60 : id.endsWith('Products') ? 50 : 30,`文档基价 ¥${engine.price}/次`);
@@ -38,7 +44,23 @@ export async function memberPriceCatalog(admin = false): Promise<MemberPriceCata
 }
 /** Only normalized member entry points call this. Recovery retains its original charge. */
 export async function assertMemberCostEligible(intent: ToolCreditIntent): Promise<void> {
+ if (intent.kind === "assistant-vision") {
+  const input=CoverVisionInput.parse(intent.input);
+  if(intent.provider!=="assistant"||intent.model!==input.model.model)throw new AccountError(409,"cost_unverified","视觉报价模型不匹配");
+  const [cost]=await sql`SELECT 1 FROM service_prices WHERE service=${input.model.service} AND model=${input.model.model} AND currency IN ('CNY','USD') AND input_per_mtok IS NOT NULL AND input_per_mtok>=0 AND output_per_mtok IS NOT NULL AND output_per_mtok>=0 AND source_url IS NOT NULL`;
+  if(!cost)throw new AccountError(409,"cost_unverified","封面视觉模型的精确供应商成本尚未核定");
+  const price=await selectToolPrice(sql,intent);
+  if(price.model!==input.model.model)throw new AccountError(409,"cost_unverified","封面视觉分析尚未配置精确会员价");
+  return;
+ }
  if (intent.recoveryRunId !== undefined && intent.kind.endsWith('/query')) return;
+ if (intent.kind === 'query' && intent.provider === 'redfox' && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(intent.model ?? '')) {
+  const [cost] = await sql`SELECT per_request FROM service_prices WHERE service='redfox.query' AND model=${intent.model!} AND currency='CNY' AND per_request IS NOT NULL AND per_request>=0 AND source_url IS NOT NULL`;
+  if (!cost) throw new AccountError(409,'cost_unverified','研究查询的供应商成本尚未核定');
+  const price = await selectToolPrice(sql, intent);
+  if (price.model !== intent.model) throw new AccountError(409,'cost_unverified','研究查询尚未配置精确会员价');
+  return;
+ }
  const catalog = await memberPriceCatalog();
  const offer = catalog.offers.find(o => o.kind === intent.kind && o.provider === intent.provider && o.model === (intent.model ?? '') && o.tier === (intent.tier ?? ''));
  let eligible = !!offer;
@@ -54,7 +76,9 @@ export async function assertMemberCostEligible(intent: ToolCreditIntent): Promis
 /** Explicit, once-per-version application. Never enables providers, budgets or collection. */
 export async function applyApprovedMemberPrices(actor: string): Promise<{ applied: boolean; version: string }> {
  const catalog = await memberPriceCatalog(true);
- return sql.begin(async tx => {
+ return sql.begin(tx => applyApprovedMemberPricesTx(tx, actor, catalog));
+}
+export async function applyApprovedMemberPricesTx(tx: Tx, actor: string, catalog: MemberPriceCatalog): Promise<{ applied: boolean; version: string }> {
   await tx`SELECT pg_advisory_xact_lock(hashtext('member-approved-price-application'))`;
   const [existing] = await tx`SELECT version FROM member_price_applications WHERE version=${catalog.version}`;
   if (existing) return {applied:false,version:catalog.version};
@@ -71,5 +95,4 @@ export async function applyApprovedMemberPrices(actor: string): Promise<{ applie
   await tx`INSERT INTO member_price_applications(version,actor) VALUES (${catalog.version},${actor})`;
   await audit(actor,'credits.prices.apply',catalog.version,'明确应用已批准会员工具价目',before,catalog,undefined,tx);
   return {applied:true,version:catalog.version};
- });
 }

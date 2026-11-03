@@ -1,3 +1,4 @@
+import { executeCoverVisionStep } from "../../assistant/cover-vision.ts";
 import { recoverMessageQueues } from "../../assistant/message-queue.ts";
 import { executeAssistantStep, recoverAssistantChildren } from "../../assistant/execution.ts";
 import { executeWanStep } from "../aliyun/wan-execution.ts";
@@ -17,9 +18,10 @@ export async function executeOperationStep(runId: number, stepVersion: number, j
     if(due!.job_id!==jobId||!due!.next_attempt_at||due!.next_attempt_at.getTime()>Date.now())return;
     await resumeRun(tx,{runId,stepVersion,generation:run.generation});
   }); } catch(error) {if(error instanceof StaleOperationError)return {skipped:true};throw error;}
-  const [run] = await sql`SELECT provider FROM operation_runs WHERE id = ${runId}`;
+  const [run] = await sql`SELECT provider,operation_key FROM operation_runs WHERE id = ${runId}`;
   if (!run) return {skipped:true};
   try {
+    if (run.provider === "assistant" && run.operation_key === "assistant.coverVision") return await executeCoverVisionStep(runId,stepVersion,jobId);
     if (run.provider === "assistant") return await executeAssistantStep(runId,stepVersion,jobId);
     if (run.provider === "aliyun") return await executeWanStep(runId,stepVersion,jobId);
     if (run.provider === "local") return await executeSubscriptionVideoStep(runId,stepVersion,jobId);

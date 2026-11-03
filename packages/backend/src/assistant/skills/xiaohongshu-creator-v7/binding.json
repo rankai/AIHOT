@@ -1,0 +1,142 @@
+{
+  "formatVersion": 1,
+  "skillId": "xiaohongshu-creator",
+  "version": "7",
+  "name": "小红书创作",
+  "modules": [
+    {
+      "moduleId": "M1",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-write",
+      "label": "小红书创作",
+      "entry": "M1",
+      "capabilities": [
+        "save-writing@1",
+        "search-xhs-notes@1",
+        "analyze-xhs-research@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "adaptation",
+        "hot-article-format"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "小红书创作",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-notes@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "moduleId": "M2",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-rewrite",
+      "label": "小红书改写",
+      "entry": "M2",
+      "capabilities": [
+        "save-writing@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "adaptation",
+        "platform-rules"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "小红书改写",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "moduleId": "M4",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-cover",
+      "label": "小红书封面",
+      "entry": "M4",
+      "capabilities": [
+        "search-xhs-covers@1",
+        "analyze-xhs-cover-images@1",
+        "save-xhs-cover-plan@1",
+        "generate_image@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "xhs-cover-delivery@1",
+      "references": [
+        "core-workflow"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "plans-only",
+          "label": "研究并交付三套封面方案",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-covers@1",
+              "maximum": 1
+            },
+            {
+              "capability": "analyze-xhs-cover-images@1",
+              "maximum": 1
+            }
+          ]
+        },
+        {
+          "delivery": "image",
+          "label": "研究、三套方案及一张封面图",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-covers@1",
+              "maximum": 1
+            },
+            {
+              "capability": "analyze-xhs-cover-images@1",
+              "maximum": 1
+            },
+            {
+              "capability": "generate_image@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -26,7 +26,7 @@ export async function feePrices(userId:number, db:Db=sql) {
  return {turn,search};
 }
 async function usage(db:Db, sessionId:string) {
- const [r]=await db`SELECT coalesce(sum(c.amount-c.released),0)::bigint used FROM assistant_auto_charges a JOIN assistant_fee_authorizations f ON f.id=a.authorization_id JOIN member_credit_run_links l ON l.run_id=a.run_id JOIN member_credit_charges c ON c.id=l.charge_id WHERE f.session_id=${sessionId}`;
+ const [r]=await db`SELECT coalesce(sum(amount-released),0)::bigint used FROM (SELECT DISTINCT c.id,c.amount,c.released FROM assistant_auto_charges a JOIN assistant_fee_authorizations f ON f.id=a.authorization_id JOIN member_credit_authorized_runs l ON l.run_id=a.run_id JOIN member_credit_charges c ON c.id=l.charge_id WHERE f.session_id=${sessionId}) charges`;
  return Number(r!.used);
 }
 export async function readFeeAuthorization(db:Db,sessionId:string):Promise<AssistantFeeAuthorization|null> {
@@ -70,7 +70,7 @@ export async function checkAuto(tx:Tx,userId:number,sessionId:string,authorizati
  if(!p||q.price_id!==p.priceId||q.price_version!==p.priceVersion||q.amount!==p.amount||(kind==="search"&&!a.allow_search))throw autoRequired();
  if(await usage(tx,sessionId)+q.amount>a.total_limit)throw autoRequired();
  if(turnId){
- const [used]=await tx`SELECT count(*) FILTER (WHERE ac.kind='search')::int searches,coalesce(sum(c.amount-c.released),0)::bigint amount FROM assistant_auto_charges ac JOIN member_credit_run_links l ON l.run_id=ac.run_id JOIN member_credit_charges c ON c.id=l.charge_id WHERE ac.turn_id=${turnId}`;
+ const [used]=await tx`SELECT count(*) FILTER (WHERE ac.kind='search')::int searches,coalesce(sum(c.amount-c.released),0)::bigint amount FROM assistant_auto_charges ac JOIN member_credit_authorized_runs l ON l.run_id=ac.run_id JOIN member_credit_charges c ON c.id=l.charge_id WHERE ac.turn_id=${turnId}`;
  if(used!.searches>=1||Number(used!.amount)+q.amount>a.per_turn_limit)throw autoRequired();
  const [unknown]=await tx`SELECT r.id FROM operation_runs r JOIN receipts p ON p.id=r.current_receipt_id WHERE p.status IN ('pending','unknown') AND (r.id=(SELECT parent_operation_run_id FROM assistant_turns WHERE id=${turnId}) OR r.id IN (SELECT child_run_id FROM assistant_tool_calls WHERE turn_id=${turnId}))`;
  if(unknown)throw autoRequired();
@@ -90,10 +90,10 @@ export async function assertSessionReceiptsReviewed(db:Db, sessionId:string) {
    UNION SELECT c.child_run_id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id
      WHERE t.session_id=${sessionId} AND c.child_run_id IS NOT NULL
  ), unresolved_charges AS (
-   SELECT DISTINCT c.id FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id
+   SELECT DISTINCT c.id FROM member_credit_charges c JOIN member_credit_authorized_runs l ON l.charge_id=c.id
      WHERE l.run_id IN (SELECT id FROM session_runs) AND c.state IN ('reserved','review')
  ), linked AS (
-   SELECT r.* FROM operation_runs r JOIN member_credit_run_links l ON l.run_id=r.id
+   SELECT r.* FROM operation_runs r JOIN member_credit_authorized_runs l ON l.run_id=r.id
      WHERE l.charge_id IN (SELECT id FROM unresolved_charges)
  ), receipt_ids AS (
    SELECT current_receipt_id AS id FROM linked WHERE current_receipt_id IS NOT NULL

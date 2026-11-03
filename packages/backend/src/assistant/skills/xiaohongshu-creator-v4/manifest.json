@@ -1,0 +1,180 @@
+{
+  "formatVersion": 1,
+  "skillId": "xiaohongshu-creator",
+  "version": "4",
+  "name": "xiaohongshu-creator",
+  "description": "Redfox小红书原文写作与受控封面研究、方案及图片（M1/M2/M4）",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/redfox-data/redfox-community/tree/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator",
+    "commit": "d2e24f02340a440a73a96aa6ad6a65f681fba89f",
+    "license": "NOASSERTION",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream redfox-data/redfox-community",
+    "review": "docs/assistant-skill-integration-standard.md"
+  },
+  "modules": [
+    {
+      "moduleId": "M1",
+      "version": "4",
+      "description": "真实笔记检索、规律分析与完整M1创作",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M1",
+      "resources": [
+        "M1",
+        "adaptation",
+        "hot-article-format"
+      ],
+      "tools": [
+        "save_draft",
+        "search_xhs_notes",
+        "analyze_xhs_research"
+      ],
+      "outputKinds": [
+        "xhs-note"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M1/success",
+        "fixtures#M1/missing-input",
+        "fixtures#M1/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "writing-delivery@1",
+      "hash": "124310d4994c85b70d670b1aa4978634892299de43737a024f27e406a0046ad9"
+    },
+    {
+      "moduleId": "M2",
+      "version": "4",
+      "description": "Redfox原文M2小红书风格改写（完整platform-rules）",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M2",
+      "resources": [
+        "M2",
+        "adaptation",
+        "platform-rules"
+      ],
+      "tools": [
+        "save_draft"
+      ],
+      "outputKinds": [
+        "xhs-note"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M2/success",
+        "fixtures#M2/missing-input",
+        "fixtures#M2/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "writing-delivery@1",
+      "hash": "582a8abd1a2ee65193557c1a9aec498c2b9056ca19ae5723078b5b0e5269d8cc"
+    },
+    {
+      "moduleId": "M4",
+      "version": "4",
+      "description": "真实封面查询与视觉研究、三套方案及可选单张图片",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M4",
+      "resources": [
+        "M4",
+        "core-workflow"
+      ],
+      "tools": [
+        "search_xhs_covers",
+        "analyze_xhs_covers",
+        "save_xhs_cover_plan",
+        "generate_image"
+      ],
+      "outputKinds": [
+        "xhs-cover-plan",
+        "image"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M4/success",
+        "fixtures#M4/missing-input",
+        "fixtures#M4/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "xhs-cover-delivery@1",
+      "hash": "e72b95d799711294623bd7b41adb9d22c05aa6e26a95f5438058f905de939093"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "M1",
+      "path": "write.md",
+      "type": "text/markdown",
+      "bytes": 15081,
+      "sha256": "ad4ec2d3263418d0f4c25611dab0c5ff2234a85a220e70c993fca9eb28ca28d3"
+    },
+    {
+      "resourceId": "M2",
+      "path": "rewrite.md",
+      "type": "text/markdown",
+      "bytes": 8331,
+      "sha256": "fc0b61c10a198c682e0b4b8ba30b51d5f4b6b1c9e2583b472ed8c3c22e0de125"
+    },
+    {
+      "resourceId": "adaptation",
+      "path": "adaptation.md",
+      "type": "text/markdown",
+      "bytes": 4708,
+      "sha256": "cc0baa7a2659b554bc307c8b9db5e68d4f66e33e63146db3d6b2edbac567b6d8"
+    },
+    {
+      "resourceId": "upstream-skill",
+      "path": "SKILL.md",
+      "type": "text/markdown",
+      "bytes": 21738,
+      "sha256": "3ff2f1f0e91f2fcbc2ae6cda08aa1ff2a3581cf195d7a8939c3f11d1fb518a48"
+    },
+    {
+      "resourceId": "platform-rules",
+      "path": "assets/platform-rules.md",
+      "type": "text/markdown",
+      "bytes": 2886,
+      "sha256": "db88ca7f08d151568bb25050bce697b9aa8564c2c6edbcfcbc7d18356015a02e"
+    },
+    {
+      "resourceId": "hot-article-format",
+      "path": "references/xhs_hot_article_format.md",
+      "type": "text/markdown",
+      "bytes": 5791,
+      "sha256": "cd946e0efa3930f505a3ee7ed2a0eb99ec09820f3cebc7bd5ec8c2a6731bd1ee"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 3681,
+      "sha256": "5ef4cfc0995e3e04fcd4ecab1a6a1b2789142297338c74f3a1862ed4f233f836"
+    },
+    {
+      "resourceId": "M4",
+      "path": "cover.md",
+      "type": "text/markdown",
+      "bytes": 2261,
+      "sha256": "f4cda28ae051f72d0571b514b8b1cc5e2c19e0b37df0a848827e3914503466fb"
+    },
+    {
+      "resourceId": "core-workflow",
+      "path": "references/core_workflow.md",
+      "type": "text/markdown",
+      "bytes": 12038,
+      "sha256": "d4cdcd94640c46680ac032de7d9d96f7ffe8a33939d4bcf2c40e190db08b93e4"
+    }
+  ],
+  "manifestHash": "7dfd8f7f0108392f1be3b1b2153f8ce4aaa85cdf6fcf23d64397228633ded57b",
+  "packageHash": "496e06972b6903788bfaabd808312e57523a45958e7d8a52c8824c00811d2a54"
+}

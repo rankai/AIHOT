@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -6,9 +7,9 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
-import { createSession, quoteTurn, submitTurn, sessionSnapshot, editArtifact } from "@aihot/backend/assistant/sessions";
+import { createSession, submitTurn as currentSubmitTurn, sessionSnapshot, editArtifact } from "@aihot/backend/assistant/sessions";
 import { answerTurn, controlTurn } from "@aihot/backend/assistant/controls";
-import { decideCall, localCall, activeTools, sourceCandidates } from "@aihot/backend/assistant/tools";
+import { decideCall, localCall, activeTools, sourceCandidates, prepareSearch, DraftArgumentsError } from "@aihot/backend/assistant/tools";
 import { analyzeResearch, researchClock, researchResults, validateResearchWindow, verifyResearchDelivery } from "@aihot/backend/assistant/xhs-research";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { recoverAssistantChildren } from "@aihot/backend/assistant/execution";
@@ -21,7 +22,7 @@ const completion = (name: string, input: unknown) => ({ id: "fixture", created: 
   message: { role: "assistant", content: null, tool_calls: [{ id: "call_0", type: "function", function: { name, arguments: JSON.stringify(input) } }] }, finish_reason: "tool_calls" }] });
 const analysisInput = (activationId: string, ids: string[]) => ({ activationId, topic: "相机选购", samples: ids.map(sourceId => ({ sourceId, relevance: "真实关键词检索中讨论相机选购，适用新手选购主题" })),
   titlePattern: { sampleIds: ids, observation: "标题使用数字与新手人群" }, contentPattern: { sampleIds: ids, observation: "正文先场景再步骤" },
-  tagPattern: { sampleIds: ids, observation: "标签包含相机选购" }, interactionPattern: { sampleIds: ids, observation: "样本互动字段未知，不推算收藏率或热度排名" },
+  tagPattern: { sampleIds: ids, observation: "标签包含相机选购" }, interactionPattern: { sampleIds: ids, observation: "接口没有给出互动数据，不能据此比较热度" },
   applicationPlan: "用新手标题、场景开头和相机标签表达选购建议", limitations: [] });
 const draft = (ids: string[], urls: string[]) => ({ title: "新手选相机的3个步骤", body: `先确定拍摄场景，再按需求选择。\n\n爆款公式来源：参考真实样本的数字标题和场景结构；互动数据未知。\n${urls.join("\n")}`,
   intent: "draft" as const, titles: ["新手选相机的3个步骤", "先选场景再选相机", "相机新手指南"], tags: ["相机", "选购", "新手", "摄影", "场景"], sources: ids, partial: true, scope: `${ids.length}条已确认有限研究样本；未执行网页热点验证` });
@@ -47,6 +48,7 @@ test("research projection preserves 50 notes plus metadata and Shanghai replay d
 test("M1 persisted search → analysis → draft → credits; bypasses cannot deliver", async (t) => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db.name, db.port);
+  const [priorXhsPolicy] = await sql`SELECT value FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
   const restore = await allowTestBudgetScope(["assistant.text", "redfox.query"], "member");
   const unique = tag(), model = `research-${unique}`, keyword = `相机-${unique}`;
   let sampleCount = 2, invalidAnalysisSent = false;
@@ -64,7 +66,7 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     if (mode === "m2") return completion("save_draft", { activationId, kind: "xhs-note", baseVersion: 0,
       content: { ...draft(["current-message"], []), intent: "rewrite", partial: false, titles: [] } });
     if (mode === "reuse") return completion("save_draft", { activationId, kind: "xhs-note", artifactId, baseVersion: 2,
-      content: researchDraft(reuseSources, reuseUrls), researchApplication: application(reuseId) });
+      content: { ...researchDraft(reuseSources, reuseUrls), intent: "rewrite", titles: [], tags: [] }, researchApplication: application(reuseId) });
     if (messages.some((m: any) => m.rejected)) return completion("ask_question", { text: "你已拒绝付费检索，创作暂停。" });
     const search = messages.find((m: any) => m.results);
     if (!search) {
@@ -88,15 +90,18 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
   });
   const redfox = await stub(() => ({ articles: Array.from({ length: sampleCount }, (_, index) => index + 1).map(i => ({ id: `fixture-${i}`, title: `新手选相机${i}`, desc: "先看拍摄场景，再做选购比较。#相机 #选购".repeat(sampleCount === 50 ? 50 : 1), shareInfoLink: `https://www.xiaohongshu.com/explore/fixture-${i}` })),
     latestHotArticles: [{ id: "recommendation", title: "无关美妆推荐", desc: "推荐", shareInfoLink: "https://www.xiaohongshu.com/explore/unrelated" }], keyword, hotTopics: [{ topic: "相机选购" }] }));
+  const [priorQueryPrice]=await sql`SELECT * FROM member_tool_prices WHERE kind='query' AND provider='redfox' AND model='3X8FGEEM' AND tier='' AND parameter_match='{}'::jsonb`;
   const previous = config.allowPrivateNetworkFetch;
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
   try {
+    await sql`INSERT INTO settings(key,value,updated_by) VALUES ('assistant.skills.xiaohongshu-creator','{"acceptingNew":true,"revision":1}'::jsonb,'test') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
     Object.assign(process.env, { ASSISTANT_ENABLED: "true", ASSISTANT_CALLS_ENABLED: "true", ASSISTANT_MODEL_VERIFIED: "true", ASSISTANT_MODEL: "default", LLM_MODEL: model,
       LLM_BASE_URL: supplier.url + "/v1", LLM_API_KEY: "synthetic-key", ASSISTANT_TOKENIZER: "cl100k_base", MODEL_CALLS_ENABLED: "true",
       REDFOX_TEST_BASE_URL: redfox.url, REDFOX_API_KEY: "synthetic-key", REDFOX_CALLS_ENABLED: "true" });
     config.allowPrivateNetworkFetch = true;
     await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('assistant.text','redfox.query')`;
     await saveToolPrice({ kind: "assistant-turn", provider: "assistant", model, baseCredits: 7, enabled: true, reason: "Synthetic M1 research fixture" }, "test");
+    await saveToolPrice({...(priorQueryPrice?{id:priorQueryPrice.id,expectedVersion:priorQueryPrice.version}:{}),kind:'query',provider:'redfox',model:'3X8FGEEM',baseCredits:3,enabled:true,reason:'Synthetic task query ceiling'},'test');
     await saveToolPrice({ kind: "query", provider: "redfox", model: "3X8FGEEM", parameterMatch: { "parameters.keyword": keyword }, baseCredits: 3, enabled: true, reason: "Synthetic M1 research fixture" }, "test");
     const user = await createSiteUser({ username: `research_${unique}`, displayName: "Research", password: "synthetic-password" }, "test");
     await grantCredits(user.id, { amount: 100, reason: "Synthetic M1 credits" }, "test", randomUUID());
@@ -114,10 +119,10 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     const advance = async (id: number) => { const [run] = await sql`SELECT step_version FROM operation_runs WHERE id=${id}`; return executeOperationStep(id, run.step_version, randomUUID()); };
     for (let i = 0; i < 4; i++) await advance(turn.runId);
     let snap = await sessionSnapshot(user.id, sessionId);
-    assert.equal(snap.turn?.phase, "waiting_approval");
+    assert.equal(snap.turn?.phase, "waiting_child");
     assert.equal(redfox.hits(), 0);
     const proposal = snap.turn!.calls[0]!;
-    await post(`sessions/${sessionId}/tool-calls/${proposal.callId}/approve`, { proposalRevision: 1 });
+    assert.equal(quote.amount,10);assert.equal(quote.task.items.length,2);
     const [searchCall] = await sql`SELECT * FROM assistant_tool_calls WHERE id=${proposal.callId}`;
     await advance(searchCall.child_run_id);
     await recoverAssistantChildren(searchCall.child_run_id);
@@ -134,6 +139,10 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     assert.equal(snap.artifacts.length, 0); assert.equal(redfox.hits(), 1);
     const [frozen] = await sql`SELECT * FROM assistant_turns WHERE id=${turn.turnId}`;
     const [activation] = await sql`SELECT * FROM assistant_activations WHERE turn_id=${turn.turnId}`;
+    for (const dates of [{ startDate: "2026-02-30", endDate: frozen.snapshot.researchClock.latestDate },
+      { startDate: frozen.snapshot.researchClock.today, endDate: frozen.snapshot.researchClock.today }]) {
+      await assert.rejects(prepareSearch(frozen, { name: "search_xhs_notes", input: { activationId: activation.id, keyword, ...dates } }), DraftArgumentsError);
+    }
     const sources = await sql.begin(tx => sourceCandidates(tx, frozen));
     const ids = analysis.result.samples.map((s: any) => s.sourceId), urls = analysis.result.samples.map((s: any) => s.url);
     const content = draft(ids, urls);
@@ -153,23 +162,19 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
       await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, ids))), /分析样本/);
       await sql`UPDATE assistant_tool_calls SET state='completed' WHERE id=${searchCall.id}`;
     });
-    await controlTurn(user.id, sessionId, turn.turnId, "stop", { generation: snap.turn!.generation });
-    snap = await sessionSnapshot(user.id, sessionId);
-    await controlTurn(user.id, sessionId, turn.turnId, "resume", { generation: snap.turn!.generation });
-    snap = await sessionSnapshot(user.id, sessionId);
-    assert.equal(snap.turn?.phase, "executing");
     assert.equal((await sql`SELECT count(*)::int n FROM assistant_tool_calls WHERE turn_id=${turn.turnId} AND name='analyze_xhs_research' AND state='completed'`)[0]!.n, 1);
     assert.equal(redfox.hits(), 1);
     // Accepted command replay freezes date and must neither duplicate search nor reserve again.
-    assert.deepEqual(await submitTurn(user.id, sessionId, { ...input, quoteId: quote.quoteId }, key), turn);
+    assert.deepEqual(await currentSubmitTurn(user.id, sessionId, { ...input, quoteId: quote.quoteId }, key), turn);
     for (let i = 0; i < 2; i++) await advance(turn.runId);
     snap = await sessionSnapshot(user.id, sessionId);
     assert.equal(snap.turn?.status, "completed"); assert.equal(snap.artifacts.length, 1);
     assert.equal((await sql`SELECT count(*)::int n FROM assistant_tool_calls WHERE turn_id=${turn.turnId} AND name='ask_question'`)[0]!.n, 0, "two usable samples deliver without a scope question");
     assert.equal(snap.artifacts[0]!.sources[0]!.research!.analysisCallId, analysis.id);
     assert(snap.turn!.activities!.some(a => a.kind === "analyze_xhs_research" && a.state === "completed"));
-    const charges = await sql`SELECT amount,state FROM member_credit_charges WHERE root_run_id IN (${turn.runId},${searchCall.child_run_id})`;
-    assert.deepEqual(charges.map(c => c.amount).sort(), [3, 7]); assert(charges.every(c => c.state === "settled"));
+    const charges = await sql`SELECT id,amount,consumed,released,state FROM member_credit_charges WHERE root_run_id IN (${turn.runId},${searchCall.child_run_id})`;
+    assert.deepEqual(charges.map(c => [c.amount,c.consumed,c.released]), [[10,10,0]]);
+    const [ledger]=await sql`SELECT count(*)::int n FROM member_credit_entries WHERE charge_id=${charges[0]!.id} AND kind='reserve'`;assert.equal(ledger!.n,1); assert(charges.every(c => c.state === "settled"));
     assert.equal(redfox.hits(), 1);
     await t.test("manual edits cannot mint verification; exact selected verified version reuses analysis without research", async () => {
       artifactId = snap.artifacts[0]!.artifactId; reuseId = analysis.id; reuseSources = ids; reuseUrls = urls;
@@ -183,6 +188,7 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
       const saved = await sessionSnapshot(user.id, sessionId);
       assert.equal(saved.turn?.status, "completed"); assert.equal(saved.artifacts[0]!.version, 3); assert.equal(redfox.hits(), 1);
       assert.equal(saved.artifacts[0]!.sources[0]!.research!.analysisCallId, analysis.id);
+      assert.equal(saved.artifacts[0]!.content.intent, "rewrite");
       const [newTurn] = await sql`SELECT * FROM assistant_turns WHERE id=${next.turnId}`;
       for (const target of [undefined, { baseVersion: 0 }, { artifactId, baseVersion: 0 }, { artifactId: randomUUID(), baseVersion: 1 }])
         await assert.rejects(sql.begin(tx => verifyResearchDelivery(tx, newTurn, randomUUID(), content, sources, application(analysis.id), target)), /选定的已验证/);
@@ -266,23 +272,33 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
       assert(rewrite);
       await assert.rejects(sql.begin(tx => localCall(tx, frozen, { request_snapshot: { tools: { save_draft: {} } } }, { name: "save_draft", input: {
         activationId: rewrite.id, kind: "xhs-note", baseVersion: 0, content: { ...draft(["current-message"], []), intent: "rewrite" },
-      } })), /不能改用其他模块静默降级/);
+      } })), /不能静默降级/);
       await controlTurn(user.id, session.sessionId, run.turnId, "stop", { generation: result.turn!.generation });
     });
-    await t.test("M2 remains rewrite without research", async () => {
+    await t.test("skill-scoped M2 hint remains rewrite without research", async () => {
       mode = "m2";
       const rewriteUser = await createSiteUser({ username: `rewrite_${unique}`, displayName: "Rewrite", password: "synthetic-password" }, "test");
       await grantCredits(rewriteUser.id, { amount: 20, reason: "Independent M2 fixture" }, "test", randomUUID());
       const session = await createSession(rewriteUser.id, { assistantId: "xiaohongshu" }, randomUUID());
-      const raw = { message: "改写我的原稿", expectedRevision: 1, skillSelection: { actionId: "xiaohongshu-rewrite" } };
+      const raw = { message: "改写我的原稿", expectedRevision: 1, skillSelection: { skillId: "xiaohongshu-creator" }, taskHint: { actionId: "xiaohongshu-rewrite" } };
       const q = await quoteTurn(rewriteUser.id, session.sessionId, raw), run = await submitTurn(rewriteUser.id, session.sessionId, { ...raw, quoteId: q.quoteId }, randomUUID());
+      const [frozenScope] = await sql`SELECT snapshot FROM assistant_turns WHERE id=${run.turnId}`;
+      assert.deepEqual(frozenScope.snapshot.candidates.map((candidate: any) => candidate.moduleId), ["M1", "M2"]);
+      assert.deepEqual(frozenScope.snapshot.taskHint, raw.taskHint);
       for (let i = 0; i < 4; i++) await advance(run.runId);
       const result = await sessionSnapshot(rewriteUser.id, session.sessionId);
       assert.equal(result.turn?.status, "completed"); assert.equal(redfox.hits(), 3);
     });
   } finally {
+    if(priorQueryPrice)await sql`UPDATE member_tool_prices SET base_credits=${priorQueryPrice.base_credits},enabled=${priorQueryPrice.enabled} WHERE id=${priorQueryPrice.id}`;
+    else await sql`UPDATE member_tool_prices SET enabled=false WHERE kind='query' AND provider='redfox' AND model='3X8FGEEM' AND tier='' AND parameter_match='{}'::jsonb`;
+    if (priorXhsPolicy) await sql`UPDATE settings SET value=${sql.json(priorXhsPolicy.value)} WHERE key='assistant.skills.xiaohongshu-creator'`;
+    else await sql`DELETE FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+
     await app?.close();
     config.allowPrivateNetworkFetch = previous;
     await supplier.close(); await redfox.close(); await stopBoss(); await restore(); await closeDb();
   }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"xiaohongshu-creator":"3"});

@@ -1,0 +1,86 @@
+{
+  "formatVersion": 1,
+  "skillId": "claude-image-generation",
+  "version": "1",
+  "name": "主题与风格图片",
+  "description": "主题与风格图片：优化主题、风格和构图提示词，人工批准后生成单张图片",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/guinacio/claude-image-gen",
+    "commit": "9ae689d2f1163ccba1900fa58a75436ef4d8d75b",
+    "license": "MIT",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream guinacio",
+    "review": "docs/reviews/2026-11-02-image-skill-manifest.json"
+  },
+  "modules": [
+    {
+      "moduleId": "generate",
+      "version": "1",
+      "description": "主题与风格图片：优化主题、风格和构图提示词，人工批准后生成单张图片",
+      "inputSchema": "image-input@1",
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "image-delivery@1",
+      "entryResource": "generate",
+      "resources": [
+        "generate",
+        "prompt-crafting"
+      ],
+      "tools": [
+        "generate_image"
+      ],
+      "outputKinds": [
+        "image"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#generate/success",
+        "fixtures#generate/missing-input",
+        "fixtures#generate/delivery"
+      ],
+      "hash": "b382540184a135b93a2db93284df302223ad217d69f2f5042ff6870a1d08b45c"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "generate",
+      "path": "generate.md",
+      "type": "text/markdown",
+      "bytes": 1367,
+      "sha256": "dfa833d73ec238bc2b133a10a9ae367b998a8fe78c6f070d7e9419ec3ed8643b"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 481,
+      "sha256": "a3a72ccb706c14ea41a77a815a58997c2bc491fb482bcaaa35d9cf5dcebfc549"
+    },
+    {
+      "resourceId": "prompt-crafting",
+      "path": "upstream/references/prompt-crafting.md",
+      "type": "text/markdown",
+      "bytes": 4032,
+      "sha256": "4a5b585814010ed7954f9ee6596e22973d52640e485ff31e51c1ee665f19cc34"
+    },
+    {
+      "resourceId": "archive-skill",
+      "path": "upstream/SKILL.md",
+      "type": "text/markdown",
+      "bytes": 6885,
+      "sha256": "0b043446708a5d4ad096efc0099a3f5d6fde097ab72dbf508827351c9d75c920"
+    },
+    {
+      "resourceId": "license",
+      "path": "upstream/LICENSE",
+      "type": "text/plain",
+      "bytes": 1074,
+      "sha256": "56f69ce1aba5e1edd4bf6dc1bcb97d24be1954b3acb5795bdd2674cf69e2dcbb"
+    }
+  ],
+  "manifestHash": "a611fc708791dcad3cdb60d7337c6c73efd88194b40f63ff7fb8b18e5d54cbd9",
+  "packageHash": "3b954de7b8f6478dcafc3b8e2e73633f8ebf958d82ebd7b8007344bcde3cf1fa"
+}

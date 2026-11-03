@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import type {
   AssistantArtifact,
@@ -10,6 +11,7 @@ import { Badge, Button, Input, Select, Textarea } from "../admin/ui";
 import { toolGet, useToolCommand } from "../tools/client";
 import { artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
 import { useEditorGuard } from "./unsaved";
+import { CoverPlanBody } from "./cover-plan";
 function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
   const { content } = artifact;
   return (
@@ -79,9 +81,11 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
 
 export function AssistantArtifactPanel({
   artifacts,
+  target,
   ...props
 }: {
   artifacts: AssistantArtifact[];
+  target?: { artifactId: string; version: number } | null;
   sessionId: string;
   csrf: string;
   active: boolean;
@@ -96,19 +100,22 @@ export function AssistantArtifactPanel({
     ? chosen
     : artifacts[0]?.artifactId;
   const guard = useEditorGuard();
+  useEffect(() => {
+    if (target) guard.request(() => setChosen(target.artifactId));
+  }, [target]);
   return (
     <div className="assistant-artifact-inner">
       <div className="assistant-artifact-heading">
         <h2 className="text-[14px] font-semibold text-ink">
-          会话稿件{" "}
-          <span className="font-normal text-ink-4">{artifacts.length} 份</span>
+          会话作品{" "}
+          <span className="font-normal text-ink-4">{artifacts.length} 项</span>
         </h2>
         <p className="mt-1 text-[11px] text-ink-4">
-          在这里查看、编辑和继续修改本次会话的稿件。
+          在这里查看本次会话的作品、封面方案和生成图片，或引用已保存版本继续修改。
         </p>
         {artifacts.length > 1 && (
           <Select
-            aria-label="选择稿件"
+            aria-label="选择作品"
             value={selectedId}
             onChange={(event) => {
               const id = event.target.value;
@@ -117,7 +124,7 @@ export function AssistantArtifactPanel({
           >
             {artifacts.map((artifact, index) => (
               <option key={artifact.artifactId} value={artifact.artifactId}>
-                稿件 {index + 1} · {artifact.content.title}
+                作品 {index + 1} · {{ "xhs-cover-plan": "封面方案", image: "图片", "text-draft": "文章", "xhs-note": "笔记" }[artifact.kind]} · {artifact.content.title}
               </option>
             ))}
           </Select>
@@ -129,14 +136,27 @@ export function AssistantArtifactPanel({
             key={artifact.artifactId}
             hidden={artifact.artifactId !== selectedId}
           >
-            <AssistantArtifactCard artifact={artifact} {...props} />
+            <AssistantArtifactCard artifact={artifact} versionTarget={selectedId === artifact.artifactId && target?.artifactId === artifact.artifactId ? target : undefined} {...props} />
           </div>
         ))}
       </div>
     </div>
   );
 }
-export function AssistantArtifactCard({
+export function AssistantArtifactCard(props: Parameters<typeof WritingArtifactCard>[0]) {
+  const {artifact} = props;
+  if (artifact.kind === "image") {
+    const c=artifact.content, href=`/api/tools/assets/${encodeURIComponent(c.fileKey ?? "")}/content`;
+    return <article className="min-w-0 space-y-4" aria-label={`图片：${c.title}`} data-artifact-id={artifact.artifactId}>
+      <Badge tone="ok">图片</Badge><h3 className="break-words text-[19px] font-semibold">{c.title}</h3>
+      <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
+      <p className="whitespace-pre-wrap break-words text-[13px] text-ink-2 [overflow-wrap:anywhere]">{c.prompt}</p>
+      <a href={href} download className="text-accent underline">下载图片</a>
+    </article>;
+  }
+  return <WritingArtifactCard {...props} />;
+}
+function WritingArtifactCard({
   artifact,
   sessionId,
   csrf,
@@ -144,6 +164,7 @@ export function AssistantArtifactCard({
   options,
   refresh,
   onReference,
+  versionTarget,
 }: {
   artifact: AssistantArtifact;
   sessionId: string;
@@ -152,6 +173,7 @@ export function AssistantArtifactCard({
   options: AssistantOptions;
   refresh: () => Promise<unknown>;
   onReference?: (artifact: AssistantArtifact) => void;
+  versionTarget?: { artifactId: string; version: number };
 }) {
   const command = useToolCommand(csrf, `assistant:session:${sessionId}`);
   const [versions, setVersions] = useState<AssistantArtifact[]>([]);
@@ -175,6 +197,7 @@ export function AssistantArtifactCard({
     !!editing &&
     JSON.stringify(editing.content) !== JSON.stringify(editing.original);
   const newer = artifact.version > selected.version;
+  const cover = selected.kind === "xhs-cover-plan";
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -183,8 +206,36 @@ export function AssistantArtifactCard({
     };
   }, []);
   const path = `${sessionApi(sessionId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/versions`;
+  useEffect(() => {
+    if (!versionTarget) return;
+    const targetVersion = versionTarget.version;
+    if (targetVersion === artifact.version) {
+      request(() => {
+        setEditing(null);
+        setSelected(artifact);
+        selectedRef.current = artifact;
+      });
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    toolGet<{ versions: AssistantArtifact[] }>(path, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setVersions(result.versions);
+      const version = result.versions.find((value) => value.version === targetVersion);
+      if (!version) { setError("指定作品版本暂不可读，请重新读取。"); return; }
+      request(() => {
+        setEditing(null);
+        setSelected(version);
+        selectedRef.current = version;
+      });
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "读取版本失败。");
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [versionTarget, path]);
   async function save(): Promise<boolean> {
-    if (!editing || active || command.pending) return false;
+    if (!editing || cover || artifact.kind === "xhs-cover-plan" || active || command.pending) return false;
     const content = {
       ...editing.content,
       titles: editing.content.titles
@@ -259,12 +310,12 @@ export function AssistantArtifactCard({
   return (
     <article
       className="min-w-0 space-y-4"
-      aria-label={`稿件：${selected.content.title}`}
+      aria-label={`${cover ? "封面方案" : "稿件"}：${selected.content.title}`}
       data-artifact-id={artifact.artifactId}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge tone={selected.content.partial ? "warn" : "ok"}>
-          {selected.kind === "xhs-note" ? "小红书笔记" : "通用稿件"}
+          {cover ? "小红书封面方案" : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
         </Badge>
         <span className="text-[12px] text-ink-4">
           版本 {selected.version}
@@ -311,7 +362,7 @@ export function AssistantArtifactCard({
         >
           {historyOpen ? "收起版本" : "历史版本"}
         </Button>
-        <Button
+        {!cover && <Button
           size="sm"
           disabled={
             active ||
@@ -329,8 +380,8 @@ export function AssistantArtifactCard({
           }}
         >
           编辑稿件
-        </Button>
-        <Button
+        </Button>}
+        {!cover && <Button
           size="sm"
           disabled={
             command.pending ||
@@ -344,13 +395,13 @@ export function AssistantArtifactCard({
           }
         >
           转交助手
-        </Button>
+        </Button>}
       </div>
       {historyOpen && (
         <label className="block space-y-2 text-[12px] text-ink-3">
           <span>查看版本</span>
           <Select
-            aria-label="稿件版本"
+            aria-label={cover ? "封面方案版本" : "稿件版本"}
             value={selected.version}
             disabled={command.pending}
             onChange={(event) => {
@@ -382,7 +433,7 @@ export function AssistantArtifactCard({
           </Select>
         </label>
       )}
-      {editing ? (
+      {cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
         <form
           className="space-y-4"
           onSubmit={(event) => {
@@ -480,7 +531,7 @@ export function AssistantArtifactCard({
           用这版继续修改
         </Button>
       )}
-      {active && (
+      {active && !cover && (
         <p className="text-[12px] text-ink-4">
           处理进行中或结果待核对时不能保存，请先完成或停止后续执行。
         </p>
@@ -495,7 +546,7 @@ export function AssistantArtifactCard({
           {error || command.error}
         </p>
       )}
-      {handoff && (
+      {handoff && !cover && (
         <HandoffDialog
           artifact={handoff}
           sessionId={sessionId}
@@ -524,6 +575,8 @@ function HandoffDialog({
   const [target, setTarget] = useState<AssistantId>(
     profiles[0]?.id ?? "creative",
   );
+  const targetProfile = options.assistants.find((profile) => profile.id === target);
+  const targetAvailable = !!targetProfile?.available;
   const [brief, setBrief] = useState("");
   const command = useToolCommand(csrf, `assistant:session:${sessionId}`);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -536,7 +589,9 @@ function HandoffDialog({
       alive.current = false;
     };
   }, []);
-  return (
+  // Keep an open dialog visible when the responsive workspace hides the artifact panel.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <dialog
       ref={dialog}
       aria-labelledby="assistant-handoff-title"
@@ -563,8 +618,14 @@ function HandoffDialog({
         <Select
           value={target}
           disabled={command.pending}
+          aria-describedby={!targetAvailable ? "assistant-handoff-target-status" : undefined}
           onChange={(event) => setTarget(event.target.value as AssistantId)}
         >
+          {!targetAvailable && (
+            <option value={target} disabled>
+              {targetProfile?.name ?? "所选助手"}（当前不可用）
+            </option>
+          )}
           {profiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.name}
@@ -572,6 +633,11 @@ function HandoffDialog({
           ))}
         </Select>
       </label>
+      {!targetAvailable && (
+        <p id="assistant-handoff-target-status" role="status" className="mt-2 text-[13px] text-ink-3">
+          当前选择的助手暂不可用，请重新选择目标助手。稿件和说明仍保留。
+        </p>
+      )}
       <label className="mt-4 block space-y-1 text-[13px] text-ink-2">
         <span>给目标助手的说明</span>
         <Textarea
@@ -595,8 +661,9 @@ function HandoffDialog({
         <Button
           tone="primary"
           busy={command.pending}
-          disabled={!profiles.length}
+          disabled={!targetAvailable}
           onClick={async () => {
+            if (!targetAvailable) return;
             const result = await command.run<{ targetSessionId: string }>(
               `${sessionApi(sessionId)}/handoffs`,
               {
@@ -613,6 +680,7 @@ function HandoffDialog({
           确认转交并打开
         </Button>
       </div>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }

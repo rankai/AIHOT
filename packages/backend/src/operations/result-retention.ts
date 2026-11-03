@@ -35,7 +35,11 @@ async function expireResultBatch(now:Date){
          (z.kind='wechat_account_rank' AND d.kind='wechat_work' AND d.item_key IN(z.item_key||':maxWork',z.item_key||':minWork'))
          OR (z.kind='dongchedi_account' AND d.kind='dongchedi_work')))))
      AND NOT EXISTS(SELECT 1 FROM operation_runs a WHERE a.status IN ('active','waiting','needs_review','stopped')
-       AND a.progress->>'detailSourceResultId'=z.id::text)`;
+       AND a.progress->>'detailSourceResultId'=z.id::text)
+     AND NOT EXISTS(SELECT 1 FROM assistant_tool_calls c
+       JOIN assistant_turns t ON t.id=c.turn_id
+       JOIN operation_runs parent ON parent.id=t.parent_operation_run_id
+       WHERE c.child_run_id=z.run_id AND parent.status IN ('active','waiting','needs_review','stopped'))`;
   const candidates=await tx`SELECT z.id FROM operation_results z JOIN operation_runs r ON r.id=z.run_id
    WHERE r.status IN ('completed','failed') AND z.kind<>'result_expired'
     AND z.article_id IS NULL AND z.source_id IS NULL AND z.file_key IS NULL

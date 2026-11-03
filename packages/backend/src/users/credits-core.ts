@@ -6,7 +6,7 @@ import { AccountError, UserId } from "./accounts.ts";
 
 export const MAX_BALANCE = 1_000_000_000_000;
 export const MAX_CREDITS = 1_000_000_000;
-export const ToolKinds = ["assistant-turn", "query", "x-account", "x-tweet", "images", "videos", "ai-search", "transcriptions", "xhs-comments", "media-upload", "images/query", "videos/query", "ai-search/query", "transcriptions/query", "xhs-comments/query"] as const;
+export const ToolKinds = ["assistant-turn", "assistant-vision", "query", "x-account", "x-tweet", "images", "videos", "ai-search", "transcriptions", "xhs-comments", "media-upload", "images/query", "videos/query", "ai-search/query", "transcriptions/query", "xhs-comments/query"] as const;
 export const Kind = z.enum(ToolKinds);
 export const Credits = z.number().int().safe().min(0).max(MAX_CREDITS);
 export const Reason = z.string().trim().min(2, "请填写操作理由").max(500, "理由最多 500 字");
@@ -61,7 +61,12 @@ export async function appendCreditEntry(tx: Tx, wallet: CreditWallet, entry: {
   return { user_id: wallet.user_id, available, reserved };
 }
 
+export interface TaskPricingItem {
+  key: string; label: string; units: number; intent: ToolCreditIntent; amount: number; pricing: PricingSnapshot;
+}
+export interface TaskPricing { version: 1; label: string; scope: string; items: TaskPricingItem[] }
 export interface PricingSnapshot {
+  task?: TaskPricing;
   kind: ToolCreditKind; provider: string; model: string; tier: string;
   imageCount: number; videoSeconds: number; referenceCount: number; price: ToolPrice;
 }
@@ -80,7 +85,7 @@ export interface CreditRunRow {
 }
 export async function chargeForRun(db: Db, runId: number, lock = false): Promise<ChargeRow | null> {
   const rows = lock
-    ? await db<ChargeRow[]>`SELECT c.* FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id = c.id WHERE l.run_id = ${runId} FOR UPDATE OF c`
-    : await db<ChargeRow[]>`SELECT c.* FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id = c.id WHERE l.run_id = ${runId}`;
+    ? await db<ChargeRow[]>`SELECT c.* FROM member_credit_charges c JOIN member_credit_authorized_runs l ON l.charge_id = c.id WHERE l.run_id = ${runId} FOR UPDATE OF c`
+    : await db<ChargeRow[]>`SELECT c.* FROM member_credit_charges c JOIN member_credit_authorized_runs l ON l.charge_id = c.id WHERE l.run_id = ${runId}`;
   return rows[0] ?? null;
 }

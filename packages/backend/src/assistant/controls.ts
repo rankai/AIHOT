@@ -1,15 +1,19 @@
+import { CoverChoice } from "./cover-plan-contract.ts";
+import { coverPlanImageAvailability } from "./cover-plan.ts";
+import { recoverMessageQueues } from "./message-queue.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sql, type Tx } from "../db.ts";
 import { AccountError } from "../users/accounts.ts";
 import { assertRunCredit, settleForRun } from "../users/credits.ts";
-import { creditHash, requireCreditUser } from "../users/credits-core.ts";
+import { creditHash, requireCreditUser, chargeForRun } from "../users/credits-core.ts";
 import { audit } from "../admin/auth.ts";
-import { lockMemberAdmission, resumeRun, type Execution } from "../providers/operations/store.ts";
+import { lockMemberAdmission, resumeRun, saveResult, advanceRun, type Execution } from "../providers/operations/store.ts";
 import { queueOperationStep } from "../providers/operations/queue.ts";
 import { ownedSession, command, conflict, event, message } from "./store.ts";
 import { accepting } from "./config.ts";
 import { profile } from "./catalog.ts";
+import { skillAdmission } from "./skill-policy.ts";
 export async function ownedTurn(tx: Tx, userId: number, id: string, turnId: string) {
   await lockMemberAdmission(tx, `user:${userId}`);
   const s = await ownedSession(tx, userId, id, true);
@@ -24,12 +28,14 @@ export async function answerTurn(userId: number, id: string, turnId: string, raw
       questionId: z.string().uuid(),
       expectedRevision: z.number().int(),
       answer: z.string().trim().min(1).max(10000),
+      choice: CoverChoice.optional(),
     })
     .strict()
     .parse(raw);
-  return sql.begin(async (tx) => {
+  let completedRunId:number|undefined;
+  const result=await sql.begin(async (tx) => {
     const { s, t } = await ownedTurn(tx, userId, id, turnId);
-    const hash = creditHash(input);
+    const hash = creditHash(input.choice?{questionId:input.questionId,choice:input.choice}:input);
     if (t.snapshot.answers?.[input.questionId]) {
       if (t.snapshot.answers[input.questionId] !== hash) throw conflict("问题已经收到不同答案");
       return { turnId };
@@ -41,19 +47,36 @@ export async function answerTurn(userId: number, id: string, turnId: string, raw
       t.pending_question?.questionId !== input.questionId
     )
       throw conflict("问题已变化，请刷新");
+    if(input.choice){
+      const choice=input.choice,context=t.pending_question?.coverPlan;
+      if(!context||context.artifactId!==choice.artifactId||context.version!==choice.version)throw conflict("封面选择与当前问题版本不一致");
+      const [plan]=await tx`SELECT version,content,activation_id FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${choice.artifactId} AND kind='xhs-cover-plan' ORDER BY version DESC LIMIT 1`;
+      if(plan?.version!==choice.version)throw conflict("封面方案版本已变化");
+      if(choice.action==="generate"){
+        if(!plan.content.coverPlan.schemes.some((scheme:any)=>scheme.schemeId===choice.schemeId))throw conflict("选择的封面方案不存在");
+        const available=await coverPlanImageAvailability(tx,t,plan.activation_id);if(!available.available)throw conflict(available.reason!);
+      }
+    }
     await requireCreditUser(tx, userId, true);
     await assertRunCredit(tx, t.parent_operation_run_id);
     await message(tx, id, turnId, "user", input.answer, { role: "user", content: input.answer });
-    await tx`UPDATE assistant_turns SET phase='executing',pending_question=NULL,snapshot=${tx.json({ ...t.snapshot, answers: { ...t.snapshot.answers, [input.questionId]: hash } })} WHERE id=${turnId}`;
+    await tx`UPDATE assistant_turns SET phase='executing',pending_question=NULL,snapshot=${tx.json({ ...t.snapshot, ...(input.choice?.action==="generate"?{coverChoice:input.choice}:{}), answers: { ...t.snapshot.answers, [input.questionId]: hash } })} WHERE id=${turnId}`;
     await tx`UPDATE assistant_sessions SET revision=revision+1 WHERE id=${id}`;
     await resumeRun(tx, {
       runId: t.parent_operation_run_id,
       stepVersion: t.step_version,
       generation: t.generation,
     });
-    await queueOperationStep(tx, t.parent_operation_run_id);
+    if(input.choice?.action==="keep-plans"){
+      const [current]=await tx`SELECT step_version,generation FROM operation_runs WHERE id=${t.parent_operation_run_id}`;
+      const execution={runId:t.parent_operation_run_id,stepVersion:current!.step_version,generation:current!.generation};
+      await saveResult(tx,execution,{itemKey:`delivery:${input.questionId}`,kind:"assistant_delivery",data:{turnId,artifactId:input.choice.artifactId,version:input.choice.version}});
+      await tx`UPDATE assistant_turns SET phase='completed' WHERE id=${turnId}`;await advanceRun(tx,execution,null);completedRunId=t.parent_operation_run_id;
+    }else await queueOperationStep(tx, t.parent_operation_run_id);
     return { turnId };
   });
+  if(completedRunId!==undefined)await recoverMessageQueues(completedRunId);
+  return result;
 }
 async function stopTx(tx: Tx, t: Record<string, any>, reason = "Stopped by owner") {
   await tx`UPDATE assistant_sessions SET queue_paused=true,queue_resume_turn_id=NULL WHERE id=${t.session_id}`;
@@ -62,8 +85,10 @@ async function stopTx(tx: Tx, t: Record<string, any>, reason = "Stopped by owner
   for (const r of runs)
     if (["active", "waiting", "needs_review"].includes(r.status)) {
       await tx`UPDATE operation_runs SET status='stopped',generation=generation+1,next_attempt_at=NULL,job_id=NULL,wait_reason=${reason},updated_at=now() WHERE id=${r.id}`;
-      await settleForRun(tx, { runId: r.id, outcome: "stopped" });
+
     }
+  // Stop every dispatcher before inspecting the shared charge. Legacy runs still settle individually.
+  for (const r of runs) await settleForRun(tx, { runId: r.id, outcome: "stopped" });
   await tx`UPDATE assistant_turns SET snapshot=snapshot || jsonb_build_object('stoppedThroughGeneration',
     (SELECT generation FROM operation_runs WHERE id=${t.parent_operation_run_id})) WHERE id=${t.id}`;
   await event(tx, t.session_id, "turn", t.id);
@@ -88,12 +113,23 @@ async function resumeTurnTx(tx: Tx, s: Record<string, any>, t: Record<string, an
   // Admission is already locked; authentication before this transaction may have raced account disablement.
   await requireCreditUser(tx, s.owner_user_id, true);
   await assertRunCredit(tx, t.parent_operation_run_id);
+  const taskCharge = await chargeForRun(tx,t.parent_operation_run_id,true);
+  if (taskCharge?.pricing_snapshot.task) {
+    if (typeof t.snapshot.stoppedThroughGeneration === "number") throw conflict("本次任务已主动终止，请核对费用后新建剩余任务");
+    const [unresolved] = await tx`WITH linked AS (SELECT run_id FROM member_credit_authorized_runs WHERE charge_id=${taskCharge.id}), ids AS (
+      SELECT current_receipt_id id FROM operation_runs WHERE id IN (SELECT run_id FROM linked)
+      UNION SELECT receipt_id FROM operation_results WHERE run_id IN (SELECT run_id FROM linked)
+      UNION SELECT jsonb_array_elements_text(coalesce(progress->'retainedReceiptIds','[]'))::bigint FROM operation_runs WHERE id IN (SELECT run_id FROM linked)
+    ) SELECT id FROM receipts WHERE id IN (SELECT id FROM ids) AND status IN ('pending','unknown') LIMIT 1`;
+    if (unresolved) throw conflict("存在未知或在途请求，需要先核对");
+    await tx`UPDATE member_credit_charges SET state='reserved',review_reason=NULL WHERE id=${taskCharge.id} AND state='review'`;
+  }
   const receipts =
     await tx`SELECT p.status FROM receipts p WHERE p.id=${t.current_receipt_id} OR p.id IN (SELECT r.current_receipt_id FROM operation_runs r JOIN assistant_tool_calls c ON c.child_run_id=r.id WHERE c.turn_id=${t.id})`;
   if (receipts.some((r) => ["pending", "unknown"].includes(r.status)))
     throw conflict("存在未知或在途请求，需要先核对");
   const [count] =
-    await tx`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${s.owner_user_id}`} AND provider='assistant' AND status IN ('active','waiting')`;
+    await tx`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${s.owner_user_id}`} AND provider='assistant' AND operation_key='assistant.turn' AND status IN ('active','waiting')`;
   if (count!.n >= 2) throw conflict("同时最多执行2个助手回合");
   // Admit every phase through the shared member limit; child failures roll this whole transaction back.
   await resumeRun(tx, {
@@ -207,7 +243,10 @@ export async function archiveSession(userId: number, id: string, remove: boolean
       // Financial snapshots stay governed by their own retention; delete visible private copies.
       await tx`DELETE FROM assistant_session_inputs WHERE session_id=${id}`;
       await tx`DELETE FROM assistant_artifact_versions WHERE session_id=${id}`;
-    } else await tx`UPDATE assistant_sessions SET archived_at=now() WHERE id=${id}`;
+    } else {
+      await tx`UPDATE assistant_sessions SET archived_at=now() WHERE id=${id}`;
+      await event(tx, id, "session", id);
+    }
     return { sessionId: id };
   });
 }
@@ -235,8 +274,9 @@ export async function handoff(userId: number, id: string, raw: unknown, key: unk
     accepting();
     await ownedSession(tx, userId, id, true);
     const p = profile(input.targetAssistantId);
+    await skillAdmission(tx, p.id, null, true);
     const [a] =
-      await tx`SELECT content FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${input.artifactId} AND version=${input.version}`;
+      await tx`SELECT content FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${input.artifactId} AND version=${input.version} AND kind IN ('text-draft','xhs-note')`;
     if (!a) throw new AccountError(404, "not_found", "稿件版本不存在");
     const [count] =
       await tx`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${userId} AND deleted_at IS NULL`;

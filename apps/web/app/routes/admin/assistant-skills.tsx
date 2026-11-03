@@ -39,6 +39,9 @@ function Details({ skill }: { skill: AssistantSkillAdminRow }) {
         <div><dt>来源</dt><dd>{skill.source ? JSON.stringify(skill.source) : "技能包不可用"}</dd></div>
         <div><dt>包 hash</dt><dd className="font-mono">{skill.packageHash ?? "不可用"}</dd></div>
         <div><dt>依赖</dt><dd>{skill.dependencies.join("；")}</dd></div>
+        <div><dt>支持能力</dt><dd>{skill.capabilities.join("；") || "技能包不可用"}</dd></div>
+        <div><dt>开放输入与交付范围</dt><dd>{skill.openScope.join("；") || "技能包不可用"}</dd></div>
+        <div><dt>上游脚本</dt><dd>仅归档，不会执行；所需接口由平台受控能力接管。</dd></div>
       </dl>
     </details>
   </div>;

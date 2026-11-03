@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CreditCharge, CreditChargePage, CreditEntry, CreditPage } from "@aihot/contracts/credits";
+import type { ToolRunDetail } from "@aihot/contracts/user-tools";
 import { sql, type Db } from "../db.ts";
 import { AccountError, UserId } from "./accounts.ts";
 import { balanceDto, requireCreditUser, type ChargeRow, type CreditWallet } from "./credits-core.ts";
@@ -50,7 +51,7 @@ export async function listCreditCharges(raw: unknown = {}): Promise<CreditCharge
       AND (c.state = ${query.state}
         OR (${query.state} = 'pending' AND c.state IN ('reserved','review'))
         OR (${query.state} = 'review' AND c.state = 'reserved' AND (c.created_at < now() - interval '24 hours' OR EXISTS (
-          SELECT 1 FROM member_credit_run_links l JOIN operation_runs review_run ON review_run.id = l.run_id WHERE l.charge_id = c.id AND review_run.status IN ('needs_review','stopped','failed')
+          SELECT 1 FROM member_credit_authorized_runs l JOIN operation_runs review_run ON review_run.id = l.run_id WHERE l.charge_id = c.id AND review_run.status IN ('needs_review','stopped','failed')
         ))))
     ORDER BY c.created_at DESC, c.id DESC LIMIT ${query.limit + 1}`;
   const charges = rows.slice(0, query.limit).map(chargeDto);
@@ -58,10 +59,16 @@ export async function listCreditCharges(raw: unknown = {}): Promise<CreditCharge
 }
 
 /** Small owner-scoped projection for the user's task details. */
-export async function readRunCredits(userId: number, runId: number): Promise<Pick<CreditCharge, "amount" | "state" | "consumed" | "released"> | null> {
+export async function readRunCredits(userId: number, runId: number): Promise<ToolRunDetail["charge"]> {
   UserId.parse(userId); UserId.parse(runId);
-  const [row] = await sql`SELECT c.amount, c.state, c.consumed, c.released FROM member_credit_charges c
-    JOIN member_credit_run_links l ON l.charge_id = c.id JOIN operation_runs r ON r.id = l.run_id
+  const [row] = await sql`SELECT c.amount, c.state, c.consumed, c.released, c.root_run_id, i.amount AS item_amount FROM member_credit_charges c
+    JOIN member_credit_authorized_runs l ON l.charge_id = c.id JOIN operation_runs r ON r.id = l.run_id
+    LEFT JOIN member_credit_task_items i ON i.charge_id=c.id AND (i.run_id=l.run_id OR i.recovery_run_id=l.run_id)
     WHERE l.run_id = ${runId} AND c.user_id = ${userId} AND r.actor = ${`user:${userId}`}`;
-  return row ? { amount: row.amount, state: row.state, consumed: row.consumed, released: row.released } : null;
+  if (!row) return null;
+  // Child allocations are not wallet reservations. Manual root reconciliation may
+  // not be attributable to individual items, so do not invent child settlement totals.
+  if (row.item_amount != null && row.root_run_id !== runId)
+    return { taskRunId: row.root_run_id, itemAmount: row.item_amount, state: row.state };
+  return { amount: row.amount, state: row.state, consumed: row.consumed, released: row.released };
 }

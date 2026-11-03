@@ -1,0 +1,142 @@
+[
+  {
+    "asset_type": "wechat_main_cover",
+    "label": "WeChat Official Account main cover",
+    "keywords": ["微信公众号头图", "公众号头图", "微信头图", "公众号封面", "wechat main cover", "wechat cover"],
+    "aspect_ratio": "2.35:1",
+    "provider_aspect_ratio": "21:9",
+    "size": "1800x766",
+    "alternate_size": "900x383",
+    "notes": "Use 21:9 when the provider cannot render exact 2.35:1."
+  },
+  {
+    "asset_type": "wechat_square_cover",
+    "label": "WeChat share card or secondary cover",
+    "keywords": ["微信公众号方图", "公众号方图", "微信分享图", "微信方形封面", "wechat square cover"],
+    "aspect_ratio": "1:1",
+    "provider_aspect_ratio": "1:1",
+    "size": "1080x1080",
+    "alternate_size": "900x900",
+    "notes": "Use for share cards or secondary covers."
+  },
+  {
+    "asset_type": "wechat_body_illustration_wide",
+    "label": "WeChat article body wide illustration",
+    "keywords": ["公众号文章配图", "微信公众号正文配图", "微信文章配图", "文章配图", "wechat body image", "wechat article illustration"],
+    "aspect_ratio": "16:9",
+    "provider_aspect_ratio": "16:9",
+    "size": "1920x1080",
+    "alternate_size": "1280x720",
+    "notes": "Use for article section visuals and wide body illustrations."
+  },
+  {
+    "asset_type": "wechat_body_illustration_4_3",
+    "label": "WeChat article explanation image",
+    "keywords": ["公众号解释图", "微信公众号说明图", "文章说明图", "framework image"],
+    "aspect_ratio": "4:3",
+    "provider_aspect_ratio": "4:3",
+    "size": "1440x1080",
+    "alternate_size": null,
+    "notes": "Use for explanation visuals, structures, comparisons, and diagrams."
+  },
+  {
+    "asset_type": "xhs_cover_card",
+    "label": "Xiaohongshu cover card",
+    "keywords": ["小红书封面", "小红书头图", "小红书首图", "rednote cover", "xiaohongshu cover", "xhs cover"],
+    "aspect_ratio": "3:4",
+    "provider_aspect_ratio": "3:4",
+    "size": "1080x1440",
+    "alternate_size": null,
+    "notes": "Use for the first card in a Xiaohongshu carousel."
+  },
+  {
+    "asset_type": "xhs_content_card",
+    "label": "Xiaohongshu content card",
+    "keywords": ["小红书配图", "小红书内容卡", "小红书图文", "小红书卡片", "xiaohongshu card", "xhs card"],
+    "aspect_ratio": "3:4",
+    "provider_aspect_ratio": "3:4",
+    "size": "1080x1440",
+    "alternate_size": null,
+    "notes": "Use for Xiaohongshu image posts and carousel cards."
+  },
+  {
+    "asset_type": "douyin_video_cover",
+    "label": "Douyin vertical video cover",
+    "keywords": ["抖音封面", "抖音视频封面", "竖屏视频封面", "douyin cover", "tiktok cover"],
+    "aspect_ratio": "9:16",
+    "provider_aspect_ratio": "9:16",
+    "size": "1080x1920",
+    "alternate_size": null,
+    "notes": "Use for vertical short video covers."
+  },
+  {
+    "asset_type": "ppt_cover",
+    "label": "Presentation cover",
+    "keywords": ["ppt封面", "ppt 封面", "演示文稿封面", "presentation cover", "slide cover"],
+    "aspect_ratio": "16:9",
+    "provider_aspect_ratio": "16:9",
+    "size": "1920x1080",
+    "alternate_size": "1280x720",
+    "notes": "Use for standard widescreen slide covers."
+  },
+  {
+    "asset_type": "mobile_wallpaper",
+    "label": "Mobile wallpaper",
+    "keywords": ["手机壁纸", "手机锁屏", "竖屏壁纸", "mobile wallpaper", "phone wallpaper"],
+    "aspect_ratio": "9:16",
+    "provider_aspect_ratio": "9:16",
+    "size": "1080x1920",
+    "alternate_size": null,
+    "notes": "Use for phone wallpapers and lock screens."
+  },
+  {
+    "asset_type": "bilibili_cover",
+    "label": "Bilibili video cover",
+    "keywords": ["b站封面", "哔哩哔哩封面", "视频封面", "bilibili cover"],
+    "aspect_ratio": "16:9",
+    "provider_aspect_ratio": "16:9",
+    "size": "1920x1080",
+    "alternate_size": "1280x720",
+    "notes": "Use for horizontal video thumbnails."
+  },
+  {
+    "asset_type": "blog_social_cover",
+    "label": "Blog or social hero cover",
+    "keywords": ["博客封面", "文章封面", "社交封面", "blog cover", "social cover"],
+    "aspect_ratio": "16:9",
+    "provider_aspect_ratio": "16:9",
+    "size": "1920x1080",
+    "alternate_size": "1280x720",
+    "notes": "Use for blog posts, newsletters, and horizontal social sharing."
+  },
+  {
+    "asset_type": "social_vertical_card",
+    "label": "General vertical social card",
+    "keywords": ["竖版海报", "竖版配图", "feed card", "vertical social card"],
+    "aspect_ratio": "4:5",
+    "provider_aspect_ratio": "4:5",
+    "size": "1080x1350",
+    "alternate_size": null,
+    "notes": "Use for general vertical social feed images."
+  },
+  {
+    "asset_type": "ecommerce_main_image",
+    "label": "E-commerce main image",
+    "keywords": ["电商主图", "商品主图", "产品主图", "ecommerce main image", "product main image"],
+    "aspect_ratio": "1:1",
+    "provider_aspect_ratio": "1:1",
+    "size": "1200x1200",
+    "alternate_size": "1080x1080",
+    "notes": "Use for product listing main images."
+  },
+  {
+    "asset_type": "avatar",
+    "label": "Avatar",
+    "keywords": ["头像", "社交头像", "卡通头像", "avatar", "profile picture"],
+    "aspect_ratio": "1:1",
+    "provider_aspect_ratio": "1:1",
+    "size": "1024x1024",
+    "alternate_size": null,
+    "notes": "Use for profile avatars."
+  }
+]

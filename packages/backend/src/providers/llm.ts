@@ -68,11 +68,11 @@ export const MODELS: Record<string, ModelSpec> = {
   "deepseek-flash": {
     key: "deepseek-flash", service: "deepseek", model: "deepseek-flash",
     baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY",
-    extra: { thinking: { type: "disabled" } }, jsonMode: true,
+    extra: { thinking: { type: "disabled" } }, jsonMode: true, vision: true,
   },
   "deepseek-flash-think": {
     key: "deepseek-flash-think", service: "deepseek", model: "deepseek-flash",
-    baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY", jsonMode: true,
+    baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY", jsonMode: true, vision: true,
   },
   "qwen3.7-flash": {
     key: "qwen3.7-flash", service: "dashscope", model: "qwen3.7-flash",

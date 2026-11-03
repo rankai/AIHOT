@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
-import type { ToolQuote } from "@aihot/contracts/credits";
+import type { AssistantTurnQuote } from "@aihot/contracts/assistant";
 import { Button } from "../admin/ui";
 /** An explicit UI action card: this is never rendered as an assistant message. */
 export function TurnQuoteDialog({
@@ -13,7 +13,7 @@ export function TurnQuoteDialog({
   close,
   confirm,
 }: {
-  quote: ToolQuote;
+  quote: AssistantTurnQuote;
   message: string;
   pending: boolean;
   requiresRequote?: boolean;
@@ -23,6 +23,13 @@ export function TurnQuoteDialog({
   confirm: () => void;
 }) {
   const titleId = useId();
+  const search = quote.additionalFeeKinds?.includes("search");
+  const image = quote.additionalFeeKinds?.includes("image");
+  const feeNotice = quote.task ? "完成或停止后按实际执行结算，未执行部分释放。" : quote.additionalFeeKinds?.includes("vision") ? `如需${quote.additionalFeeKinds.map(kind=>({search:"查询参考",vision:"视觉分析",image:"图片生成"})[kind]).join("、")}，将分别报价并确认。` : quote.additionalFeeKinds === undefined
+    ? "额外服务费用以执行前的报价为准。"
+    : search && image ? "如需检索或生成图片，将另行计费；图片生成前会单独确认。"
+    : search ? "如需查询参考，将另行报价并确认。"
+    : image ? "图片生成另行计费，生成前会单独确认。" : null;
   const [expired, setExpired] = useState(false);
   useEffect(() => {
     const check = () => setExpired(Date.parse(quote.expiresAt) <= Date.now());
@@ -41,7 +48,7 @@ export function TurnQuoteDialog({
             id={titleId}
             className="text-[13px] font-medium text-ink"
           >
-            本次 {quote.amount.toLocaleString()} 积分
+            {quote.task?.label ?? "本次创作"} · {quote.task ? "预计最多 " : ""}{quote.amount.toLocaleString()} 积分
           </h2>
           <p role="status" className="mt-1 text-[12px] text-ink-3">
             可用 {quote.available.toLocaleString()} 积分 ·{" "}
@@ -50,12 +57,14 @@ export function TurnQuoteDialog({
         </div>
 
       </div>
+      {feeNotice && <p className="mt-2 text-[12px] leading-relaxed text-ink-3">{feeNotice}</p>}
       <details className="mt-2 text-[12px] text-ink-3">
         <summary className="cursor-pointer">费用与需求详情</summary>
         <p className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {message}
         </p>
-        <p className="mt-2">确认后占用积分并开始创作。额外检索另行报价和批准；未知或部分结果需要核对。</p>
+        {quote.task?.items.map(item=><p key={item.key} className="mt-1">{item.label} × {item.units}：最多 {item.amount*item.units} 积分</p>)}
+        <p className="mt-2">确认后冻结上限并开始任务。未知或部分结果需要核对。</p>
       </details>
       {expired && (
         <p role="alert" className="mt-2 text-[12px] text-hot">
@@ -64,7 +73,7 @@ export function TurnQuoteDialog({
       )}
       {!quote.affordable && (
         <p role="alert" className="mt-2 text-[12px] text-hot">
-          积分不足，请联系管理员补充。
+          积分不足，还差 {Math.max(0,quote.amount-quote.available).toLocaleString()} 积分。
           <Link to="/account" className="ml-1 underline">
             查看积分
           </Link>
@@ -87,7 +96,7 @@ export function TurnQuoteDialog({
           disabled={requiresRequote || expired || !quote.affordable || pending}
           onClick={confirm}
         >
-          确认继续
+          确认开始
         </Button>
       </div>
     </section>

@@ -1,0 +1,49 @@
+{
+  "formatVersion": 1,
+  "skillId": "xiaohongshu-creator",
+  "version": "2",
+  "name": "小红书创作",
+  "modules": [
+    {
+      "moduleId": "M1",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-write",
+      "label": "小红书创作",
+      "entry": "M1",
+      "capabilities": [
+        "save-writing@1",
+        "search-xhs-notes@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "adaptation",
+        "hot-article-format"
+      ],
+      "scriptBindings": []
+    },
+    {
+      "moduleId": "M2",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-rewrite",
+      "label": "小红书改写",
+      "entry": "M2",
+      "capabilities": [
+        "save-writing@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "adaptation",
+        "platform-rules"
+      ],
+      "scriptBindings": []
+    }
+  ]
+}

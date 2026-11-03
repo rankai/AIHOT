@@ -38,7 +38,7 @@ export const SequentialMode=z.enum(["auto","disabled"]);
 export const MAX_GROUP_IMAGES=10;
 export const GeminiResolution=z.enum(["1K","2K","4K"]);
 const seed={prompt:Prompt,...refs,watermark:z.boolean().optional(),outputFormat:OutputFormat.optional(),responseFormat:z.literal("url").default("url"),optimizePromptOptions:z.object({mode:OptimizePromptMode}).strict().optional()};
-const Old=z.object({model:z.literal("gptImage2").optional(),prompt:z.string().trim().min(1).max(10000),resolution:Resolution,size:Size,n:z.number().int().min(1).max(4),fileKeys:z.array(z.string()).max(2).default([])}).strict();
+const Old=z.object({model:z.literal("gptImage2").optional(),prompt:Prompt,resolution:Resolution,size:Size,n:z.number().int().min(1).max(4),fileKeys:z.array(z.string()).max(2).default([])}).strict();
 export const ImageInput=z.union([
  Old,
  z.object({model:z.literal("gptImage25"),prompt:Prompt,resolution:Resolution,size:Gpt25Size,background:z.literal("transparent").optional(),...refs}).strict(),

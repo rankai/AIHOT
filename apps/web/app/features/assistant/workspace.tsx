@@ -291,7 +291,7 @@ export function AssistantWorkspace({
                 setView?.(view === "artifacts" ? "chat" : "artifacts");
               }}
             >
-              稿件 {artifactCount}
+              作品 {artifactCount}
             </button>
           )}
         </header>
@@ -313,7 +313,7 @@ export function AssistantWorkspace({
               aria-selected={view === "artifacts"}
               onClick={() => setView?.("artifacts")}
             >
-              稿件 {artifactCount}
+              作品 {artifactCount}
             </button>
           </div>
         )}
@@ -322,7 +322,7 @@ export function AssistantWorkspace({
             {chat}
           </section>
           {artifacts && (
-            <aside className="assistant-artifact-panel" aria-label="会话稿件">
+            <aside className="assistant-artifact-panel" aria-label="会话作品">
               {artifacts}
             </aside>
           )}

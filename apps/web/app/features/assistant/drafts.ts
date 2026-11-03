@@ -1,3 +1,4 @@
+import type { AssistantSkillSelection, AssistantTaskHint, AssistantAction } from "@aihot/contracts/assistant";
 import { useEffect, useRef, useState } from "react";
 import type { PendingTurn, TurnInput } from "./data";
 import { readRecoveries, subscribeRecovery, type QueueAttempt, type SavedQuote } from "./recovery-store.ts";
@@ -10,6 +11,9 @@ export interface ArtifactReference {
 export interface AssistantDraft {
   text: string;
   actionId: string | null;
+  skillSelection?: AssistantSkillSelection | null;
+  taskHint?: AssistantTaskHint | null;
+  taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice;
   references?: ArtifactReference[];
   attachments?: DraftAttachment[];
   inputIds?: string[];
@@ -18,11 +22,23 @@ export interface AssistantDraft {
   pendingQueue?: QueueAttempt;
   pendingQuote?: SavedQuote;
   recoveryCount?: number;
-  pendingCreate?: { text: string; actionId: string | null; attachments?: DraftAttachment[]; configureFees?: boolean; unknown?: boolean; rejected?: boolean };
+  pendingCreate?: { creationKey?: string; text: string; actionId: string | null; skillSelection?: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice; attachments?: DraftAttachment[]; configureFees?: boolean; unknown?: boolean; rejected?: boolean };
   configureFees?: boolean;
   pendingLifecycle?: "archive" | "delete";
 }
 export const emptyDraft = (): AssistantDraft => ({ text: "", actionId: null });
+/** Old in-memory drafts keep their exact action until an explicit reselection. */
+export function draftSelection(draft: { skillSelection?: AssistantSkillSelection | null; actionId?: string | null }): AssistantSkillSelection | null {
+  return draft.skillSelection !== undefined ? draft.skillSelection : draft.actionId ? { actionId: draft.actionId } : null;
+}
+export function editDraftText(draft: AssistantDraft, text: string): AssistantDraft {
+  return { ...draft, text, taskHint: undefined, taskChoice: undefined };
+}
+export function chooseDraftAction(draft: AssistantDraft, action: AssistantAction | null): AssistantDraft {
+  return { ...draft, actionId: null, skillSelection: action ? { skillId: action.skillId } : null,
+    taskHint: action ? { actionId: action.actionId } : undefined,
+    text: draft.text.trim() ? draft.text : action ? `请帮我完成「${action.label}」。\n主题或原文：` : "" };
+}
 const drafts = new Map<string, AssistantDraft>();
 const listeners = new Map<string, Set<(draft: AssistantDraft) => void>>();
 export const draftKey = (identity: string, scope: string) =>
@@ -59,6 +75,7 @@ export function freezeTurn(
   return {
     ...draft,
     text: "",
+    taskHint: undefined,
     references: [],
     attachments: [],
     inputIds: [],
@@ -87,6 +104,8 @@ export function rejectedDraft(
     ...draft,
     text: input.message,
     actionId: input.skillSelection?.actionId ?? null,
+    skillSelection: input.skillSelection,
+    taskHint: input.taskHint,
     attachments: draft.pendingTurn.attachments,
     inputIds: input.inputIds.filter((id) => !draft.pendingTurn!.attachments?.some((attachment) => attachment.inputId === id)),
     references: input.artifactVersions?.map((reference) => ({

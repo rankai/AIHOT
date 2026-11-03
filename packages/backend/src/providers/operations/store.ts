@@ -9,6 +9,8 @@ import { SUBSCRIPTION_VIDEO_DOWNLOAD, lockVideoDownloadOwners, eligibleVideoDown
 import { reserveForRun, settleForRun, assertRunCredit, type ToolAuthorization } from "../../users/credits.ts";
 
 export class StaleOperationError extends Error { readonly code = "conflict"; }
+/** Exhausted work needs an observable review state; it is not a superseded execution. */
+export class AssistantChildCallLimitError extends Error {}
 export interface Execution { runId: number; stepVersion: number; generation: number }
 export interface OperationProgress extends Record<string, unknown> {
   /** Unconsumed source pages survive switching the current request to enrichment. */
@@ -54,6 +56,7 @@ export async function createRun(tx: Tx, command: {
   let limits = command.limits ?? {};
   if (authorization?.intent.recoveryRunId !== undefined) {
     const [parent] = await tx`SELECT * FROM operation_runs WHERE id=${authorization.intent.recoveryRunId} AND actor=${command.actor} FOR UPDATE`;
+    if (parent && Object.hasOwn(parent.input, "assistantParentTurnId")) throw new StaleOperationError("请回到原助手会话核对或恢复此任务");
     const [receipt] = parent?.current_receipt_id ? await tx`SELECT status FROM receipts WHERE id=${parent.current_receipt_id}` : [];
     const [job] = parent?.job_id ? await tx`SELECT state FROM pgboss.job WHERE id=${parent.job_id}` : [];
     if (!parent || !["stopped", "needs_review"].includes(parent.status) || !parent.step_key.endsWith(".poll") || ["pending", "unknown"].includes(receipt?.status) || job?.state === "active") {
@@ -189,7 +192,7 @@ export function receiptOptions(execution: Execution): PaidRequestOptions {
       if (run.operation_key === "redfox.image.generate" && ["redfox.image.upload","redfox.image.submit"].includes(run.step_key)) assertKnownNonVideoCost("images",run.input.parameters as Record<string,unknown>);
       if (run.operation_key === "redfox.xhs_comments.submit" && run.step_key === "redfox.xhs_comments.submit") assertKnownNonVideoCost("xhs-comments",run.input.parameters as Record<string,unknown>);
     }
-    if (run.input.assistantParentTurnId && info.kind === "call") { const [parent] = await tx`UPDATE assistant_turns SET child_calls=child_calls+1 WHERE id=${String(run.input.assistantParentTurnId)} AND child_calls<20 RETURNING id`; if (!parent) throw new StaleOperationError("Assistant child request limit exhausted"); }
+    if (run.input.assistantParentTurnId && info.kind === "call") { const [parent] = await tx`UPDATE assistant_turns SET child_calls=child_calls+1 WHERE id=${String(run.input.assistantParentTurnId)} AND child_calls<20 RETURNING id`; if (!parent) throw new AssistantChildCallLimitError("Assistant child request limit exhausted"); }
     if (run.current_receipt_id !== null && run.current_receipt_id !== receiptId) throw new Error("Consume or retain current receipt before replacing it");
     await tx`UPDATE operation_runs SET current_receipt_id = ${receiptId}, updated_at = now() WHERE id = ${run.id}`;
   } };

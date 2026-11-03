@@ -1,3 +1,5 @@
+import { XHS_COVER_OPERATION } from "../providers/redfox/xhs-cover-contract.ts";
+import { WECHAT_HOT_OPERATION } from "../providers/redfox/wechat-hot-contract.ts";
 import { WanInput, WAN_GENERATE, WAN_MODEL } from "../providers/aliyun/wan-contract.ts";
 import { wanMedia } from "../providers/aliyun/wan-media.ts";
 import { z } from "zod";
@@ -33,6 +35,7 @@ export async function recoveryInput(actor: string, kind: keyof typeof recoveryKe
   const [run] = await sql`SELECT r.*,p.status AS receipt_status FROM operation_runs r LEFT JOIN receipts p ON p.id=r.current_receipt_id
     WHERE r.id=${id} AND r.actor=${actor} AND (r.operation_key=${recoveryKeys[kind]} OR (${kind} = 'videos/query' AND r.operation_key=${WAN_GENERATE}))`;
   if (!run) throw missing();
+  if (Object.hasOwn(run.input, "assistantParentTurnId")) throw new AccountError(409, "conflict", "请回到原助手会话核对或恢复此任务");
   if (!["stopped", "needs_review"].includes(run.status) || !run.step_key.endsWith(".poll") || ["pending", "unknown"].includes(run.receipt_status)) {
     throw new AccountError(409, "conflict", "此任务不能另行续查，请先查看现有结果或由管理员核对；结果保存失败请恢复原任务");
   }
@@ -62,7 +65,7 @@ export async function recoveryInput(actor: string, kind: keyof typeof recoveryKe
 }
 
 export interface NormalizedToolInput { intent: ToolCreditIntent; commandInput: Record<string, unknown> }
-export async function normalizeToolInput(actor: string, rawKind: unknown, raw: unknown): Promise<NormalizedToolInput> {
+export async function normalizeToolInput(actor: string, rawKind: unknown, raw: unknown, internal?: { assistantSearch: true }): Promise<NormalizedToolInput> {
   const kind = ToolKind.parse(rawKind);
   if (kind in recoveryKeys) {
     const { runId } = z.object({ runId: ToolId }).strict().parse(raw);
@@ -76,7 +79,7 @@ export async function normalizeToolInput(actor: string, rawKind: unknown, raw: u
       const request = z.object({ provider: z.enum(["redfox", "agentkey"]).default("redfox"), operationId: z.string().min(1), parameters: z.record(z.string(), z.unknown()), sourceResultId: ToolId.optional() }).strict().parse(raw);
       const catalog = await platformToolCatalog();
       const descriptor = catalog.find(operation => operation.id === request.operationId);
-      if (!descriptor || descriptor.platform === "redfox-account") throw new AccountError(403, "forbidden", "该接口不对前台用户开放");
+      if ((!descriptor && !(internal?.assistantSearch === true && request.provider === "redfox" && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(request.operationId))) || descriptor?.platform === "redfox-account") throw new AccountError(403, "forbidden", "该接口不对前台用户开放");
       if (request.sourceResultId !== undefined) await ownToolResult(actor, request.sourceResultId);
       provider = request.provider;
       const { provider: _, ...body } = request;

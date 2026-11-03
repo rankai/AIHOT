@@ -1,5 +1,5 @@
 /** Integer trial credits. No monetary exchange rate is implied. */
-export type ToolCreditKind = "assistant-turn" | "query" | "x-account" | "x-tweet" | "images" | "videos" | "ai-search" | "transcriptions" | "xhs-comments" | "media-upload"
+export type ToolCreditKind = "assistant-turn" | "assistant-vision" | "query" | "x-account" | "x-tweet" | "images" | "videos" | "ai-search" | "transcriptions" | "xhs-comments" | "media-upload"
   | "images/query" | "videos/query" | "ai-search/query" | "transcriptions/query" | "xhs-comments/query";
 
 /** Constructed from validated tool input by the server, never accepted as a client price. */
@@ -15,7 +15,7 @@ export interface ToolCreditIntent {
   recoveryRunId?: number;
 }
 
-export interface ToolAuthorization { quoteId: string; intent: ToolCreditIntent }
+export interface ToolAuthorization { quoteId: string; intent: ToolCreditIntent; taskAllocation?: { parentRunId: number; generation: number; callId: string } }
 export interface ToolPrice {
   id: string;
   kind: ToolCreditKind;
@@ -38,6 +38,7 @@ export interface ToolPriceInput extends Omit<ToolPrice, "id" | "version" | "upda
   reason: string;
 }
 export interface ToolQuote {
+  task?: { label: string; scope: string; items: { key: string; label: string; units: number; amount: number }[] };
   quoteId: string;
   amount: number;
   expiresAt: string;

@@ -1,10 +1,12 @@
+import { bindings, bindingScope, capabilities, actions, skillNames, currentSkillVersions } from "./bindings.ts";
+export { actions, skillNames, currentSkillVersions } from "./bindings.ts";
 import { readFile, realpath, lstat } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { sha256, stableJson } from "../lib/ids.ts";
 import { AccountError } from "../users/accounts.ts";
-import type { AssistantId, AssistantTaskHint } from "@aihot/contracts/assistant";
+import type { AssistantId, AssistantTaskHint, AssistantAdditionalFeeKind, AssistantSkillSelection } from "@aihot/contracts/assistant";
 const Id = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
 const Resource = z
   .object({
@@ -21,14 +23,14 @@ const Module = z
     version: z.string(),
     hash: z.string(),
     description: z.string(),
-    inputSchema: z.literal("writing-input@1"),
+    inputSchema: z.enum(["writing-input@1", "image-input@1"]),
     toolContractVersion: z.literal(1),
     outputSchemaVersion: z.literal(1),
-    deliveryContract: z.literal("writing-delivery@1"),
+    deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1"]),
     entryResource: Id,
     resources: z.array(Id),
-    tools: z.array(z.enum(["save_draft", "search_xhs_notes", "analyze_xhs_research"])),
-    outputKinds: z.array(z.enum(["text-draft", "xhs-note"])),
+    tools: z.array(z.enum(["save_draft", "save_xhs_cover_plan", "analyze_xhs_covers", "search_xhs_covers", "search_xhs_notes", "analyze_xhs_research", "search_wechat_articles", "analyze_wechat_research", "generate_image"])),
+    outputKinds: z.array(z.enum(["text-draft", "xhs-note", "image", "xhs-cover-plan"])),
     modelCapabilities: z.array(z.literal("text-tools")),
     fixtures: z.array(z.string()).min(3),
   })
@@ -46,7 +48,7 @@ export const Manifest = z
       z.object({ kind: z.literal("owned"), license: z.literal("MIT"), maintainer: z.string(), review: z.string() }).strict(),
       z.object({
         kind: z.literal("external"), url: z.string().url(), commit: z.string().regex(/^[a-f0-9]{40}$/),
-        license: z.literal("NOASSERTION"), usageBasis: z.literal("user-directed-local-evaluation"),
+        license: z.enum(["NOASSERTION", "MIT"]), usageBasis: z.literal("user-directed-local-evaluation"),
         maintainer: z.string(), review: z.string(),
       }).strict(),
     ]),
@@ -106,6 +108,16 @@ export async function validatePackage(root: string, raw: unknown): Promise<Loade
 
     if (!module.resources.includes(module.entryResource) || module.resources.some((id) => !texts.has(id)))
       throw catalogError("resource_missing", "模块资源不存在");
+    // These finite delivery contracts require real capabilities, independent of package identity.
+    const hasTools = (...tools: string[]) => tools.every(tool => (module.tools as string[]).includes(tool));
+    if ((hasTools("generate_image") && !module.outputKinds.includes("image")) || ((module.deliveryContract === "xhs-cover-delivery@1" || hasTools("save_xhs_cover_plan")) &&
+        (module.deliveryContract !== "xhs-cover-delivery@1" || !hasTools("search_xhs_covers","analyze_xhs_covers","save_xhs_cover_plan") || !module.outputKinds.includes("xhs-cover-plan"))) || ((module.deliveryContract === "wechat-research-writing@1" || module.tools.includes("analyze_wechat_research")) &&
+        (module.deliveryContract !== "wechat-research-writing@1" || !hasTools("search_wechat_articles", "analyze_wechat_research", "save_draft") || !module.outputKinds.includes("text-draft"))) ||
+      (module.deliveryContract === "image-delivery@1" &&
+        (!hasTools("generate_image") || !module.outputKinds.includes("image"))) ||
+      (module.tools.includes("analyze_xhs_research") &&
+        (module.deliveryContract !== "writing-delivery@1" || !hasTools("search_xhs_notes", "save_draft") || !module.outputKinds.includes("xhs-note"))))
+      throw catalogError("contract_mismatch", "交付合同缺少必要能力或作品类型");
     const { hash, ...body } = module;
     if (
       hash !==
@@ -130,9 +142,20 @@ const root = fileURLToPath(new URL("./skills/", import.meta.url));
 let cache: Promise<LoadedSkill[]> | undefined;
 export function catalog(): Promise<LoadedSkill[]> {
   return (cache ??= Promise.all(
-    ["general-writing", "xiaohongshu-creator", "xiaohongshu-creator-v2"].map(async (id) =>
-      validatePackage(resolve(root, id), JSON.parse(await readFile(resolve(root, id, "manifest.json"), "utf8"))),
-    ),
+    bindings.map(async (binding) => {
+      const loaded = await validatePackage(resolve(root, binding.directory), JSON.parse(await readFile(resolve(root, binding.directory, "manifest.json"), "utf8")));
+      if (loaded.manifest.skillId !== binding.skillId || loaded.manifest.version !== binding.version) throw catalogError("integrity_mismatch", "绑定版本不符");
+      for (const bound of binding.modules) {
+        const module = loaded.manifest.modules.find(m => m.moduleId === bound.moduleId);
+        if (!module || module.entryResource !== bound.entry || module.inputSchema !== bound.inputContract || module.deliveryContract !== bound.deliveryContract ||
+          stableJson(module.tools) !== stableJson(bound.capabilities.map(c => capabilities[c])) ||
+          stableJson(module.resources) !== stableJson([bound.entry, ...bound.references]) ||
+          bound.scriptBindings.some(script => !bound.capabilities.includes(script.capability) || !loaded.manifest.resources.some(r => r.path === script.path)))
+          throw catalogError("integrity_mismatch", "绑定与已验证模块合同不符");
+      }
+      if (binding.modules.length !== loaded.manifest.modules.length) throw catalogError("integrity_mismatch", "绑定模块缺失");
+      return loaded;
+    }),
   ));
 }
 export const profiles = {
@@ -140,19 +163,15 @@ export const profiles = {
     id: "creative",
     version: "1",
     name: "创作助手",
-    welcome: "提供材料，起草、列提纲或改写；也可选择小红书创作。",
-    skills: ["general-writing", "xiaohongshu-creator"],
-    modules: { "general-writing": ["write"], "xiaohongshu-creator": ["M1", "M2"] },
-    tools: ["save_draft", "search_xhs_notes", "analyze_xhs_research"],
+    welcome: "提供材料，起草、列提纲或改写；也可选择小红书或公众号创作。",
+    ...bindingScope("creative"),
   },
   xiaohongshu: {
     id: "xiaohongshu",
     version: "1",
     name: "小红书助手",
     welcome: "根据你的材料写笔记或改写原稿。创作先检索真实笔记并分析规律；改写使用原稿。",
-    skills: ["xiaohongshu-creator"],
-    modules: { "xiaohongshu-creator": ["M1", "M2"] },
-    tools: ["save_draft", "search_xhs_notes", "analyze_xhs_research"],
+    ...bindingScope("xiaohongshu"),
   },
 } as const;
 export function profile(id: unknown) {
@@ -162,36 +181,40 @@ export function profile(id: unknown) {
 export function taskHint(id: AssistantId, raw: unknown): AssistantTaskHint | null {
   if (raw === null || raw === undefined) return null;
   const hint = z
-    .object({ actionId: z.enum(["general-writing", "xiaohongshu-write", "xiaohongshu-rewrite"]) })
+    .object({ actionId: z.string().refine(value => actions.some(a => a.actionId === value)) })
     .strict()
     .parse(raw);
-  if (id === "xiaohongshu" && hint.actionId === "general-writing")
+  if (!profileActions(id).some(a => a.actionId === hint.actionId))
     throw catalogError("scope_denied", "当前助手不支持此动作");
   return hint;
 }
-/** Code-owned bindings shared by public options and model scope. */
-export const actions = [
-  { actionId: "general-writing", label: "通用文章草稿", skillId: "general-writing", moduleId: "write" },
-  { actionId: "xiaohongshu-write", label: "小红书创作", skillId: "xiaohongshu-creator", moduleId: "M1" },
-  { actionId: "xiaohongshu-rewrite", label: "小红书改写", skillId: "xiaohongshu-creator", moduleId: "M2" },
-] as const;
-export const skillNames: Record<string, string> = { "general-writing": "通用创作", "xiaohongshu-creator": "小红书创作" };
-export const currentSkillVersions: Record<string, string> = { "general-writing": "2", "xiaohongshu-creator": "3" };
+export const SkillSelection = z.union([
+  z.object({ skillId: Id }).strict(), z.object({ actionId: Id }).strict(),
+]);
+export function skillSelection(id: AssistantId, raw: unknown): AssistantSkillSelection | null {
+  if (raw === undefined || raw === null) return null;
+  const selected = SkillSelection.parse(raw);
+  if ("actionId" in selected) taskHint(id, selected);
+  else if (!(profile(id).skills as readonly string[]).includes(selected.skillId))
+    throw catalogError("scope_denied", "当前助手不支持此技能");
+  return selected;
+}
 export const registeredSkillIds = Object.keys(currentSkillVersions).sort();
 export function profileActions(id: AssistantId) {
-  return actions.filter(a => (profile(id).skills as readonly string[]).includes(a.skillId));
+  return actions.filter(a => a.profiles.includes(id));
 }
-export async function candidates(id: AssistantId, selection?: AssistantTaskHint | null, versions = currentSkillVersions): Promise<Candidate[]> {
+export async function candidates(id: AssistantId, selection?: AssistantSkillSelection | null, versions = currentSkillVersions): Promise<Candidate[]> {
   const p = profile(id);
-  const selected = taskHint(id, selection);
-  const binding = actions.find(a => a.actionId === selected?.actionId);
+  const selected = skillSelection(id, selection);
+  const binding = selected && "actionId" in selected ? actions.find(a => a.actionId === selected.actionId) : null;
   return (await catalog())
     .filter((s) => (p.skills as readonly string[]).includes(s.manifest.skillId))
     .filter((s) => s.manifest.version === versions[s.manifest.skillId])
+    .filter((s) => !selected || !("skillId" in selected) || s.manifest.skillId === selected.skillId)
     .flatMap(({ manifest: s }) =>
       s.modules
         .filter((m) => ((p.modules as Record<string, readonly string[]>)[s.skillId] ?? []).includes(m.moduleId))
-        .filter((m) => !selected || (binding?.skillId === s.skillId && binding.moduleId === m.moduleId))
+        .filter((m) => !selected || "skillId" in selected || (binding?.skillId === s.skillId && binding.moduleId === m.moduleId))
         .map((m) => ({
           skillId: s.skillId,
           version: s.version,
@@ -222,4 +245,15 @@ export async function resolveCandidate(
   );
   if (!skill || !module) throw catalogError("version_unavailable", "原技能版本不可用，请核对");
   return { candidate, skill, module };
+}
+/** Fee disclosure follows the admitted immutable modules, without predicting tool use. */
+export async function additionalFeeKinds(candidates: Candidate[]): Promise<AssistantAdditionalFeeKind[]> {
+  const kinds = new Set<AssistantAdditionalFeeKind>();
+  for (const candidate of candidates) {
+    const { module } = await resolveCandidate([candidate], candidate.skillId, candidate.moduleId);
+    if (module.tools.some(tool => tool === "search_xhs_covers" || tool === "search_xhs_notes" || tool === "search_wechat_articles")) kinds.add("search");
+    if (module.tools.includes("analyze_xhs_covers")) kinds.add("vision");
+    if (module.tools.includes("generate_image")) kinds.add("image");
+  }
+  return (["search", "image", "vision"] as const).filter(kind => kinds.has(kind));
 }
