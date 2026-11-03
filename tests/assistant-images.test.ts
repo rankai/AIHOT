@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -16,7 +17,7 @@ import { controlTurn } from "@aihot/backend/assistant/controls";
 import { deliverImage } from "@aihot/backend/assistant/image-delivery";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { saveToolPrice, grantCredits } from "@aihot/backend/users/credits";
-import { createSession, quoteTurn, submitTurn, sessionSnapshot, editArtifact, snapshotInput, assistantOptions } from "@aihot/backend/assistant/sessions";
+import { createSession, quoteTurn as currentQuoteTurn, sessionSnapshot, editArtifact, snapshotInput, assistantOptions } from "@aihot/backend/assistant/sessions";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { recoverAssistantChildren } from "@aihot/backend/assistant/execution";
 import { readSkillPolicies, updateAssistantSkill } from "@aihot/backend/assistant/skill-policy";
@@ -54,7 +55,7 @@ test("image ratio priority uses validated specs and rejects unsupported or confl
    assert.throws(()=>resolveImageSize(prompt,"1:1",specs),DraftArgumentsError);
  assert.equal(ImageProposal.parse({activationId:randomUUID(),title:"猫",prompt:directPrompt}).prompt,directPrompt);
 });
-test("image approval, local persistence, idempotent delivery, stop and unknown recovery",async t=>{
+test("historical image v1 approval, local persistence, idempotent delivery, stop and unknown recovery",async t=>{
  const [db]=await sql`SELECT current_database() name,inet_server_port() port`;assertConfiguredTestDatabase(db!.name,db!.port);
  const services=["assistant.text","redfox.image","redfox.poll"], restore=await allowTestBudgetScope(services,"member");
  const oldDir=config.dataDir,oldPrivate=config.allowPrivateNetworkFetch,dir=await mkdtemp(join(tmpdir(),"assistant-images-"));config.dataDir=dir;config.allowPrivateNetworkFetch=true;
@@ -93,7 +94,7 @@ test("image approval, local persistence, idempotent delivery, stop and unknown r
   for(const id of internalIds){
    await assert.rejects(createSession(user.id,{assistantId:"creative",initialRequest:{message:directPrompt,skillSelection:{actionId:id}}},randomUUID()),/暂停/);
    const raw={message:directPrompt,expectedRevision:1,skillSelection:{actionId:id}};
-   await assert.rejects(quoteTurn(user.id,session.sessionId,raw),/暂停/);
+   await assert.rejects(currentQuoteTurn(user.id,session.sessionId,raw),/暂停/);
    await assert.rejects(enqueueMessage(user.id,session.sessionId,raw,randomUUID()),/暂停/);
   }
   assert.deepEqual(await counts(),before);
@@ -109,6 +110,9 @@ test("image approval, local persistence, idempotent delivery, stop and unknown r
   if(acceptedQueue){
    await setImageEnabled(id,true);
    const entry=await enqueueMessage(userId,session.sessionId,{...raw,taskHint:{actionId:id},inputIds:[],artifactVersions:[]},randomUUID()),entryId=entry.entryId;
+   const {candidates}=await import('@aihot/backend/assistant/catalog');
+   const legacy=await candidates('creative',{actionId:id},{'image-generator':'1','claude-image-generation':'1','ai-image-generator':'1'});
+   await sql`UPDATE assistant_message_queue SET admission_snapshot=${sql.json({version:1,candidates:legacy,policies:[],unavailableSkills:[]} as never)} WHERE id=${entryId}`;
    await setImageEnabled(id,false);
    const refreshed=await refreshQueuedQuote(userId,session.sessionId,entryId);assert.deepEqual(refreshed.quote.additionalFeeKinds,["image"]);
    const accepted=await approveQueuedMessage(userId,session.sessionId,entryId,{quoteId:refreshed.quote.quoteId});
@@ -228,3 +232,5 @@ test("image approval, local persistence, idempotent delivery, stop and unknown r
   await modelStub.close();await new Promise<void>(r=>server.close(()=>r()));await restore();await stopBoss();await closeDb();await rm(dir,{recursive:true,force:true});
  }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"image-generator": "1", "claude-image-generation": "1", "ai-image-generator": "1"});

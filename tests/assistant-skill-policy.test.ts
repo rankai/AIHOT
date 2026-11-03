@@ -204,8 +204,11 @@ test("skill policy admission, administration, concurrency and grandfathered work
       const [run] = await sql`SELECT generation FROM operation_runs WHERE id=${accepted.runId}`; await controlTurn(user.id, f.sessionId, accepted.turnId, "stop", { generation: run.generation });
       await change(true);
     });
-    await t.test("accepted queue continues through load, question, answer, stop/resume and saved artifact after closure", async () => {
+    await t.test("historical accepted general-writing v2 queue continues through closure and stop/resume", async () => {
       const f = await fresh(), key = randomUUID(), queued = await enqueueMessage(user.id, f.sessionId, f.input, key);
+      const {candidates}=await import('@aihot/backend/assistant/catalog');
+      const legacy=await candidates('creative',f.input.skillSelection,{'general-writing':'2'});
+      await sql`UPDATE assistant_message_queue SET admission_snapshot=${sql.json({version:1,candidates:legacy,policies:[],unavailableSkills:[]} as never)} WHERE id=${queued.entryId}`;
       await change(false); assert.equal((await enqueueMessage(user.id, f.sessionId, f.input, key)).entryId, queued.entryId);
       const quote = await refreshQueuedQuote(user.id, f.sessionId, queued.entryId);
       const submitted = await approveQueuedMessage(user.id, f.sessionId, queued.entryId, { quoteId: quote.quote.quoteId });
@@ -224,6 +227,14 @@ test("skill policy admission, administration, concurrency and grandfathered work
       await editArtifact(user.id, f.sessionId, artifact.artifactId, { baseVersion: artifact.version, kind: artifact.kind, content: { ...artifact.content, title: "手工修改" } });
       assert.equal((await artifactVersions(user.id, f.sessionId, artifact.artifactId)).versions.length, 2); assert.equal(await charges(), count);
       await change(true);
+    });
+    await t.test("unconfirmed current task queue cannot execute after its skill closes",async()=>{
+      const f=await fresh(),before=await charges(),entry=await enqueueMessage(user.id,f.sessionId,f.input,randomUUID());
+      const quote=await refreshQueuedQuote(user.id,f.sessionId,entry.entryId);assert(quote.quote.task);
+      await change(false);
+      await assert.rejects(refreshQueuedQuote(user.id,f.sessionId,entry.entryId),/暂停/);
+      const result=await approveQueuedMessage(user.id,f.sessionId,entry.entryId,{quoteId:quote.quote.quoteId});assert('requote' in result);assert.equal(await charges(),before);
+      await cancelQueuedMessage(user.id,f.sessionId,entry.entryId);await change(true);
     });
     await t.test("migration-marked queue freezes explicit legacy scope once, even after closing", async () => {
       const f = await fresh();

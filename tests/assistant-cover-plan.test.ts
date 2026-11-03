@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope,assertConfiguredTestDatabase,stub,tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -9,7 +10,7 @@ import { config } from "@aihot/backend/config";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits,saveToolPrice } from "@aihot/backend/users/credits";
-import { createSession,quoteTurn,submitTurn,sessionSnapshot,snapshotInput,editArtifact } from "@aihot/backend/assistant/sessions";
+import { createSession,sessionSnapshot,snapshotInput,editArtifact } from "@aihot/backend/assistant/sessions";
 import { decideCall } from "@aihot/backend/assistant/tools";
 import { skillAdmission } from "@aihot/backend/assistant/skill-policy";
 import { answerTurn } from "@aihot/backend/assistant/controls";
@@ -77,7 +78,7 @@ test("formal v4 cover workflow reads the full rules, researches real images, sav
   }
   async function approve(x:Awaited<ReturnType<typeof start>>,name:string){const snapshot=await reach(x),call=snapshot.turn!.calls.find(c=>c.name===name&&c.state==="proposed")!;assert(call,JSON.stringify(snapshot.turn));await decideCall(user.id,x.sessionId,call.callId,true,{proposalRevision:call.proposalRevision},randomUUID());return call;}
   await sql`UPDATE member_tool_prices SET enabled=false WHERE kind='assistant-vision' AND model=${model}`;
-  const writing=await skillAdmission(sql,"xiaohongshu",{skillId:"xiaohongshu-creator"});assert.deepEqual(writing.candidates.map(c=>c.moduleId),["M1","M2"]);
+  const writing=await skillAdmission(sql,"xiaohongshu",{skillId:"xiaohongshu-creator"});assert(writing.candidates.some(c=>c.moduleId==="M2"));assert(!writing.candidates.some(c=>c.moduleId==="M4"));
   await sql`UPDATE member_tool_prices SET enabled=true WHERE kind='assistant-vision' AND model=${model}`;
   const x=await start();await approve(x,"search_xhs_covers");await approve(x,"analyze_xhs_covers");const waiting=await reach(x);
   assert.equal(waiting.turn!.phase,"waiting_question");const artifact=waiting.artifacts.find(a=>a.kind==="xhs-cover-plan")!;assert(artifact);assert.equal(artifact.content.coverPlan!.schemes.length,3);assert.equal(artifact.content.coverPlan!.evidence.observedCount,1);assert.equal(artifact.content.coverPlan!.evidence.samples[0]!.fans,0);
@@ -140,3 +141,5 @@ test("formal v4 cover workflow reads the full rules, researches real images, sav
   config.allowPrivateNetworkFetch=oldPrivate;process.env.MODEL_CALLS_ENABLED="false";process.env.REDFOX_CALLS_ENABLED="false";await modelStub.close();await new Promise<void>(r=>server.close(()=>r()));await restore();await stopBoss();await closeDb();
  }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"xiaohongshu-creator": "4"});

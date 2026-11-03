@@ -1,4 +1,4 @@
-import { catalog } from "@aihot/backend/assistant/catalog";
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -8,7 +8,7 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
-import { createSession, quoteTurn, submitTurn, sessionSnapshot, editArtifact, artifactVersions } from "@aihot/backend/assistant/sessions";
+import { createSession, sessionSnapshot, editArtifact, artifactVersions } from "@aihot/backend/assistant/sessions";
 import { saveArtifact } from "@aihot/backend/assistant/store";
 import { sourceCandidates } from "@aihot/backend/assistant/tools";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
@@ -33,7 +33,7 @@ const completion = (name: string, input: unknown) => ({
   }, finish_reason: "tool_calls" }],
 });
 
-test("assistant revisions preserve exact-version research sources without another search", async (t) => {
+test("historical xhs v2 revisions preserve exact-version research sources without another search", async (t) => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db.name, db.port);
   const restoreBudgetScope = await allowTestBudgetScope(["assistant.text"], "member");
@@ -78,16 +78,11 @@ test("assistant revisions preserve exact-version research sources without anothe
         expectedSources = explicitOldVersion ? original : newer;
         const reference = { artifactId: draftId, version: 1 };
         const input = {
-          message: "只修改这份稿件，保留已有研究链接，不重新检索", expectedRevision: 1,
+          message: "只修改这份稿件，保留已有研究链接，不重新检索", expectedRevision: 1, skillSelection:{actionId:"xiaohongshu-write"},
           ...(explicitOldVersion ? { artifactVersions: [reference, reference] } : {}),
         };
         const quote = await quoteTurn(user.id, sessionId, input);
         const turn = await submitTurn(user.id, sessionId, { ...input, quoteId: quote.quoteId }, randomUUID());
-        // Historical v2 source propagation remains supported; v3 requires verified analysis, tested separately.
-        const old = (await catalog()).find((p) => p.manifest.skillId === "xiaohongshu-creator" && p.manifest.version === "2")!.manifest;
-        const frozen = old.modules.map((m) => ({ skillId: old.skillId, version: old.version, packageHash: old.packageHash,
-          moduleId: m.moduleId, moduleVersion: m.version, moduleHash: m.hash, description: m.description }));
-        await sql`UPDATE assistant_turns SET snapshot=jsonb_set(snapshot,'{candidates}',${sql.json(frozen)}) WHERE id=${turn.turnId}`;
 
         const [savedTurn] = await sql`SELECT * FROM assistant_turns WHERE id=${turn.turnId}`;
         const selected = savedTurn.snapshot.selected;
@@ -159,3 +154,5 @@ test("assistant revisions preserve exact-version research sources without anothe
     await closeDb();
   }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"xiaohongshu-creator":"2"});

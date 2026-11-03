@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, symlink, cp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { catalog, candidates, resolveCandidate, validatePackage, taskHint, additionalFeeKinds } from "@aihot/backend/assistant/catalog";
-import { actions as boundActions, skillNames } from "@aihot/backend/assistant/bindings";
+import { actions as boundActions, skillNames, bindings } from "@aihot/backend/assistant/bindings";
 import { sha256, stableJson } from "@aihot/backend/lib/ids";
 test("assistant fee disclosures follow only the admitted immutable module capabilities", async () => {
   for (const [actionId, expected] of [
@@ -20,7 +20,7 @@ test("assistant fee disclosures follow only the admitted immutable module capabi
 });
 test("assistant catalogs bind package namespace, contracts, fixtures and profile scope", async () => {
   const packages = await catalog();
-  assert.equal(packages.length, 8);
+  assert.deepEqual(packages.map(p=>`${p.manifest.skillId}@${p.manifest.version}`).sort(), bindings.map(b=>`${b.skillId}@${b.version}`).sort());
   for (const p of packages)
     for (const m of p.manifest.modules)
       for (const ref of m.fixtures) {
@@ -53,12 +53,12 @@ test("assistant catalogs bind package namespace, contracts, fixtures and profile
     ["M1", "## 4. M1 ", "## 5. M2 ", "hot-article-format"],
     ["M2", "## 5. M2 ", "## 6. M3 ", "platform-rules"],
   ]) {
-    const resolved = await resolveCandidate(await candidates("xiaohongshu"), "xiaohongshu-creator", id!);
+    const resolved = await resolveCandidate(await candidates("xiaohongshu",null,{"xiaohongshu-creator":"4"}), "xiaohongshu-creator", id!);
     const loadedEntry = resolved.skill.texts.get(resolved.module.entryResource)!;
     assert(loadedEntry.includes(globalRules));
     assert(loadedEntry.includes(originalSkill.slice(originalSkill.indexOf(start!), originalSkill.indexOf(end!))));
     assert(loadedEntry.includes(redfox.texts.get(reference!)!), `${id} inlines its complete upstream reference`);
-    if (id === "M1") assert(loadedEntry.includes(redfox.texts.get("adaptation")!));
+    if (id === "M1") assert(loadedEntry.includes(resolved.skill.texts.get("adaptation")!));
     assert(!resolved.module.resources.includes("upstream-skill"), "archived full skill does not expose M3–M5");
     assert(!loadedEntry.includes(id === "M1" ? "## 5. M2 文案改写" : "## 4. M1 笔记生成"));
   }

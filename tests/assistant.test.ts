@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -8,8 +9,7 @@ import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
 import {
   createSession,
-  quoteTurn,
-  submitTurn,
+  quoteTurn as currentQuoteTurn,
   sessionSnapshot,
   editArtifact,
   artifactVersions,
@@ -19,6 +19,7 @@ import { executeOperationStep } from "@aihot/backend/providers/operations/execut
 import { modelPolicy, modelCredential } from "@aihot/backend/assistant/config";
 import { responseUsage } from "@aihot/backend/assistant/model";
 import { switchModel } from "@aihot/backend/admin/models";
+import { bindings } from "@aihot/backend/assistant/bindings";
 import { catalog } from "@aihot/backend/assistant/catalog";
 const complete = (name: string, input: unknown) => ({
   id: "completion",
@@ -38,12 +39,13 @@ const complete = (name: string, input: unknown) => ({
   ],
   usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 },
 });
-test("assistant paid turn preserves local activation, artifacts, ownership and handoff replay", async (t) => {
+test("historical multi-module authorization preserves local activation, artifacts, ownership and handoff replay", async (t) => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db.name, db.port);
   const restoreBudgetScope = await allowTestBudgetScope(["assistant.text"], "member");
   const unique = tag(),
     model = `fixture-${unique}`;
+  const priorPolicies=await sql`SELECT key,value FROM settings WHERE key IN ('assistant.skills.general-writing','assistant.skills.xiaohongshu-creator')`;
   let inputSource = "current-message";
   const supplier = await stub((_hit, req) => {
     const body = JSON.parse(req.body);
@@ -72,6 +74,7 @@ test("assistant paid turn preserves local activation, artifacts, ownership and h
     });
   });
   try {
+    for(const skill of ['general-writing','xiaohongshu-creator'])await sql`INSERT INTO settings(key,value,updated_by) VALUES (${`assistant.skills.${skill}`},'{"acceptingNew":true,"revision":1}','test') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`;
     Object.assign(process.env, {
       ASSISTANT_ENABLED: "true",
       ASSISTANT_CALLS_ENABLED: "true",
@@ -124,8 +127,8 @@ test("assistant paid turn preserves local activation, artifacts, ownership and h
     );
     await grantCredits(a.id, { amount: 100, reason: "Assistant fixture credits" }, "test", randomUUID());
     const unpricedSession = await createSession(a.id, { assistantId: "creative" }, randomUUID());
-    await assert.rejects(() => quoteTurn(a.id, unpricedSession.sessionId, { message: "尚未定价", expectedRevision: 1 }),
-      (error: any) => error.code === "tool_unpriced");
+    await assert.rejects(() => currentQuoteTurn(a.id, unpricedSession.sessionId, { message: "尚未定价", expectedRevision: 1 }),
+      (error: any) => error.code === "skill_unavailable");
     assert.equal(supplier.hits(), 0);
     await saveToolPrice(
       {
@@ -210,6 +213,9 @@ test("assistant paid turn preserves local activation, artifacts, ownership and h
         version: artifact.version,
         brief: "换成小红书语气",
       };
+    // Handoff is new admission: restore a currently priced model after proving frozen execution.
+    process.env.LLM_MODEL=model;
+    process.env.LLM_EXTRA_JSON=JSON.stringify({enable_thinking:false,top_p:0.9});
     const target = await handoff(a.id, sessionId, request, hkey);
     assert.deepEqual(await handoff(a.id, sessionId, request, hkey), target);
     assert.equal((await sessionSnapshot(a.id, target.targetSessionId)).inputs.length, 1);
@@ -220,12 +226,16 @@ test("assistant paid turn preserves local activation, artifacts, ownership and h
       (e: any) => e.statusCode === 410,
     );
     const packages = await catalog();
-    assert.equal(packages.length, 3);
-    assert.deepEqual(packages.filter(p => p.manifest.skillId === "xiaohongshu-creator").map(p => p.manifest.version).sort(), ["2", "3"]);
+    assert.equal(packages.length, bindings.length);
+    assert.deepEqual(packages.filter(p => p.manifest.skillId === "xiaohongshu-creator").map(p => p.manifest.version).sort(), bindings.filter(b=>b.skillId==="xiaohongshu-creator").map(b=>b.version).sort());
+    for(const version of ["2","3"])assert(packages.some(p=>p.manifest.skillId==="xiaohongshu-creator"&&p.manifest.version===version),"historical snapshots remain available");
   } finally {
+    for(const skill of ['general-writing','xiaohongshu-creator']){const key=`assistant.skills.${skill}`,old=priorPolicies.find(p=>p.key===key);if(old)await sql`UPDATE settings SET value=${sql.json(old.value)} WHERE key=${key}`;else await sql`DELETE FROM settings WHERE key=${key}`;}
     await supplier.close();
     await stopBoss();
     await restoreBudgetScope();
     await closeDb();
   }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"general-writing":"2","xiaohongshu-creator":"3","wechat-write":"1","image-generator":"1","claude-image-generation":"1","ai-image-generator":"1"});

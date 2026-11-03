@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -6,12 +7,12 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, quoteTool, reconcileCreditCharge, saveToolPrice } from "@aihot/backend/users/credits";
-import { createSession, quoteTurn, submitTurn, sessionSnapshot } from "@aihot/backend/assistant/sessions";
+import { createSession,   sessionSnapshot } from "@aihot/backend/assistant/sessions";
 import { controlTurn } from "@aihot/backend/assistant/controls";
 import { controlOperation, operationDetail } from "@aihot/backend/providers/operations/read";
 import { advanceRun, createRun, saveResult } from "@aihot/backend/providers/operations/store";
 
-test("assistant resume admits the complete group and preserves its financial and waiting boundaries", async (t) => {
+test("historical general-writing v2 resume admits the complete group and preserves its financial and waiting boundaries", async (t) => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db.name, db.port);
   const restoreBudgetScope = await allowTestBudgetScope(["assistant.text"], "member");
@@ -57,7 +58,7 @@ test("assistant resume admits the complete group and preserves its financial and
     const start = async (user?: Awaited<ReturnType<typeof member>>) => {
       user ??= await member();
       const { sessionId } = await createSession(user.id, { assistantId: "creative" }, randomUUID());
-      const input = { message: "基于已确认材料写稿", expectedRevision: 1 };
+      const input = { message: "基于已确认材料写稿", expectedRevision: 1, skillSelection: {actionId:"general-writing"} };
       const q = await quoteTurn(user.id, sessionId, input);
       return {
         user,
@@ -297,3 +298,5 @@ test("assistant resume admits the complete group and preserves its financial and
     await closeDb();
   }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"general-writing": "2"});

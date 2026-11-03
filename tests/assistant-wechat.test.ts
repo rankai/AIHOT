@@ -1,3 +1,4 @@
+import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,12 +15,12 @@ import { createSynchronousQuery } from "@aihot/backend/providers/redfox/synchron
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { resumeRun } from "@aihot/backend/providers/operations/store";
 import { catalog, candidates, taskHint } from "@aihot/backend/assistant/catalog";
-import { Binding } from "@aihot/backend/assistant/bindings";
+import { Binding, currentSkillVersions } from "@aihot/backend/assistant/bindings";
 import { normalizeToolInput } from "@aihot/backend/users/tool-input";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { saveToolPrice, grantCredits } from "@aihot/backend/users/credits";
 import { assertMemberCostEligible } from "@aihot/backend/users/member-pricing";
-import { createSession, quoteTurn, submitTurn, sessionSnapshot } from "@aihot/backend/assistant/sessions";
+import { createSession, quoteTurn as currentQuoteTurn, submitTurn as currentSubmitTurn, sessionSnapshot } from "@aihot/backend/assistant/sessions";
 import { decideCall, localCall, activeTools, autoApproveSearch } from "@aihot/backend/assistant/tools";
 import { controlTurn } from "@aihot/backend/assistant/controls";
 import { expireOperationResults } from "@aihot/backend/operations/result-retention";
@@ -35,7 +36,7 @@ const draft = (ids:string[]) => ({title:"职场成长，从观察开始",body:"�
 test("fixed bindings preserve old identities, original six files and platform boundaries", async () => {
  const packages = await catalog(), current=await candidates("creative"), xhs=await candidates("xiaohongshu");
  assert.equal(current.filter(c=>c.skillId==="wechat-write").length,1);
- assert(xhs.every(c=>c.skillId==="xiaohongshu-creator"&&c.version==="4"));
+ assert(xhs.every(c=>c.skillId==="xiaohongshu-creator"&&c.version===currentSkillVersions["xiaohongshu-creator"]));
  assert.equal((await candidates("xiaohongshu",null,{"xiaohongshu-creator":"2"})).length,2);
  assert.throws(()=>taskHint("xiaohongshu",{actionId:"wechat-write"}));
  const pack=packages.find(p=>p.manifest.skillId==="wechat-write")!;
@@ -71,7 +72,7 @@ test("analysis preserves the persisted excerpt when query metadata crosses the t
  const result=await analyzeWechatResearch(tx,{id:randomUUID()},randomUUID(),{activationId,topic:"职场",samples:ids.map(sourceId=>({sourceId,relevance:"可见摘要与主题相关"})),titlePattern:p,openingPattern:p,structurePattern:p,languagePattern:p,interactionPattern:p,keywordPattern:p,applicationPlan:"使用场景结构",limitations:[]});
  for(const sample of result.samples){const shown=persisted.results.find(r=>`search:${r.id}`===sample.sourceId)!;assert.equal(sample.text,shown.text);assert.equal(sample.textTruncated,shown.textTruncated);}
 });
-test("local stub: manual quote → one HTTP → real samples → analysis → text draft, with fail-closed/replay",async t=>{
+test("wechat v1 accepted authorization recovery plus current single-task research delivery",async t=>{
  const [db]=await sql`SELECT current_database() name,inet_server_port() port`;assertConfiguredTestDatabase(db.name,db.port);
  const restore=await allowTestBudgetScope(["assistant.text","redfox.query"],"member");
  const previous=config.allowPrivateNetworkFetch, model=`wechat-${tag()}`;
@@ -132,7 +133,7 @@ test("local stub: manual quote → one HTTP → real samples → analysis → te
   assert(!(await sql.begin(tx=>activeTools(tx,frozen!))).tools.save_draft);
   await assert.rejects(sql.begin(tx=>localCall(tx,frozen!,{request_snapshot:{tools:{save_draft:{}}}},{name:"save_draft",input:{activationId:activation!.id,kind:"text-draft",baseVersion:0,content:draft(["current-message"]),researchApplication:{analysisCallId:randomUUID(),explanation:"伪造分析"}}})),/真实检索/);
   await updateAssistantSkill("wechat-write",{acceptingNew:false,expectedRevision:1,reason:"Fixture stop new admission"},"test");
-  await assert.rejects(quoteTurn(user.id,session.sessionId,raw));
+  await assert.rejects(currentQuoteTurn(user.id,session.sessionId,raw));
   await decideCall(user.id,session.sessionId,call.callId,true,{proposalRevision:1},randomUUID());
   await decideCall(user.id,session.sessionId,call.callId,true,{proposalRevision:1},randomUUID());
   const [child]=await sql`SELECT child_run_id FROM assistant_tool_calls WHERE id=${call.callId}`;
@@ -183,8 +184,8 @@ test("local stub: manual quote → one HTTP → real samples → analysis → te
    const fresh=await createSession(user.id,{assistantId:"creative"},randomUUID());
    const raw={message:"写公众号文章并补充一次研究。"+sentence.repeat(40),expectedRevision:1,skillSelection:{actionId:"wechat-write"}};
    const over={...raw,message:raw.message+sentence};
-   await assert.rejects(quoteTurn(user.id,fresh.sessionId,over),/减少材料.*明确选择/);
-   for(const actionId of ["general-writing","xiaohongshu-rewrite"]) assert((await quoteTurn(user.id,fresh.sessionId,{...over,skillSelection:{actionId}})).quoteId);
+   await assert.rejects(currentQuoteTurn(user.id,fresh.sessionId,over),/减少材料.*明确选择/);
+   for(const actionId of ["general-writing","xiaohongshu-rewrite"]) assert((await currentQuoteTurn(user.id,fresh.sessionId,{...over,skillSelection:{actionId}})).quoteId);
    assert.equal((await sql`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${fresh.sessionId}`)[0]!.n,0,"admission checks and quotes create no paid turn");
    const q=await quoteTurn(user.id,fresh.sessionId,raw),next=await submitTurn(user.id,fresh.sessionId,{...raw,quoteId:q.quoteId},randomUUID());
    for(let query=0;query<2;query++){
@@ -243,6 +244,23 @@ test("local stub: manual quote → one HTTP → real samples → analysis → te
     for(const attempt of attempts)await sql`UPDATE receipt_attempts SET response=${attempt.response===null?null:sql.json(attempt.response)} WHERE id=${attempt.id}`;
    }
   });
+  await t.test("current wechat task researches, analyzes and delivers with one frozen charge",async()=>{
+   mode='normal';invalidSearch=2;invalidDraft=false;const beforeCurrentQueries=hits;
+   await sql`UPDATE operation_runs SET created_at=now()-interval '2 minutes' WHERE actor=${`user:${user.id}`}`;
+   const fresh=await createSession(user.id,{assistantId:'creative'},randomUUID()),raw={message:'研究职场成长并写公众号文章',expectedRevision:1,skillSelection:{actionId:'wechat-write'}};
+   const q=await currentQuoteTurn(user.id,fresh.sessionId,raw);assert(q.task);assert.equal(q.amount,13);
+   const run=await currentSubmitTurn(user.id,fresh.sessionId,{...raw,quoteId:q.quoteId},randomUUID());
+   let result:any;
+   for(let i=0;i<30;i++){
+    result=await sessionSnapshot(user.id,fresh.sessionId);if(result.turn.status==='completed')break;
+    assert.notEqual(result.turn.phase,'waiting_approval');assert.notEqual(result.turn.status,'needs_review');
+    const call=result.turn.calls.find((c:any)=>c.state==='running');const [child]=call?await sql`SELECT status FROM operation_runs WHERE id=${call.childRunId}`:[];
+    await advance(child&&['active','waiting'].includes(child.status)?call.childRunId:run.runId);
+   }
+   assert.equal(result.turn.status,'completed');assert.equal(result.artifacts.length,1);assert.equal(hits,beforeCurrentQueries+1);
+   const [charge]=await sql`SELECT id,amount,consumed,released FROM member_credit_charges WHERE root_run_id=${run.runId}`;assert.deepEqual([charge!.amount,charge!.consumed,charge!.released],[13,10,3]);
+   const [ledger]=await sql`SELECT count(*)::int n FROM member_credit_entries WHERE charge_id=${charge!.id} AND kind='reserve'`;assert.equal(ledger!.n,1);
+  });
  }finally{
   if(beforePolicy)await sql`UPDATE settings SET value=${sql.json(beforePolicy.value)} WHERE key='assistant.skills.wechat-write'`;else await sql`DELETE FROM settings WHERE key='assistant.skills.wechat-write'`;
   await sql`DELETE FROM service_prices WHERE service='redfox.query' AND model=${operationId}`;
@@ -252,3 +270,5 @@ test("local stub: manual quote → one HTTP → real samples → analysis → te
   await supplier.close();await new Promise<void>(resolve=>server.close(()=>resolve()));await restore();await stopBoss();await closeDb();
  }
 });
+
+const quoteTurn=(userId:number,sessionId:string,raw:unknown)=>quoteLegacyTurn(userId,sessionId,raw,{"wechat-write":"1"});
