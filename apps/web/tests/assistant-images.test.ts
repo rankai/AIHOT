@@ -10,7 +10,7 @@ import {renderToStaticMarkup} from "react-dom/server";
 import {rolldown} from "rolldown";
 test("image artifact renders responsive local image, prompt, alt and download without editing controls",async()=>{
  const directory=await mkdtemp(join(tmpdir(),"assistant-image-render-")),require=createRequire(import.meta.url);
- const bundle=await rolldown({input:new URL("../app/features/assistant/artifacts.tsx",import.meta.url).pathname,plugins:[{name:"runtime",resolveId(id){if(["react","react/jsx-runtime","react-router","motion/react"].includes(id))return {id:require.resolve(id),external:true};}}]});
+ const bundle=await rolldown({input:new URL("../app/features/assistant/artifacts.tsx",import.meta.url).pathname,plugins:[{name:"runtime",resolveId(id){if(["react","react-dom","react/jsx-runtime","react-router","motion/react","@assistant-ui/react"].includes(id))return {id:require.resolve(id),external:true};}}]});
  try{
   await bundle.write({dir:directory,format:"esm",entryFileNames:"artifact.mjs"});
   const {AssistantArtifactCard}=await import(pathToFileURL(join(directory,"artifact.mjs")).href);
