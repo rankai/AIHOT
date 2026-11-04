@@ -1,5 +1,7 @@
 # 助手聊天工作区改版方案
 
+> **现行状态（2026-11-04）：**聊天工作区已在 localhost 使用，综合入口和小红书专属入口共用对话、稿件和一次任务费用确认；旧版输入区的逐项授权说明是当时的设计。 版本、各技能开放情况和验收证据见[本地状态记录](assistant-local-trial-plan.md#当前状态)，日常限额见[当前调用额度](assistant-local-trial-plan.md#当前调用额度)。以下带日期的方案与验收结论按当时状态保留。
+
 日期：2026-10-30；修订：2026-10-31。状态：既有三栏和真实接口流程已完成相应验收，见[三栏验收](reviews/2026-10-30-assistant-chat-ui-acceptance.md)及[真实联调记录](reviews/2026-10-31-assistant-live-acceptance.md)，未部署。第12节输入区增量已实现并完成本地验收，见[输入区验收](reviews/2026-10-31-assistant-inputs-acceptance.md)，未部署。
 
 本方案承接[统一底座接入方案](xiaohongshu-agent-integration-plan.md)及[首版验收记录](reviews/2026-10-30-assistant-v1-acceptance.md)，第1–11节记录既有三栏改版及执行反馈；第12节是本次增量的范围权威，包含必要的技能绑定、文本材料和费用授权后端适配。沿用 assistant-ui + AI SDK + 业务系统的职责、现有价格、积分账本、预算和执行链；不再将本次增量描述为纯前端改动。
