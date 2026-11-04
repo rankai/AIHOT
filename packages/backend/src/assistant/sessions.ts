@@ -118,8 +118,33 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
   });
   if (created.initialRequest && !created.initialRequest.quote) {
     try {
-      created.initialRequest.quote = await quoteTurn(userId,created.sessionId,created.initialRequest.input);
-      await sql`UPDATE assistant_sessions SET initial_request=${sql.json(created.initialRequest as never)} WHERE id=${created.sessionId} AND active_turn_id IS NULL`;
+      await requireAvailable();
+      const initial = created.initialRequest;
+      const prepared = await snapshotInput(sql, userId, created.sessionId, initial.input);
+      if (taskChoices(prepared.snapshot.candidates).length && !initial.input.taskChoice) {
+        const choice = await prepareTaskChoice(userId, prepared.snapshot);
+        // Persist recognition before pricing: a temporarily unavailable service must
+        // not force a second classification when the same create command is replayed.
+        const [saved] = await sql`UPDATE assistant_sessions SET initial_request=jsonb_set(initial_request,'{input,taskChoice}',
+          coalesce(initial_request#>'{input,taskChoice}',${sql.json(choice)}::jsonb))
+          WHERE id=${created.sessionId} AND active_turn_id IS NULL AND revision=${prepared.snapshot.revision}
+          AND initial_request->>'commandKey'=${initial.commandKey} RETURNING initial_request`;
+        if (!saved) throw conflict("首条需求已变化，请刷新");
+        initial.input.taskChoice = saved.initial_request.input.taskChoice;
+        Object.assign(prepared.snapshot,{taskChoice:initial.input.taskChoice});
+      }
+      // Persist the quote and its session pointer together. A replay that races this
+      // transaction returns the same quote. Recognition above never holds a DB lock.
+      created.initialRequest = await sql.begin(async tx => {
+        await lockMemberAdmission(tx,`user:${userId}`);
+        const current = await ownedSession(tx,userId,created.sessionId,true);
+        if (current.active_turn_id || current.revision !== prepared.snapshot.revision ||
+            current.initial_request?.commandKey !== initial.commandKey) throw conflict("首条需求已变化，请刷新");
+        if (current.initial_request.quote) return current.initial_request;
+        const result = {...initial,quote:await quoteAssistantTurn(userId,prepared,tx)};
+        await tx`UPDATE assistant_sessions SET initial_request=${tx.json(result as never)} WHERE id=${created.sessionId}`;
+        return result;
+      });
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'assistant_task_selection_required')) throw error;
     }

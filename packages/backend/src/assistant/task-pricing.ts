@@ -37,7 +37,12 @@ export function applyTaskChoice(snapshot:Record<string,any>,raw:unknown) {
 }
 /** Only an explicit send/quote path calls this. Stable receipt identity reuses a prior preparation. */
 export async function prepareTaskChoice(userId:number,snapshot:Record<string,any>,choice?:unknown,allowModel=true):Promise<TaskChoiceValue> {
- if(choice){applyTaskChoice(structuredClone(snapshot),choice);return TaskChoice.parse(choice);}
+ if(choice){
+   const parsed=TaskChoice.parse(choice);
+   if(!taskChoices(snapshot.candidates).some(o=>o.skillId===parsed.skillId&&o.moduleId===parsed.moduleId))
+     throw new AccountError(409,'skill_unavailable','所选任务暂不可用，需求已保留，请稍后重试。');
+   applyTaskChoice(structuredClone(snapshot),parsed);return parsed;
+ }
  const options=taskChoices(snapshot.candidates);
  const actionId=snapshot.skillSelection?.actionId??snapshot.taskHint?.actionId;
  const explicit=actionId ? options.filter(o=>bindings.some(b=>b.skillId===o.skillId&&b.modules.some(m=>m.moduleId===o.moduleId&&m.actionId===actionId))) : [];
@@ -80,7 +85,8 @@ export async function taskPriceDefinition(snapshot:Record<string,any>,choice:Tas
  if(choice.delivery==='image'){
   const normalized=await normalizeToolInput('assistant-capability','images',{model:'gptImage2',prompt:'报价规格检查',size:choice.size,resolution:'1k',n:1,fileKeys:[]});
   await assertMemberCostEligible(normalized.intent);
-  for(const service of ['redfox.image','redfox.poll']){await checkBudget(sql,service);await checkBudget(sql,service,'member');}
+  try {for(const service of ['redfox.image','redfox.poll']){await checkBudget(sql,service);await checkBudget(sql,service,'member');}}
+  catch(error){if(error instanceof BudgetExceededError)throw new AccountError(503,'image_budget_exhausted','图片服务额度暂不可用，请稍后重试，未冻结积分。');throw error;}
  }
  const items: {key:string;label:string;units:number;intent:ToolCreditIntent}[]=[];
  const savedCover=selected.contract==='xhs-cover-delivery@1'&&hasSavedCoverResearch(snapshot.selected);
