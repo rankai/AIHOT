@@ -1,4 +1,5 @@
-import { rejectedCoverPlanDelivery } from "./cover-plan.ts";
+import { contextTokens } from "./context.ts";
+import { resolveCoverImage, rejectedCoverPlanDelivery } from "./cover-plan.ts";
 import { coverVisionResults } from "./cover-vision.ts";
 import { xhsCoverResults } from "../providers/redfox/xhs-covers.ts";
 import { deliverImage } from "./image-delivery.ts";
@@ -66,11 +67,20 @@ export async function executeAssistantStep(runId: number, stepVersion: number, j
 }
 async function modelStep(execution: Execution, turn: Record<string, any>) {
   const step = await sql.begin(async (tx) => {
-    await requireExecution(tx, execution);
+    const run = await requireExecution(tx, execution);
     await requireCreditUser(tx, turn.owner_user_id, true);
     const [existing] =
       await tx`SELECT * FROM assistant_model_steps WHERE turn_id=${turn.id} AND operation_step_version=${execution.stepVersion}`;
-    if (existing) return existing;
+    const choice = turn.snapshot.taskScope?.delivery === "image" && turn.snapshot.coverChoice;
+    if (existing) {
+      // An old preflight failure may have persisted a request too large to dispatch.
+      // A dispatched step must keep its original request identity, even on recovery.
+      if (!choice || existing.receipt_id || existing.decision || run.current_receipt_id ||
+          contextTokens(JSON.stringify(existing.request_snapshot)) + 256 <= existing.request_snapshot.model.maxInputTokens)
+        return existing;
+      const [receipt] = await tx`SELECT id FROM receipts WHERE service='assistant.text' AND subject=${String(existing.id)} LIMIT 1`;
+      if (receipt) return existing;
+    }
     const [ordinal] =
       await tx`SELECT coalesce(max(model_ordinal),0)+1 n FROM assistant_model_steps WHERE turn_id=${turn.id}`;
     const messages =
@@ -107,6 +117,24 @@ async function modelStep(execution: Execution, turn: Record<string, any>) {
       ],
       tools,
     };
+    if (choice) {
+      const {artifactId, version, schemeId} = choice;
+      const image = await resolveCoverImage(tx, turn, {artifactId, version, schemeId});
+      if (!tools.generate_image || !activationIds.includes(String(image.activationId))) throw conflict("封面方案不属于当前已授权技能");
+      // Research and the other designs remain in the artifact. Only the chosen design
+      // and any tool feedback since the choice are needed to submit the single image.
+      const answer = messages.findLastIndex(m => m.model_message.role === "user");
+      if (answer < 0) throw conflict("找不到封面选择记录");
+      snapshot.system = "按用户已选的封面方案调用 generate_image 一次。沿用已冻结的规格和 planReference，不重复研究或报价。";
+      snapshot.tools = {generate_image:tools.generate_image};
+      snapshot.messages = [{role:"user",content:JSON.stringify({activationId:image.activationId,planReference:image.reference,
+        title:image.title,prompt:image.prompt,size:image.size})}, ...messages.slice(answer).map(m=>m.model_message)];
+      if (existing) {
+        const [updated] = await tx`UPDATE assistant_model_steps SET request_snapshot=${tx.json(snapshot)},request_hash=${creditHash(snapshot)}
+          WHERE id=${existing.id} AND receipt_id IS NULL AND decision IS NULL RETURNING *`;
+        return updated!;
+      }
+    }
     const [row] =
       await tx`INSERT INTO assistant_model_steps(id,turn_id,model_ordinal,operation_step_version,request_snapshot,request_hash,cost_context_version) VALUES (${randomUUID()},${turn.id},${ordinal!.n},${execution.stepVersion},${tx.json(snapshot)},${creditHash(snapshot)},1) RETURNING *`;
     for (const activationId of activationIds)

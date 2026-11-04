@@ -13,6 +13,7 @@ import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits,saveToolPrice } from "@aihot/backend/users/credits";
 import { contextTokens } from "@aihot/backend/assistant/context";
 import { coverPlanInputProjection } from "@aihot/backend/assistant/cover-plan";
+import { controlAssistantOperation } from "@aihot/backend/assistant/controls";
 import { message } from "@aihot/backend/assistant/store";
 import { sessionSnapshot } from "@aihot/backend/assistant/sessions";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
@@ -36,16 +37,24 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
   res.writeHead(200,{"content-type":"application/json"});res.end(JSON.stringify({code:2000,data}));
  });});await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
  let preparations=0,writeDraft=false;
- const modelStub=await stub((_hit,req)=>{
+ const modelStub=await stub(async (_hit,req)=>{
   const request=JSON.parse(req.body),content=request.messages[0]?.content;
   if(request.response_format?.type==='json_object'&&typeof content==='string'&&content.startsWith('只识别')){
-   preparations++;const input=JSON.parse(request.messages[1].content);assert.match(input.message,/春日通勤穿搭/);assert.match(input.message,/暂时不要生成图片/);
+   preparations++;const input=JSON.parse(request.messages[1].content);assert.match(input.message,/春日通勤穿搭/);if(input.message.includes('模拟报价暂不可用')){
+    await sql`UPDATE budgets SET per_minute=0 WHERE service='redfox.image'`;
+    return {choices:[{message:{content:JSON.stringify({skillId:'xiaohongshu-creator',moduleId:'M4',delivery:'image',size:'3:4'})}}],usage:{prompt_tokens:90,completion_tokens:30,total_tokens:120}};
+   }
+   assert.match(input.message,/暂时不要生成图片/);
    const candidate=input.candidates.find((c:any)=>c.delivery==='plans-only');assert(candidate);
    return {choices:[{message:{content:JSON.stringify({skillId:candidate.skillId,moduleId:candidate.moduleId,delivery:candidate.delivery,...(preparations===1?{size:'3:4'}:{})})}}],usage:{prompt_tokens:100,completion_tokens:30,total_tokens:130}};
   }
   if(Array.isArray(content)&&content.some((c:any)=>c.type==="image_url")){
    visions++;const ids=content.filter((c:any)=>c.type==="text"&&c.text.startsWith("sourceId: ")).map((c:any)=>c.text.slice(10));
    return {choices:[{finish_reason:"stop",message:{content:JSON.stringify({observations:ids.map((sourceId:string)=>({sourceId,status:"observed",text:"",subject:"暖橙色画面",colors:"橙色",layout:"纯色背景",uncertainties:["没有可读文字"]}))})}}],usage:{prompt_tokens:100,completion_tokens:100,total_tokens:200}};
+  }
+  if(request.tools?.length===1&&request.tools[0].function.name==='generate_image'){
+   const image=JSON.parse(request.messages[1].content);assert.equal(image.prompt,scheme(2,[]).prompt);
+   assert(!JSON.stringify(request).includes('coverUrl'));return completion('generate_image',image);
   }
   const messages=request.messages.filter((m:any)=>m.role==="tool").map((m:any)=>JSON.parse(m.content)),loaded=messages.find((m:any)=>m.entry);
   if(!loaded){const c=JSON.parse(request.messages[0].content.slice(request.messages[0].content.indexOf("{"))).candidates[0];return completion("load_skill",{skillId:c.skillId,moduleId:c.moduleId});}
@@ -101,6 +110,13 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
   }
   assert.equal(preparations,2);assert.equal(queries,2);assert.equal(visions,2);assert.equal(submits,0);
   next='choose';
+  const retryKey=randomUUID(),retryRequest={assistantId:'creative',initialRequest:{message:'春日通勤穿搭，生成小红书封面（模拟报价暂不可用）'}};
+  const createAgain=()=>app!.inject({method:'POST',url:'/api/assistant/sessions',headers:{...headers,'idempotency-key':retryKey},payload:retryRequest});
+  const interrupted=await createAgain();assert.equal(interrupted.statusCode,503,interrupted.body);
+  const [paused]=await sql`SELECT id,initial_request FROM assistant_sessions WHERE owner_user_id=${user.id} AND command_key=${retryKey}`;
+  assert.equal(paused!.initial_request.input.taskChoice.delivery,'image');assert.equal(paused!.initial_request.quote,null);
+  await sql`UPDATE budgets SET per_minute=1000 WHERE service='redfox.image'`;
+  const [restored,concurrent]=await Promise.all([createAgain(),createAgain()]);assert.equal(restored.statusCode,201,restored.body);assert.equal(concurrent.json().initialRequest.quote.quoteId,restored.json().initialRequest.quote.quoteId);assert.equal(restored.json().sessionId,paused!.id);assert.equal(restored.json().initialRequest.quote.amount,34);assert.equal(preparations,3);
   for(const keep of [true,false]){
    await sql`UPDATE operation_runs SET created_at=now()-interval '2 minutes' WHERE actor=${`user:${user.id}`}`;
    const initialRequest={message:'请研究并设计小红书春日通勤穿搭封面，最终生成一张3:4图片',skillSelection:{skillId:'xiaohongshu-creator'},taskChoice:{skillId:'xiaohongshu-creator',moduleId:'M4',delivery:'image',size:'3:4'}};
@@ -114,13 +130,31 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
     if(done.turn.phase==='waiting_question'){
      choices++;const q=done.turn.question,plan=q.coverPlan;
      const choice={artifactId:plan.artifactId,version:plan.version,action:keep?'keep-plans':'generate',...(keep?{}:{schemeId:'scheme-2'})};
-     const answer:any=await app.inject({method:'POST',url:`/api/assistant/sessions/${initial.sessionId}/turns/${run.turnId}/answer`,headers,payload:{questionId:q.questionId,expectedRevision:done.revision,answer:keep?'只保留方案':'选择第二方案',choice}});assert.equal(answer.statusCode,200,answer.body);continue;
+     const answer:any=await app.inject({method:'POST',url:`/api/assistant/sessions/${initial.sessionId}/turns/${run.turnId}/answer`,headers,payload:{questionId:q.questionId,expectedRevision:done.revision,answer:keep?'只保留方案':'选择第二方案',choice}});assert.equal(answer.statusCode,200,answer.body);
+     if(!keep){
+       // Reproduce the legacy persisted, undispatched oversized step after the user chose a scheme.
+       const [r]=await sql`SELECT step_version,generation FROM operation_runs WHERE id=${run.runId}`;
+       const [old]=await sql`SELECT * FROM assistant_model_steps WHERE turn_id=${run.turnId} ORDER BY model_ordinal DESC LIMIT 1`;
+       const oldRequest={...old!.request_snapshot,system:'超长研究材料 '.repeat(10000)};
+       assert(contextTokens(JSON.stringify(oldRequest))>24000);
+       const stepId=randomUUID();
+       await sql`INSERT INTO assistant_model_steps(id,turn_id,model_ordinal,operation_step_version,request_snapshot,request_hash,cost_context_version) VALUES(${stepId},${run.turnId},${old!.model_ordinal+1},${r!.step_version},${sql.json(oldRequest)},'preflight',1)`;
+       await sql`INSERT INTO assistant_model_step_activations SELECT ${stepId},activation_id FROM assistant_model_step_activations WHERE model_step_id=${old!.id}`;
+       await sql`UPDATE operation_runs SET status='needs_review',wait_reason='assistant:review' WHERE id=${run.runId}`;
+       await sql`UPDATE member_credit_charges SET state='review' WHERE root_run_id=${run.runId}`;
+       await sql.begin(tx=>controlAssistantOperation(tx,{runId:run.runId,generation:r!.generation,stepVersion:r!.step_version},'resume','admin:test','核对已冻结同任务，无回执后恢复'));
+     }
+     continue;
     }
     const child=done.turn.calls.find((c:any)=>c.state==='running');const [childRun]=child?await sql`SELECT status FROM operation_runs WHERE id=${child.childRunId}`:[];await advance(childRun?.status==='active'||childRun?.status==='waiting'?child.childRunId:run.runId);
    }
    assert.equal(done.turn.status,'completed');assert.equal(choices,1);
    const [charge]=await sql`SELECT amount,consumed,released FROM member_credit_charges WHERE root_run_id=${run.runId}`;assert.equal(charge!.amount,34);assert.equal(charge!.consumed,keep?21:34);assert.equal(charge!.released,keep?13:0);
    assert.equal(done.artifacts.filter((a:any)=>a.kind==='image').length,keep?0:1);
+   if(!keep){
+     const [ledger]=await sql`SELECT count(*) FILTER(WHERE e.kind='reserve')::int reserves,count(*) FILTER(WHERE e.kind='consume')::int consumes FROM member_credit_entries e JOIN member_credit_charges c ON c.id=e.charge_id WHERE c.root_run_id=${run.runId}`;
+     assert.deepEqual(ledger,{reserves:1,consumes:1});assert.equal(lastImageInput.prompt,scheme(2,[]).prompt);
+   }
   }
   assert.equal(submits,1);
   // A realistic historical three-scheme plan alone exceeds the old 4k admission remainder.
@@ -231,7 +265,7 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
    const [charge]=await sql`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${target.runId}`;
    assert.equal(charge!.state,'settled');assert.equal(charge!.consumed,writeDraft?7:20);assert.equal(charge!.released,0);
   }
-  const [costs]=await sql`SELECT count(*)::int n FROM receipt_attempts WHERE service='assistant.quote-preparation' AND owner_user_id=${user.id}`;assert.equal(costs!.n,2);
+  const [costs]=await sql`SELECT count(*)::int n FROM receipt_attempts WHERE service='assistant.quote-preparation' AND owner_user_id=${user.id}`;assert.equal(costs!.n,3);
   t.diagnostic('Routing and vendors are synthetic local fixtures: proves HTTP scope, execution and accounting, not real-model semantic recognition.');
  } finally {
   await app?.close();config.allowPrivateNetworkFetch=oldPrivate;process.env.MODEL_CALLS_ENABLED='false';process.env.REDFOX_CALLS_ENABLED='false';await modelStub.close();await new Promise<void>(r=>server.close(()=>r()));await restore();await stopBoss();await closeDb();

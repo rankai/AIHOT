@@ -97,13 +97,13 @@ export async function persistCoverPlan(tx:Tx,turn:Record<string,any>,activationI
 export async function resolveCoverImage(tx:Tx,turn:Record<string,any>,raw:unknown){
  const reference=CoverPlanReference.parse(raw),chosen=turn.snapshot.coverChoice;
  if(chosen&&(chosen.artifactId!==reference.artifactId||chosen.version!==reference.version||chosen.schemeId!==reference.schemeId))throw conflict("生成方案与本次明确选择不一致");
- const [row]=await tx`SELECT content,turn_id FROM assistant_artifact_versions WHERE session_id=${turn.session_id} AND artifact_id=${reference.artifactId} AND version=${reference.version} AND kind='xhs-cover-plan'`;
+ const [row]=await tx`SELECT content,turn_id,activation_id FROM assistant_artifact_versions WHERE session_id=${turn.session_id} AND artifact_id=${reference.artifactId} AND version=${reference.version} AND kind='xhs-cover-plan'`;
  const selected=selectedCoverPlans(turn).some((s:any)=>s.artifact_id===reference.artifactId&&s.version===reference.version);
  if(!row||row.turn_id!==turn.id&&!selected)throw conflict("只能生成本轮方案或明确选中的历史方案版本");
  if(row.turn_id===turn.id){const [latest]=await tx`SELECT max(version)::int version FROM assistant_artifact_versions WHERE artifact_id=${reference.artifactId}`;if(latest!.version!==reference.version)throw conflict("方案版本已变化，请重新选择");}
  const plan=row.content.coverPlan as AssistantCoverPlan,scheme=plan.schemes.find(s=>s.schemeId===reference.schemeId);
  if(!scheme||!plan.evidence.observedCount)throw conflict("所选方案或研究证据不存在");
- return {reference,title:row.content.title,prompt:scheme.prompt,size:"3:4" as const};
+ return {reference,activationId:row.activation_id,title:row.content.title,prompt:scheme.prompt,size:"3:4" as const};
 }
 /** A declined optional cover image still leaves the already saved plans as this turn's delivery. */
 export async function rejectedCoverPlanDelivery(tx:Tx,turn:Record<string,any>,call:Record<string,any>){

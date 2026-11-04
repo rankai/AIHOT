@@ -733,7 +733,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                     </Button>
                   </div>
                 )}
-                {profile && !quoted && !active && !waitingEntries.length && hasComposerDraft(draft) && (command.failure.current?.code==='assistant_task_selection_required' || session.initialRequest && !session.initialRequest.quote && draft.text===session.initialRequest.input.message) && <TaskClarification key={JSON.stringify(draftSelection(draft))} profile={profile} selection={draftSelection(draft)} disabled={command.pending||quoteReading} confirm={taskChoice=>{updateDraft(previous=>({...previous,taskChoice}));void requestQuote(draft.text);}} />}
+                {profile && !quoted && !active && !waitingEntries.length && hasComposerDraft(draft) && (command.failure.current?.code==='assistant_task_selection_required' || session.initialRequest && !session.initialRequest.quote && !session.initialRequest.input.taskChoice && !draft.taskChoice && draft.text===session.initialRequest.input.message) && <TaskClarification key={JSON.stringify(draftSelection(draft))} profile={profile} selection={draftSelection(draft)} disabled={command.pending||quoteReading} confirm={taskChoice=>{updateDraft(previous=>({...previous,taskChoice}));void requestQuote(draft.text);}} />}
                 {command.error && !quoted && command.failure.current?.code!=='assistant_task_selection_required' && (
                   <p role="alert" className="mb-2 text-[12px] text-hot">
                     {command.error}
