@@ -1,7 +1,7 @@
 import { bindings, currentSkillVersions } from "./bindings.ts";
 import { Size } from "../providers/redfox/image-models.ts";
 import { prepareTaskChoice, taskPriceDefinition, applyTaskChoice, taskChoices } from "./task-pricing.ts";
-import { selectedArtifactVersions, coverPlanImageAvailability } from "./cover-plan.ts";
+import { selectedArtifactVersions, coverPlanImageAvailability, hasSavedCoverResearch, COVER_DELIVERY_CONTRACT } from "./cover-plan.ts";
 import { researchClock } from "./xhs-research.ts";
 import { contextTokens } from "./context.ts";
 import { readAssistantAttachment } from "./attachments.ts";
@@ -191,7 +191,11 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
   // Reserve space before charging for two bounded article queries, loaded rules,
   // tool schemas and the subsequent analysis/draft exchange. Never trim user material.
   const modules = await Promise.all(allowed.map(candidate => resolveCandidate(allowed, candidate.skillId, candidate.moduleId)));
-  const coverResearch=modules.some(({module})=>module.tools.includes("analyze_xhs_covers"));
+  // Owned saved plans already contain frozen research; reserve only their remaining execution.
+  // Other admitted research contracts still need their original continuation allowance.
+  const savedCoverResearch=hasSavedCoverResearch(selected);
+  const coverResearch=modules.some(({module})=>module.tools.includes("analyze_xhs_covers")
+    && !(module.deliveryContract===COVER_DELIVERY_CONTRACT&&savedCoverResearch));
   const continuationReserve = coverResearch || modules.some(({ module }) => module.tools.includes("search_wechat_articles")) ? 20000 : 4096;
   if (contextTokens(JSON.stringify(snapshot)) + continuationReserve > model.maxInputTokens)
     throw conflict(coverResearch ? "模型上下文超过封面研究材料额度，请减少材料，或选择具体非封面技能后重试" : continuationReserve === 20000 ? "模型上下文超过上限，请减少材料；自动选择包含公众号研究，可明确选择其他不需要研究的技能后重试" : "模型上下文超过上限，请缩小材料");

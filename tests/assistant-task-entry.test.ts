@@ -11,6 +11,9 @@ import { config } from "@aihot/backend/config";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits,saveToolPrice } from "@aihot/backend/users/credits";
+import { contextTokens } from "@aihot/backend/assistant/context";
+import { coverPlanInputProjection } from "@aihot/backend/assistant/cover-plan";
+import { message } from "@aihot/backend/assistant/store";
 import { sessionSnapshot } from "@aihot/backend/assistant/sessions";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
 import { XHS_COVER_OPERATION } from "@aihot/backend/providers/redfox/xhs-cover-contract";
@@ -120,6 +123,23 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
    assert.equal(done.artifacts.filter((a:any)=>a.kind==='image').length,keep?0:1);
   }
   assert.equal(submits,1);
+  // A realistic historical three-scheme plan alone exceeds the old 4k admission remainder.
+  // Keep its original evidence and publish a synthetic later version, never overwrite v1.
+  const expanded=structuredClone(savedPlan.content);
+  for(const item of expanded.coverPlan.schemes){
+   item.layout='标题置于上方，主体居中，底部保留留白；文字大小清楚，元素间距均匀。'.repeat(12);
+   item.palette='暖橙与米白，使用低饱和度背景，深色标题保持清晰对比。'.repeat(8);
+   item.prompt+='画面保持简洁，标题与主体层次分明，周围留出空白，不加入额外文字；采用自然光线和细腻材质。'.repeat(24);
+  }
+  const [historical]=await sql`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,turn_id,activation_id,content,source_snapshot)
+    SELECT session_id,artifact_id,version+1,version,kind,turn_id,activation_id,${sql.json(expanded)},source_snapshot FROM assistant_artifact_versions WHERE session_id=${savedSession.sessionId} AND artifact_id=${savedPlan.artifactId} AND version=${savedPlan.version}
+    RETURNING artifact_id,version,kind,content,source_snapshot`;
+  savedPlan={...savedPlan,version:historical!.version,content:expanded};
+  const selectedTokens=contextTokens(JSON.stringify([coverPlanInputProjection(historical!)]));assert(selectedTokens>4000,`selected historical plan must reproduce the old admission failure: ${selectedTokens}`);
+  const historicalText='这次沿用已经确定的主题与设计方向，保留原有色调和文字层级，不需要重新研究。'.repeat(24);
+  await sql.begin(tx=>message(tx,savedSession.sessionId,null,'assistant',historicalText));
+  const researchLimit=await app.inject({method:'POST',url:`/api/assistant/sessions/${savedSession.sessionId}/quote`,headers,payload:{message:historicalText.repeat(4),expectedRevision:savedSession.revision,artifactVersions:[],inputIds:[],skillSelection:{skillId:'xiaohongshu-creator'},taskChoice:{skillId:'xiaohongshu-creator',moduleId:'M4',delivery:'plans-only'}}});
+  assert.equal(researchLimit.statusCode,409,researchLimit.body);assert.match(researchLimit.body,/模型上下文超过封面研究材料额度/);
   // Current M4 can render an explicitly owned plan while research dependencies are unavailable.
   await sql`UPDATE budgets SET per_minute=0,per_hour=0,per_day=0 WHERE service IN ('assistant.vision','redfox.query')`;
   await sql`UPDATE operation_runs SET created_at=now()-interval '2 minutes' WHERE actor=${`user:${user.id}`}`;
@@ -152,6 +172,14 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
    const child=rendered.turn.calls.find((c:any)=>c.state==='running');const [childRun]=child?await sql`SELECT status FROM operation_runs WHERE id=${child.childRunId}`:[];await advance(childRun?.status==='active'||childRun?.status==='waiting'?child.childRunId:historicalRun.runId);
   }
   assert.equal(rendered.turn.status,'completed');assert.equal(rendered.artifacts.filter((a:any)=>a.kind==='image').length,1);
+  const frozenRequests=await sql`SELECT request_snapshot FROM assistant_model_steps WHERE turn_id=${historicalRun.turnId} ORDER BY model_ordinal`;
+  assert(frozenRequests.length>0);
+  const requestTokens=frozenRequests.map(r=>contextTokens(JSON.stringify(r.request_snapshot))+256);
+  assert(requestTokens.every(n=>n<=24000),JSON.stringify(requestTokens));
+  assert(frozenRequests.some(r=>JSON.stringify(r.request_snapshot).includes(expanded.coverPlan.schemes[1].prompt)), 'the selected prompt is retained without trimming');
+  assert(frozenRequests.some(r=>JSON.stringify(r.request_snapshot).includes(historicalText)), 'history is retained without trimming');
+  t.diagnostic(`saved-plan selected=${selectedTokens} tokens; executed requests=${requestTokens.join(',')} / 24000`);
+
   assert.equal(queries,counts.queries);assert.equal(visions,counts.visions);assert.equal(submits,counts.submits+1);
   assert.equal(lastImageInput.prompt,savedPlan.content.coverPlan.schemes[1].prompt);assert.equal(lastImageInput.size,"3:4");
   const [historicalCharge]=await sql`SELECT id,amount,consumed,released FROM member_credit_charges WHERE root_run_id=${historicalRun.runId}`;
