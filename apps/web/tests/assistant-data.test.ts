@@ -12,6 +12,7 @@ import {
   safeSourceHref,
   sessionHref,
   turnActive,
+  submissionErrorCovered,
 } from "../app/features/assistant/data.ts";
 import { shouldReadSnapshot } from "../app/features/assistant/snapshot-poll.ts";
 import { runDetailHref } from "../app/features/tools/run-history-data.ts";
@@ -20,6 +21,18 @@ import type {
   AssistantArtifactContent,
   AssistantSession,
 } from "@aihot/contracts/assistant";
+
+test("only the same uncertain submission's network or server failure is covered by recovery feedback", () => {
+  for (const status of [null, 500, 503]) {
+    const failure = { commandKey: "original", status };
+    assert.equal(submissionErrorCovered(failure, "original", true), true);
+    assert.equal(submissionErrorCovered(failure, "other", true), false);
+    assert.equal(submissionErrorCovered(failure, "original", false), false);
+  }
+  for (const status of [400, 402, 403, 409, 429])
+    assert.equal(submissionErrorCovered({ commandKey: "original", status }, "original", true), false, "definite business rejection remains visible even after an earlier unknown response");
+  assert.equal(submissionErrorCovered(null, "original", true), false);
+});
 
 test("completed model labels stay neutral without matching persisted activity context", () => {
   const model: AssistantActivity = { id: "model:known", kind: "model_request", state: "completed" };
@@ -96,7 +109,7 @@ test("draft copying and handoff material projection stay readable without execut
   };
   assert.equal(
     artifactText(content),
-    "标题\n\n正文\n第二段\n\n备选标题\n另一个标题\n\n#AI #写作",
+    "标题\n\n正文\n第二段\n\n#AI #写作",
   );
   assert.equal(
     materialText(JSON.stringify(content)),

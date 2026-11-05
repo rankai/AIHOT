@@ -20,6 +20,7 @@ export const Binding = z.object({ formatVersion: z.literal(1), skillId: id, vers
   modules: z.array(z.object({ moduleId: id, profiles: z.array(z.enum(["creative", "xiaohongshu"])).min(1), actionId: id,
     label: z.string().max(80), entry: id, capabilities: z.array(capability).min(1), inputContract: z.enum(["writing-input@1", "image-input@1"]),
     deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1"]), references: z.array(id),
+    researchPolicy: z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1"]).optional(),
     tasks: z.array(z.object({
       delivery: z.enum(["writing", "plans-only", "image"]), label: z.string().min(1).max(120),
       units: z.array(z.object({ capability: z.enum(["creation", "search-xhs-covers@1", "search-xhs-notes@1", "search-wechat-hot@1", "analyze-xhs-cover-images@1", "generate_image@1"]), maximum: z.number().int().min(1).max(2) }).strict()).min(1).max(5),

@@ -314,7 +314,20 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
     const before=recognitionCalls;
     const response=await app!.inject({method:'POST',url:'/api/assistant/sessions',headers:requestHeaders,payload:request});assert.equal(response.statusCode,201,response.body);
     const created=response.json();assert.equal(recognitionCalls,before+1);
-    if(fixture.result){assert(created.initialRequest.quote,`case ${i}: expected quote for recognized scope`);assert.deepEqual(JSON.parse(created.initialRequest.quote.task.scope),fixture.result);assert.equal(created.initialRequest.quote.task.items.some((item:any)=>item.key==='generate_image@1'),fixture.result.delivery==='image');}
+    if(fixture.result){
+     assert(created.initialRequest.quote,`case ${i}: expected quote for recognized scope`);
+     const {research,...scope}=JSON.parse(created.initialRequest.quote.task.scope);
+     assert.deepEqual(scope,fixture.result);
+     if(fixture.result.moduleId==='M1'){
+      assert.equal(research.policy,'xhs-empty-window@1');
+      assert.equal(research.maximumQueries,2);
+      assert.equal(research.fixedDates,false);
+      assert.equal(research.startDate,research.clock.defaultStartDate);
+      assert.equal(research.endDate,research.clock.latestDate);
+      assert.equal(created.initialRequest.quote.task.items.find((item:any)=>item.key==='search-xhs-notes@1').units,2);
+     }else assert.equal(research,undefined);
+     assert.equal(created.initialRequest.quote.task.items.some((item:any)=>item.key==='generate_image@1'),fixture.result.delivery==='image');
+    }
     else assert.equal(created.initialRequest.quote,null,'a cover hint alone cannot authorize the image scope');
     const replay=await app!.inject({method:'POST',url:'/api/assistant/sessions',headers:requestHeaders,payload:request});assert.equal(replay.statusCode,201,replay.body);assert.equal(replay.json().sessionId,created.sessionId);assert.equal(recognitionCalls,before+1,'replaying accepted create does not identify again');
     const [wallet]=await sql`SELECT reserved FROM member_credit_accounts WHERE user_id=${member.id}`;assert.equal(Number(wallet!.reserved),0);

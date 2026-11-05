@@ -50,6 +50,7 @@ import {
   assistantHref,
   makeTurnInput,
   runtimeMessage,
+  submissionErrorCovered,
   sessionApi,
   turnActive,
   type PendingTurn,
@@ -119,7 +120,8 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     }
     await refresh();
   }
-  const [quoteReading, setQuoteReading] = useState(false);
+  const [quoteRequest, setQuoteRequest] = useState<string | null>(null);
+  const quoteReading = quoteRequest !== null;
   const [feeOpen, setFeeOpen] = useState(false);
   const [feeAuthorization, setFeeAuthorization] = useState<AssistantFeeAuthorization | null>(session.feeAuthorization ?? null);
   const feeModeCommand = useToolCommand(data.me.csrf, `assistant:fee-mode:${session.sessionId}`);
@@ -134,10 +136,11 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const [newArtifacts, setNewArtifacts] = useState<ArtifactTarget[]>([]);
   const deliveries = artifactDeliveries(session);
   const currentArtifact = currentArtifactTarget(session);
-  const legacyArtifactLink = session.turn?.phase === "completed" && !deliveries.some((delivery) => delivery.turnId === session.turn?.turnId) && !!session.artifacts.length;
-  const uncoveredUpdates = legacyArtifactLink ? [] : uncoveredArtifactUpdates(newArtifacts, deliveries);
+  const uncoveredUpdates = uncoveredArtifactUpdates(newArtifacts, deliveries);
   const alive = useRef(true);
   const submitting = useRef(false);
+  const queueSubmitting = useRef(false);
+  const [sending, setSending] = useState<{ key: string; message: string; afterSeq: number; label: string; entryId?: string } | null>(null);
   const stopAttempt = useRef<{ turnId: string; generation: number } | null>(null);
   const quoting = useRef(false);
   const lifecyclePending = useRef(false);
@@ -157,6 +160,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     (!question && (!profile?.available || unavailableSelection(profile, draftSelection(draft)))) ||
     command.pending ||
     feeModeCommand.pending || feeModeUncertain ||
+    !!sending ||
     !!draft.pendingTurn ||
     !!draft.pendingQueue ||
     !!draft.pendingLifecycle ||
@@ -201,16 +205,22 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     );
   }
   async function runQueueAttempt(attempt: NonNullable<AssistantDraft["pendingQueue"]>, clearComposer = false) {
+    if (queueSubmitting.current || command.pending) return;
+    queueSubmitting.current = true;
+    if (!readDraft(key).pendingQueue) setSending({ key: attempt.key, message: attempt.kind === "enqueue" ? attempt.input.message : session.queue?.entries.find(entry => entry.id === attempt.entryId)?.message ?? "", afterSeq: session.messages.at(-1)?.seq ?? 0, label: attempt.kind === "enqueue" ? "正在排队…" : "正在开始处理…", ...(attempt.kind === "approve" ? { entryId: attempt.entryId } : {}) });
     const path = attempt.kind === "enqueue" ? `${sessionApi(session.sessionId)}/queue` : `${sessionApi(session.sessionId)}/queue/${attempt.entryId}/approve`;
     const body = attempt.kind === "enqueue" ? attempt.input : { quoteId: attempt.quoteId };
     const started = beginAttempt({ kind: "queue", value: attempt });
-    if (!started) return;
+    if (!started) { queueSubmitting.current = false; setSending(null); return; }
     if (clearComposer) updateDraft(previous => ({ ...previous, text: "", taskHint: undefined, taskChoice: undefined, references: [], attachments: [], inputIds: [] }));
     const result = await command.run(path, body, "POST", body, attempt.key);
     if (result) clearRecovery(key, { kind: "queue", value: attempt });
     else updateRecoveryFailure(key, { kind: "queue", value: attempt }, started, command.failure.current?.status ?? null);
-    if (result) setNotice(attempt.kind === "enqueue" ? "已排队，可继续输入下一条需求。" : "已核对排队消息的执行状态。");
+    queueSubmitting.current = false;
+    if (!result) setSending(null);
+    if (result) setNotice(attempt.kind === "enqueue" ? "已排队，可继续输入下一条需求。" : "已确认，正在处理。");
     await refresh();
+    if (result) setSending(null);
   }
   useEffect(() => {
     const attempt = draft.pendingQueue;
@@ -231,27 +241,27 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   async function requestQuote(message: string, manually = false) {
     if (sendDisabled || quoting.current || !message.trim()) return;
     quoting.current = true;
-    setQuoteReading(true);
+    setQuoteRequest(message);
     setManualFallback(false);
     const selected = { ...readDraft(key), text: message };
     let revision = session.revision;
     for (const attachment of selected.attachments ?? []) {
       if (attachment.inputId || !attachment.assetKey) continue;
       const attached = await inputCommand.run<{ inputId: string; revision: number }>(`${sessionApi(session.sessionId)}/inputs`, { assetKey: attachment.assetKey });
-      if (!attached) { quoting.current = false; setQuoteReading(false); setNotice("材料关联未完成，文件和需求已保留。请重新发送以核对原关联。"); await refresh(); return; }
+      if (!attached) { quoting.current = false; setQuoteRequest(null); setNotice("材料关联未完成，文件和需求已保留。请重新发送以核对原关联。"); await refresh(); return; }
       revision = attached.revision;
       updateDraft((previous) => ({ ...previous, attachments: patchAttachment(previous.attachments, attachment.id, { inputId: attached.inputId }) }));
     }
     const current = readDraft(key);
     // Attachment binding changes revision/IDs only; user edits still require a fresh Send.
     if (current.text.trim() !== selected.text.trim() || JSON.stringify(draftSelection(current)) !== JSON.stringify(draftSelection(selected)) || JSON.stringify(current.taskHint) !== JSON.stringify(selected.taskHint) || JSON.stringify(current.references ?? []) !== JSON.stringify(selected.references ?? []) || JSON.stringify(current.attachments?.map((row) => row.id) ?? []) !== JSON.stringify(selected.attachments?.map((row) => row.id) ?? [])) {
-      quoting.current = false; setQuoteReading(false); setNotice("需求或材料已更改，请重新发送。"); await refresh(); return;
+      quoting.current = false; setQuoteRequest(null); setNotice("需求或材料已更改，请重新发送。"); await refresh(); return;
     }
     const autoAuthorizationId = undefined;
     const input = inputFor(current, revision, autoAuthorizationId);
     if (active || waitingEntries.length > 0) {
       const attempt = { kind: "enqueue" as const, key: crypto.randomUUID(), input };
-      quoting.current = false; setQuoteReading(false);
+      quoting.current = false; setQuoteRequest(null);
       await runQueueAttempt(attempt, true); return;
     }
     const quote = await command.run<AssistantTurnQuote>(
@@ -260,7 +270,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     );
     quoting.current = false;
     if (!alive.current) return;
-    setQuoteReading(false);
+    setQuoteRequest(null);
     // A response cannot resurrect a quote for an input changed while the request was in flight.
     if (
       quote &&
@@ -285,9 +295,10 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       session.archived
     )
       return;
-    const started = beginAttempt({ kind: "turn", value: attempt });
-    if (!started) return;
     submitting.current = true;
+    if (!retry) setSending({ key: attempt.commandKey, message: attempt.input.message, afterSeq: session.messages.at(-1)?.seq ?? 0, label: "正在开始处理…" });
+    const started = beginAttempt({ kind: "turn", value: attempt });
+    if (!started) { submitting.current = false; setSending(null); return; }
     if (!retry) updateDraft((previous) => preserveDraft ? { ...previous, pendingTurn: attempt } : freezeTurn(previous, attempt));
     if (quoted?.quote.quoteId === attempt.quoteId) clearRecovery(key, { kind: "quote", value: quoted });
     const result = await command.run(
@@ -308,8 +319,10 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
         setManualFallback(true);
       }
     }
+    if (!result) setSending(null);
     if (!alive.current) return;
     await refresh();
+    if (result) setSending(null);
   }
   async function answerQuestion() {
     if (!question || command.pending || session.archived) return;
@@ -509,6 +522,12 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     question && draft.answer?.questionId === question.questionId
       ? draft.answer.text
       : "";
+  const sendingRequestVisible = !!sending && (
+    messages.some(message => message.role === "user" && message.seq > sending.afterSeq && message.text === sending.message) ||
+    session.queue?.entries.some(entry => ["pending", "quoted"].includes(entry.state) && (entry.commandKey === sending.key || entry.id === sending.entryId))
+  );
+  const submissionError = submissionErrorCovered(command.failure.current, draft.pendingTurn?.commandKey, draft.pendingTurn?.hasUnknownResult) ||
+    submissionErrorCovered(command.failure.current, draft.pendingQueue?.key, draft.pendingQueue?.unknown);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AssistantUnsavedGuard
@@ -566,14 +585,23 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 setView={setView}
                 view={view}
                 canQueue={!sendDisabled && !question && !readError}
-                actionsStamp={`${quoted?.quote.quoteId ?? ""}:${session.queue?.paused}:${session.queue?.entries.map(entry => `${entry.id}:${entry.state}:${entry.quote?.quoteId ?? ""}:${entry.error ?? ""}`).join("|") ?? ""}`}
-                actions={<>{quoted && (                  <TurnQuoteDialog
+                showWelcome={ready && !reading && !readError && !session.turn && !session.initialRequest && !quoteReading && !quoted && !sending && !draft.pendingTurn && !draft.pendingQueue && !waitingEntries.length}
+                actionsStamp={`${quoteReading}:${sending?.key ?? ""}:${quoted?.quote.quoteId ?? ""}:${session.queue?.paused}:${session.queue?.entries.map(entry => `${entry.id}:${entry.state}:${entry.quote?.quoteId ?? ""}:${entry.error ?? ""}`).join("|") ?? ""}`}
+                actions={<>
+                  {(quoteReading || sending) && <div>
+                    {!sendingRequestVisible && <div className="assistant-message assistant-message-user">
+                      <p className="mb-2 text-[11px] font-medium text-ink-4">你</p>
+                      <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] [overflow-wrap:anywhere]">{sending?.message ?? quoteRequest}</p>
+                    </div>}
+                    <p role="status" className="mt-2 text-[12px] text-ink-3">{sending?.label ?? "正在准备本次费用…"}</p>
+                  </div>}
+                  {quoted && <TurnQuoteDialog
                     quote={quoted.quote}
                     message={quoted.input.message}
-                    pending={command.pending || !!draft.pendingTurn || !!draft.pendingQueue || active}
+                    pending={command.pending || !!sending || !!draft.pendingTurn || !!draft.pendingQueue || active}
                     requiresRequote={requiresRequote}
                     requote={() => void requoteSaved()}
-                    error={command.error}
+                    error={submissionError ? null : command.error}
                     close={() => {
                       if (!hasComposerDraft(readDraft(key))) restoreInput(quoted.input);
                       setQuoted(null); setNotice("原需求已取消，未执行；输入框中的草稿已保留。");
@@ -587,9 +615,9 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                           attachments: [],
                         }, false, true);
                     }}
-                  />)}
+                  />}
                   {quoted && quoted.input.expectedRevision !== session.revision && <p role="status" className="text-[12px] text-hot">会话材料已变化，请重新获取报价后确认。</p>}
-              <AssistantMessageQueue profile={profile??undefined} queue={session.queue} pending={command.pending || !!draft.pendingQueue} approve={approveQueue} cancel={id => void queueAction("cancel", id)} resume={() => void queueAction("resume")} requote={(id,choice) => void queueAction("quote", id,choice)} />
+                  <AssistantMessageQueue profile={profile ?? undefined} queue={session.queue} pending={command.pending || !!sending || !!draft.pendingQueue} approve={approveQueue} cancel={id => void queueAction("cancel", id)} resume={() => void queueAction("resume")} requote={(id,choice) => void queueAction("quote", id,choice)} />
                 </>}
               />
               <AssistantComposer
@@ -624,8 +652,6 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 hint={
                   question?.coverPlan
                     ? "也可以在这里补充修改要求。"
-                    : quoteReading
-                    ? "正在估算本次费用…"
                     : active && !question
                       ? "输入后发送到队列；输入为空时可停止当前任务。"
                       : session.archived
@@ -646,6 +672,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 )}
                 {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
                 {!question && unavailableSelection(profile, draftSelection(draft)) && <AssistantSkillNotice />}
+                {session.initialRequest?.clarification && !session.turn && !quoted && <p role="status" className="mb-2 text-[12px] text-ink-3">{session.initialRequest.clarification.message} 修改需求后在本会话重新发送；尚未查询或冻结积分。</p>}
                 {session.initialRequest && !session.initialRequest.quote && !session.turn && !hasComposerDraft(draft) && <Button size="sm" onClick={()=>{const input=session.initialRequest!.input;updateDraft(previous=>({...previous,text:input.message,skillSelection:input.skillSelection,taskHint:input.taskHint,taskChoice:input.taskChoice,inputIds:input.inputIds}));}}>继续首条需求</Button>}
                 {session.initialRequest?.quote && !session.turn && !draft.recoveryCount && !hasComposerDraft(draft) && <Button size="sm" onClick={() => setQuoted({...session.initialRequest!,quote:session.initialRequest!.quote!})}>恢复首条需求报价</Button>}
                 {notice && (
@@ -661,46 +688,38 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
 
                 {stopCommand.error && <p role="alert" className="text-[12px] text-hot">{stopCommand.error}</p>}
 
-                {!!draft.recoveryCount && draft.recoveryCount > 1 && <p className="text-[12px] text-ink-3">还有 {draft.recoveryCount} 条保存的费用或提交记录，按原记录逐条核对。</p>}
-                {draft.pendingQueue && <div className="assistant-inline-notice" role="status">
-                  <p>正在核对原排队提交。新草稿会保留，不会作为重试内容。</p>
-                  <Button size="sm" disabled={command.pending} onClick={() => void runQueueAttempt(draft.pendingQueue!)}>核对原提交</Button>
+                {!sending && !!draft.recoveryCount && draft.recoveryCount > 1 && <p className="text-[12px] text-ink-3">还有 {draft.recoveryCount} 条保存的费用或提交记录，按原记录逐条核对。</p>}
+                {draft.pendingQueue && sending?.key !== draft.pendingQueue.key && <div className="assistant-inline-notice" role="status">
+                  <p>{!draft.pendingQueue.unknown ? "这次发送未受理，原需求和新草稿都已保留。" : command.pending ? "正在核对上次发送…" : "上次发送的结果尚未确认，原需求和新草稿都已保留。"}</p>
+                  {draft.pendingQueue.kind === "enqueue" && <details className="mt-2"><summary>查看原需求</summary><p className="mt-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{draft.pendingQueue.input.message}</p></details>}
+                  {draft.pendingQueue.unknown && <Button size="sm" disabled={command.pending} onClick={() => void runQueueAttempt(draft.pendingQueue!)}>核对上次发送</Button>}
                   {!draft.pendingQueue.unknown && !command.pending && <Button size="sm" onClick={() => updateDraft(previous => {
                     const attempt = previous.pendingQueue;
                     if (attempt) clearRecovery(key, { kind: "queue", value: attempt });
                     return rejectedQueueDraft(previous);
-                  })}>返回编辑</Button>}
+                  })}>{draft.pendingQueue.kind === "approve" ? "返回费用确认" : hasComposerDraft(draft) ? "保留新草稿并取消原提交" : "返回修改原需求"}</Button>}
                 </div>}
-                {draft.pendingTurn && (
+                {draft.pendingTurn && sending?.key !== draft.pendingTurn.commandKey && (
                   <div className="assistant-inline-notice" role="status">
                     <p>
-                      {command.pending
-                        ? "正在提交已确认的需求，尚未显示为已保存消息。"
-                        : "上次已确认的提交仍在核对。将按已确认的原需求核对，不会自动重发。"}
+                      {canRejectTurn(draft.pendingTurn, command.errorStatus) ? "这次发送未受理，原需求和新草稿都已保留。" : command.pending ? "正在核对上次发送…" : "上次发送的结果尚未确认，原需求和新草稿都已保留。"}
                     </p>
                     <details className="mt-2">
-                      <summary>查看本次提交</summary>
+                      <summary>查看原需求</summary>
                       <p className="mt-2 whitespace-pre-wrap break-words">
                         {draft.pendingTurn.input.message}
                       </p>
                     </details>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        disabled={reading || command.pending}
-                        onClick={() => void refresh()}
-                      >
-                        读取提交状态
-                      </Button>
-                      <Button
+                      {!canRejectTurn(draft.pendingTurn, command.errorStatus) && <Button
                         size="sm"
                         disabled={command.pending}
                         onClick={() =>
                           void submitConfirmed(draft.pendingTurn!, true)
                         }
                       >
-                        重试原提交
-                      </Button>
+                        核对上次发送
+                      </Button>}
                       {canRejectTurn(draft.pendingTurn, command.errorStatus) && (
                           <Button
                             size="sm"
@@ -725,7 +744,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                         )}
                     </div>
                     <p className="mt-2 text-[11px] text-ink-4">
-                      刷新后仍按原标识核对提交，不会自动重发或重新报价。
+                      核对时沿用上次确认的需求与费用，新草稿不会被发送。
                     </p>
                   </div>
                 )}
@@ -746,7 +765,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   </div>
                 )}
                 {profile && !quoted && !active && !waitingEntries.length && hasComposerDraft(draft) && (command.failure.current?.code==='assistant_task_selection_required' || session.initialRequest && !session.initialRequest.quote && !session.initialRequest.input.taskChoice && !draft.taskChoice && draft.text===session.initialRequest.input.message) && <TaskClarification key={JSON.stringify([draftSelection(draft),draft.taskHint])} profile={profile} selection={draftSelection(draft)} taskHint={draft.taskHint} disabled={command.pending||quoteReading} confirm={taskChoice=>{updateDraft(previous=>({...previous,taskChoice}));void requestQuote(draft.text);}} />}
-                {command.error && !quoted && command.failure.current?.code!=='assistant_task_selection_required' && (
+                {command.error && !submissionError && !quoted && command.failure.current?.code!=='assistant_task_selection_required' && (
                   <p role="alert" className="mb-2 text-[12px] text-hot">
                     {command.error}
                   </p>

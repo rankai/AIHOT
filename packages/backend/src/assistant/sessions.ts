@@ -1,4 +1,5 @@
 import { bindings, currentSkillVersions } from "./bindings.ts";
+import { projectArticleVersions } from "./article-research.ts";
 import { Size } from "../providers/redfox/image-models.ts";
 import { prepareTaskChoice, taskPriceDefinition, applyTaskChoice, taskChoices } from "./task-pricing.ts";
 import { selectedArtifactVersions, coverPlanImageAvailability, hasSavedCoverResearch, COVER_DELIVERY_CONTRACT } from "./cover-plan.ts";
@@ -21,6 +22,8 @@ import { skillAdmission, queuedSkillAdmission, readSkillPolicies, skillHealth } 
 import { accepting, requireAvailable, modelPolicy, TurnInput } from "./config.ts";
 import { command, ownedSession, event, message, conflict, saveArtifact, Content } from "./store.ts";
 import type {
+  AssistantArtifactContent,
+  AssistantSource,
   AssistantImageParameters,
   AssistantSession,
   AssistantOptions,
@@ -117,7 +120,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
     }
     return { sessionId: id, initialRequest };
   });
-  if (created.initialRequest && !created.initialRequest.quote) {
+  if (created.initialRequest && !created.initialRequest.quote && !created.initialRequest.clarification) {
     try {
       await requireAvailable();
       const initial = created.initialRequest;
@@ -141,8 +144,15 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
         const current = await ownedSession(tx,userId,created.sessionId,true);
         if (current.active_turn_id || current.revision !== prepared.snapshot.revision ||
             current.initial_request?.commandKey !== initial.commandKey) throw conflict("首条需求已变化，请刷新");
-        if (current.initial_request.quote) return current.initial_request;
-        const result = {...initial,quote:await quoteAssistantTurn(userId,prepared,tx)};
+        if (current.initial_request.quote || current.initial_request.clarification) return current.initial_request;
+        let result;
+        try {
+          result = { ...initial, quote: await quoteAssistantTurn(userId, prepared, tx) };
+        } catch (error) {
+          // Only this correctable pre-quote refusal belongs to the already-created conversation.
+          if (!(error instanceof Error && "code" in error && error.code === "assistant_research_date_required")) throw error;
+          result = { ...initial, clarification: { code: error.code, message: error.message } };
+        }
         await tx`UPDATE assistant_sessions SET initial_request=${tx.json(result as never)} WHERE id=${created.sessionId}`;
         return result;
       });
@@ -167,21 +177,21 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     allowed = admission.candidates;
   const history =
     await db`SELECT role,text FROM assistant_messages WHERE session_id=${sessionId} AND role IN ('user','assistant') AND text<>'' ORDER BY seq`;
-  const previousArtifacts =
-    await db`SELECT DISTINCT ON (artifact_id) artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND kind IN ('text-draft','xhs-note') ORDER BY artifact_id,version DESC`;
-  const explicitArtifacts = new Set((input.artifactVersions ?? []).map((a) => a.artifactId));
-  if (input.artifactVersions === undefined) selected.push(...previousArtifacts.filter((a) => !explicitArtifacts.has(a.artifact_id)));
+  const articleRows = input.artifactVersions === undefined
+    ? await db`SELECT DISTINCT ON (artifact_id) artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND kind IN ('text-draft','xhs-note') ORDER BY artifact_id,version DESC`
+    : selected;
+  const materials: Record<string, any>[] = await projectArticleVersions(db, sessionId, articleRows as { content: AssistantArtifactContent; source_snapshot?: AssistantSource[] }[]);
   if (input.inputIds === undefined)
-    selected.push(
+    materials.push(
       ...(await db`SELECT id,text,hash,source FROM assistant_session_inputs WHERE session_id=${sessionId}`),
     );
   for (const id of input.inputIds ?? []) {
     const [row] =
       await db`SELECT id,text,hash,source FROM assistant_session_inputs WHERE id=${id} AND session_id=${sessionId}`;
     if (!row) throw conflict("选定输入不存在");
-    selected.push(row);
+    materials.push(row);
   }
-  for (const item of selected as Record<string, any>[]) {
+  for (const item of materials) {
     if (item.source?.assetKey) {
       if (db !== sql) await lockAssetInputs(db as Tx, [item.source.assetKey]);
       const attachment = await readAssistantAttachment(`user:${userId}`, item.source.assetKey, db);
@@ -211,7 +221,7 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     message: input.message,
     inputIds: input.inputIds,
     artifactVersions: input.artifactVersions,
-    selected,
+    selected: materials,
   };
   if (JSON.stringify(snapshot).length > 85000) throw conflict("选定材料过多，请缩小范围");
   // Reserve space before charging for two bounded article queries, loaded rules,
@@ -219,7 +229,7 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
   const modules = await Promise.all(allowed.map(candidate => resolveCandidate(allowed, candidate.skillId, candidate.moduleId)));
   // Owned saved plans already contain frozen research; reserve only their remaining execution.
   // Other admitted research contracts still need their original continuation allowance.
-  const savedCoverResearch=hasSavedCoverResearch(selected);
+  const savedCoverResearch=hasSavedCoverResearch(materials);
   const coverResearch=modules.some(({module})=>module.tools.includes("analyze_xhs_covers")
     && !(module.deliveryContract===COVER_DELIVERY_CONTRACT&&savedCoverResearch));
   const continuationReserve = coverResearch || modules.some(({ module }) => module.tools.includes("search_wechat_articles")) ? 20000 : 4096;
@@ -290,7 +300,8 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
     const [frozenQuote] = await tx`SELECT pricing_snapshot FROM member_tool_quotes WHERE id=${quoteId} AND user_id=${userId}`;
     if (frozenQuote?.pricing_snapshot.task) {
       if (input.autoAuthorizationId) throw conflict("本次任务需要一次明确费用确认，不能使用旧会话自动授权");
-      await taskPriceDefinition(snapshot, JSON.parse(frozenQuote.pricing_snapshot.task.scope));
+      const { research, ...choice } = JSON.parse(frozenQuote.pricing_snapshot.task.scope);
+      await taskPriceDefinition(snapshot, choice, research);
     }
     const turnId = randomUUID();
     if(input.autoAuthorizationId) await checkAuto(tx,userId,id,input.autoAuthorizationId,quoteId,"turn");
@@ -323,8 +334,8 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
         LEFT JOIN (SELECT entity_id,CASE WHEN count(*)=1 THEN min(seq) END AS event_seq
           FROM assistant_events WHERE session_id=${id} AND type='message' GROUP BY entity_id) e ON e.entity_id=m.id::text
         WHERE m.session_id=${id} ORDER BY m.seq`;
-    const artifacts =
-      await tx`SELECT DISTINCT ON (artifact_id) * FROM assistant_artifact_versions WHERE session_id=${id} ORDER BY artifact_id,version DESC`;
+    const artifacts = await projectArticleVersions(tx, id,
+      await tx`SELECT DISTINCT ON (artifact_id) * FROM assistant_artifact_versions WHERE session_id=${id} ORDER BY artifact_id,version DESC` as any[]);
     const deliveries = await tx<ArtifactDeliveryRow[]>`WITH versions AS (
         SELECT *,count(*) OVER (PARTITION BY artifact_id)::int AS version_count
         FROM assistant_artifact_versions WHERE session_id=${id}
@@ -513,10 +524,10 @@ export async function artifactVersions(userId: number, id: string, artifactId: s
   z.string().uuid().parse(artifactId);
   const { version } = ArtifactVersionQuery.parse(raw);
   return {
-    versions: (version === undefined
+    versions: (await projectArticleVersions(sql, id, (version === undefined
       ? await sql`SELECT * FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${artifactId} ORDER BY version DESC LIMIT 100`
       : await sql`SELECT * FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${artifactId} AND version=${version}`
-    ).map((a) => ({
+    ) as any[])).map((a) => ({
       artifactId: a.artifact_id,
       version: a.version,
       kind: a.kind,

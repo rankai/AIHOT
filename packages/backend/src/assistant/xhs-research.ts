@@ -7,6 +7,7 @@ import { contextTokens } from "./context.ts";
 import { conflict } from "./store.ts";
 import { DraftArgumentsError } from "./tool-arguments.ts";
 import { researchCitations, selectResearchSamples } from "./research-sources.ts";
+import { articleResearch, legacyResearchAppendix } from "./article-research.ts";
 
 export function researchClock(now = new Date()) {
   const today = beijingDate(now);
@@ -132,7 +133,7 @@ export async function analyzeResearch(tx: Tx, turn: Record<string, any>, callId:
     applicationPlan: input.applicationPlan, limitations };
 }
 export async function verifyResearchDelivery(tx: Tx, turn: Record<string, any>, activationId: string,
-  content: AssistantArtifactContent, sources: AssistantSource[], raw: unknown, target?: { artifactId?: string; baseVersion: number }) {
+  content: AssistantArtifactContent, sources: AssistantSource[], raw: unknown, target?: { artifactId?: string; baseVersion: number }, publishable = false) {
   const application = ResearchApplication.parse(raw);
   const [analysis] = await tx`SELECT c.*,t.snapshot,t.session_id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id
     WHERE c.id=${application.analysisCallId} AND c.name='analyze_xhs_research' AND c.state='completed' AND t.session_id=${turn.session_id}`;
@@ -146,16 +147,16 @@ export async function verifyResearchDelivery(tx: Tx, turn: Record<string, any>, 
   }
   if (!same && !inherited) throw conflict("分析不属于当前激活或选定的已验证稿件版本");
   const citation = researchCitations(analysis.result.samples, content.sources, sources, analysis.id, application.explanation);
-  const patterns = analysis.result.patterns;
-  const references = citation.cited.slice(0, 2).map((sample: any) =>
-    `- ${sample.title}：${sample.url ?? "原文链接未返回"}；作者：${sample.author ?? "未知"}；作者主页：${sample.authorUrl ?? "未知"}；` +
-    Object.entries(sample.metrics).map(([key, value]) => `${({ likedCount: "点赞", collectedCount: "收藏", commentsCount: "评论", sharedCount: "分享", interactiveCount: "互动总数", totalScore: "综合分" } as Record<string, string>)[key]}：${value ?? "未知"}`).join("，"));
-  // The observable research summary is server-rendered from persisted analysis, never just a heading check.
-  const formula = `\n\n### 爆款公式来源（已验证研究）\n标题：${patterns.title.observation}\n内容结构：${patterns.content.observation}\n标签：${patterns.tags.observation}\n互动：${patterns.interaction.observation}\n本稿应用：${application.explanation}\n研究范围：${analysis.result.samples.length}条；${analysis.result.limitations.join("；")}\n以下为本次研究参考，不代表已核实正文中的事实。\n${references.join("\n")}`;
-  const marker = "\n\n### 爆款公式来源（已验证研究）";
-  const body = content.body.split(marker)[0]!.replace(/\n\n(?:#{1,6} )?爆款公式来源[：:][\s\S]*$/, "");
+  const research = { ...analysis.result, analysisCallId: analysis.id };
+  let body = content.body;
+  if (!publishable) {
+    const appendix = legacyResearchAppendix("xiaohongshu", research, citation.cited, application.explanation);
+    if (!body.endsWith(appendix)) body += appendix;
+  }
   return {
-    content: { ...content, body: body + formula, sources: citation.sourceIds, partial: true,
+    content: { ...content, body,
+      ...(publishable ? { research: articleResearch("xiaohongshu", research, citation.cited, application.explanation) } : {}),
+      sources: citation.sourceIds, partial: true,
       scope: `${analysis.result.samples.length}条实际研究样本；${analysis.result.limitations.join("；")}`.slice(0, 1000) },
     sources: citation.sources,
   };

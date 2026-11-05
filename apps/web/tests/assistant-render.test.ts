@@ -180,6 +180,11 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
             sources: ["research-1", "unsafe", "current-message"],
             partial: true,
             scope: "仅单关键词研究",
+            research: {
+              platform: "xiaohongshu", analysisCallId: "frozen-analysis", application: "从日常场景开篇",
+              patterns: [{ label: "标题", observation: "用具体场景点题" }],
+              references: [{ sourceId: "research-1", title: "真实参考笔记", url: "https://example.com/note", metrics: [{ label: "收藏", value: 0 }] }],
+            },
           },
           sources: [
             {
@@ -417,15 +422,58 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(turnQuote.includes("费用与需求详情"));
     assert(turnQuote.includes(">确认开始</button>"));
     assert(turnQuote.includes(">取消</button>"));
+    assert.equal((turnQuote.match(/<button/g) ?? []).length, 2);
+    assert(turnQuote.indexOf("私有需求") < turnQuote.indexOf("<details"), "the request is visible before the first approval");
+    assert(!turnQuote.slice(0, turnQuote.indexOf("<details")).includes("报价时余额"));
     const taskQuote=render(TurnQuoteDialog,{quote:{...quote,task:{label:'三套方案',scope:'plans-only',items:[{key:'creation',label:'方案创作',units:1,amount:7}]}},message:'私有需求',pending:false,error:null,close(){},confirm(){}});
-    assert(taskQuote.includes('预计最多'));assert(taskQuote.includes('按实际执行结算'));assert(!taskQuote.includes('另行报价'));
+    assert(taskQuote.includes('最多'));assert(taskQuote.includes('按实际执行结算'));assert(!taskQuote.includes('另行报价'));
+    for (const [policy, queryKey] of [["xhs-empty-window@1", "search-xhs-notes@1"], ["wechat-low-raw-window@1", "search-wechat-hot@1"]]) {
+      for (const [units, unitPrice, creationPrice] of [[2, 20, 200], [1, 37, 230]]) {
+        const researchQuote = { ...quote, amount: creationPrice + units * unitPrice, available: 1000, task: { label: "研究写作", scope: JSON.stringify({ delivery: "writing", research: { policy, maximumQueries: units } }), items: [
+          { key: "creation", label: "文字创作", units: 1, amount: creationPrice },
+          { key: queryKey, label: "参考查询", units, amount: unitPrice },
+        ] } };
+        const renderResearch = (value = researchQuote) => render(TurnQuoteDialog, { quote: value, message: "本次研究需求", pending: false, error: null, close(){}, confirm(){}, requote(){} });
+        const research = renderResearch();
+        assert(research.includes(`最多 ${researchQuote.amount} 积分`));
+        assert(research.includes(`查询每次 ${unitPrice} 积分，最多 ${units} 次；没搜到只收查询费。`));
+        assert(!research.includes("重新获取报价"), "a valid quote offers only cancel and confirmation");
+        assert.equal((research.match(/<button/g) ?? []).length, 2);
+        for (const scope of ["old-contract", JSON.stringify({ delivery: "writing" }), JSON.stringify({ delivery: "image", research: { policy, maximumQueries: units } })])
+          assert(!renderResearch({ ...researchQuote, task: { ...researchQuote.task, scope } }).includes("只收查询费"));
+        assert(!renderResearch({ ...researchQuote, amount: researchQuote.amount + 1 }).includes("只收查询费"), "inconsistent frozen items use neutral disclosure");
+      }
+    }
+    assert(!taskQuote.includes("只收查询费"), "cover plans do not inherit writing research settlement");
+    const queueQuote = render(AssistantMessageQueue, { ...queueProps, queue: { paused: false, entries: [{ ...queuedEntry, state: "quoted", taskSelectionRequired: false, quote }] } });
+    assert(!queueQuote.includes("重新获取报价"));
+    assert.equal((queueQuote.match(/<button/g) ?? []).length, 2, "the quoted queue item uses the same cancel and confirm actions once");
+    assert.equal((queueQuote.slice(0, queueQuote.indexOf("<details")).match(/春季穿搭封面/g) ?? []).length, 1, "the queued request is already visible above its quote");
+    const expiredQueue = render(AssistantMessageQueue, { ...queueProps, queue: { paused: false, entries: [{ ...queuedEntry, state: "quoted", quote: { ...quote, expiresAt: "2020-01-01T00:00:00Z" } }] } });
+    assert.equal((expiredQueue.match(/重新获取报价/g) ?? []).length, 1);
+    assert(!expiredQueue.includes(">确认开始</button>"));
+    const firstRequest = { commandKey: "first-request", input: { message: "已发送的首条需求", expectedRevision: 0, skillSelection: null, inputIds: [], artifactVersions: [] }, quote };
+    const firstQuoteSession = render(AssistantConversation, { data: { me, options, session: { ...session, messages: [], turn: null, initialRequest: firstRequest } } });
+    assert(!firstQuoteSession.includes("开始这次创作"), "the initial request has already left the empty conversation state");
+    const dateCorrection = "查询日期超出可用范围，请选择2026-10-06至2026-11-05内的日期。";
+    const firstDateSession = render(AssistantConversation, { data: { me, options, session: { ...session, messages: [], turn: null, initialRequest: { ...firstRequest, quote: null, clarification: { code: "assistant_research_date_required", message: dateCorrection } } } } });
+    assert(firstDateSession.includes(dateCorrection), "a refreshed session retains the backend's exact date correction");
+    assert(firstDateSession.includes("修改需求后在本会话重新发送；尚未查询或冻结积分。"));
+    assert(firstDateSession.includes("继续首条需求"));
+    assert(!firstDateSession.includes("开始这次创作") && !firstDateSession.includes("这次发送未受理"));
+    const hydratingEmpty = render(AssistantConversation, { data: { me, options, session: { ...session, messages: [], turn: null } } });
+    assert(!hydratingEmpty.includes("开始这次创作"), "withhold the welcome until local pending requests have been read");
     const expiredQuote=render(TurnQuoteDialog,{quote:{...quote,amount:200,available:20,affordable:false,expiresAt:"2020-01-01T00:00:00Z"},message:"私有需求",pending:false,error:null,close(){},confirm(){},requote(){}});
-    assert(expiredQuote.includes("报价已过期，刷新后查看最新费用和余额"));
+    assert(expiredQuote.includes("报价已过期，请重新获取最新费用和余额"));
     assert(expiredQuote.includes("报价时余额：20"));
     assert(!expiredQuote.includes("还差")&&!expiredQuote.includes("查看积分"));
     assert(expiredQuote.includes("重新获取报价"));
+    assert(!expiredQuote.includes(">确认开始</button>"));
     const insufficient=render(TurnQuoteDialog,{quote:{...quote,amount:200,available:20,affordable:false},message:"私有需求",pending:false,error:null,close(){},confirm(){}});
     assert(insufficient.includes("还差 180"));
+    assert(insufficient.includes("查看积分") && !insufficient.includes(">确认开始</button>"));
+    const balanceRefresh=render(TurnQuoteDialog,{quote:{...quote,amount:200,available:20,affordable:false},message:"私有需求",pending:false,error:null,close(){},confirm(){},requote(){}});
+    assert(balanceRefresh.includes("重新获取报价") && balanceRefresh.includes("查看积分"));
     assert(cards.includes("重试"));
     assert(cards.includes("移除附件 长文件名.md"));
     assert(!cards.includes("private text"), "private preview stays closed until selected");
@@ -455,8 +503,10 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(!html.includes("本回合用户提供的材料"));
     assert(html.includes('href="https://example.com/note"'));
     assert(!html.includes("javascript:"));
-    assert(html.includes("部分交付"));
-    assert(html.includes("仅单关键词研究"));
+    assert.doesNotMatch(html, /部分交付|仅单关键词研究|frozen-analysis/);
+    const references = html.match(/<details(?![^>]* open)[^>]*><summary[^>]*>参考规律与作品<\/summary>([\s\S]*?)<\/details>/);
+    assert(references && references[1]!.includes("用具体场景点题") && references[1]!.includes("收藏 0"));
+    assert.equal(html.split('href="https://example.com/note"').length, 2);
     assert(html.includes("带入标题"));
     assert(html.includes("带入正文"));
     assert(html.includes("保留原稿事实"));
@@ -654,6 +704,38 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert.equal((completed.match(/已处理完成/g) ?? []).length, 1);
     assert(!completed.includes("会话稿件已保存"));
     assert(!completed.includes("回合"));
+    const previousDelivery = { turnId: "previous-turn", artifactId: "draft", version: 2, kind: "xhs-note" as const, title: "前轮稿件" };
+    const emptyResearchSession: AssistantSession = {
+      ...session,
+      messages: [
+        { id: "previous-request", seq: 1, role: "user", text: "上一轮写作需求", turnId: "previous-turn" },
+        { id: "empty-request", seq: 2, role: "user", text: "仅查询本次时间范围", turnId: "empty-turn" },
+        { id: "empty-response", seq: 3, role: "assistant", text: "本次范围没有查到可用文章，未生成新稿。", turnId: "empty-turn" },
+      ],
+      turn: {
+        ...session.turn!, turnId: "empty-turn", phase: "completed", status: "completed",
+        activities: [{ id: "call:empty-search", kind: "search_wechat_articles", state: "completed" }],
+        calls: [{ ...session.turn!.calls[0]!, name: "search_wechat_articles", state: "completed", result: { results: [], limited: false } }],
+      },
+    };
+    for (const deliveries of [undefined, [], [previousDelivery]]) {
+      const emptyResearch = render(AssistantConversation, { data: { me, options, session: { ...emptyResearchSession, deliveries } } });
+      assert(!emptyResearch.includes("assistant-task-artifacts"), "an empty current search must not offer an old draft as its result, including older snapshots");
+      assert(emptyResearch.includes("本次范围没有查到可用文章，未生成新稿。"));
+      assert(emptyResearch.includes('aria-label="会话作品"') && emptyResearch.includes("可读正文"), "historical artifacts stay available in the workspace");
+      const summary = emptyResearch.match(/<span[^>]*class="assistant-execution-phase"[^>]*>[\s\S]*?<\/span>/)?.[0] ?? "";
+      assert(summary.includes("已处理完成"));
+      assert(!summary.includes("稿件已保存"));
+      assert.equal((emptyResearch.match(/data-delivery-artifact-id="draft"/g) ?? []).length, deliveries?.length ?? 0);
+      const savedConversation = emptyResearch.slice(emptyResearch.indexOf('aria-label="已保存的对话"'));
+      if (deliveries?.length) assert(savedConversation.indexOf('data-delivery-artifact-id="draft"') < savedConversation.indexOf("仅查询本次时间范围"), "the previous delivery remains beside its own request");
+    }
+    const projectedEmptySave = render(CurrentTask, {
+      session: { ...emptyResearchSession, deliveries: [], turn: { ...emptyResearchSession.turn!, activities: [{ id: "call:save", kind: "save_draft", state: "completed" }] } },
+      csrf: me.csrf, pending: false, reading: false, readError: null, refresh: async () => {}, control: async () => {}, showArtifacts() {}, setView() {},
+    });
+    const emptySaveSummary = projectedEmptySave.match(/<span[^>]*class="assistant-execution-phase"[^>]*>[\s\S]*?<\/span>/)?.[0] ?? "";
+    assert(emptySaveSummary.includes("已处理完成") && !emptySaveSummary.includes("稿件已保存"), "an explicit empty delivery projection takes precedence over a save activity label");
     assert(html.includes('aria-label="对话目录"'));
     assert.equal((html.match(/aria-label="跳到第 /g) ?? []).length, 1);
     assert(html.includes('aria-controls="assistant-message-message-user"'));
@@ -733,10 +815,25 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     };
     const history = renderTask(projected);
     assert(history.includes("已收到请求"));
-    assert(history.includes("已选择创作技能"));
-    assert(history.includes("已加载创作技能"));
-    assert(history.includes("正在调用创作接口"));
+    assert(!history.includes("创作技能") && !history.includes("创作接口"));
+    assert(history.includes("正在处理"));
     assert(!history.includes("正在处理你的创作需求"));
+    for (const [kind, label] of [
+      ["search_xhs_notes", "正在查找参考笔记"],
+      ["search_wechat_articles", "正在查找参考文章"],
+      ["analyze_xhs_research", "正在整理参考笔记"],
+      ["analyze_wechat_research", "正在分析参考文章"],
+    ] as const) {
+      const business = renderTask({ ...executingTurn, activities: [{ id: `business:${kind}`, kind, state: "running" }] });
+      const summary = business.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0] ?? "";
+      assert(summary.includes(label));
+      assert(!summary.includes("创作接口") && !summary.includes("加载"));
+    }
+    const onlyTechnical = renderTask({ ...executingTurn, activities: [{ id: "only-model", kind: "model_request", state: "running" }] });
+    assert.match(onlyTechnical, /<li class="assistant-execution-step">[\s\S]*?<p>正在处理<\/p>/, "expansion remains readable when only internal preparation exists");
+    const oldReply = "I will load the skill. 加载模块是这条历史回复的原文。";
+    const preservedReply = render(AssistantConversation, { data: { me, options, session: { ...session, messages: [...session.messages, { id: "historical-technical", seq: 99, role: "assistant", text: oldReply, turnId: "turn" }] } } });
+    assert(preservedReply.includes(oldReply), "model replies are never removed by frontend keywords");
     const correcting = renderTask({ ...projected, activities: [
       ...projected.activities.slice(0, 3),
       { id: "call:invalid-draft", kind: "save_draft", state: "failed" },
@@ -752,10 +849,8 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       { id: "model:m2", kind: "model_request", state: "completed" },
       { id: "call:draft", kind: "save_draft", state: "completed" },
     ] });
-    assert.equal((generated.match(/已选择创作技能/g) ?? []).length, 1);
-    assert.equal((generated.match(/稿件内容已返回/g) ?? []).length, 1);
-    assert(generated.indexOf("已选择创作技能") < generated.indexOf("已加载创作技能"));
-    assert(generated.indexOf("稿件内容已返回") < generated.lastIndexOf("稿件已保存"));
+    assert(!generated.includes("创作技能") && !generated.includes("稿件内容已返回"));
+    assert(generated.includes("稿件已保存"));
     assert(!generated.includes("创作接口已返回"));
     const savedCover = renderTask({ ...completedTurn, activities: [{ id: "call:cover-plan", kind: "save_xhs_cover_plan", state: "completed" }] }, [coverArtifact]);
     assert(savedCover.includes("封面方案已保存"));
@@ -825,6 +920,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(!writingHtml.includes("作品已更新") && !writingHtml.includes("查看会话作品"));
     assert(!writingHtml.includes("已保存第 2 版。"), "an existing assistant reply is not repeated");
     assert(writingHtml.includes("本次用了 200 积分。"));
+    assert.match(writingHtml, /class="assistant-execution-phase"[^>]*>稿件已保存<\/span>/, "a persisted current delivery proves completion even without activity records");
     assert(!writingHtml.includes("已释放") && !writingHtml.includes("另有 0 积分"));
     assert.equal((writingHtml.match(/aria-label="复制需求"/g) ?? []).length, 2);
     assert.equal((writingHtml.match(/aria-label="复制回复"/g) ?? []).length, 2);
@@ -849,37 +945,33 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     });
     const modelThenTools = (tools: AssistantActivity[], state: AssistantActivity["state"] = "completed") =>
       renderTask({ ...executingTurn, activities: [{ ...modelActivity, state }, ...tools] }, []);
-    assert(modelThenTools([]).includes("创作接口已返回"));
+    assert(modelThenTools([]).includes("正在处理"));
     const mixed = modelThenTools([toolActivity("load_skill"), toolActivity("save_draft")]);
-    assert(mixed.includes("已返回下一步处理安排"));
+    assert(mixed.includes("准备保存稿件"));
     assert(!mixed.includes("已选择创作技能"));
     assert(!mixed.includes("稿件内容已返回"));
     const repeated = modelThenTools([toolActivity("load_skill"), toolActivity("load_skill", 1)]);
-    assert(repeated.includes("已选择创作技能"));
+    assert(repeated.includes("正在处理"));
+    assert(!repeated.includes("创作技能"));
     assert(!repeated.includes("已返回下一步处理安排"));
-    for (const [kind, label] of [
-      ["ask_question", "已提出需要补充的问题"],
-      ["read_skill_reference", "已提出读取资料需求"],
-    ] as const) assert(modelThenTools([toolActivity(kind)]).includes(label));
-    for (const [state, label] of [
-      ["running", "正在调用创作接口"],
-      ["preparing", "准备调用创作接口"],
-      ["waiting", "等待处理 · 调用创作接口"],
-    ] as const) {
+    assert(modelThenTools([toolActivity("ask_question")]).includes("准备补充信息"));
+    assert(!modelThenTools([toolActivity("read_skill_reference")]).includes("技能资料"));
+    for (const state of ["running", "preparing", "waiting"] as const) {
       const pendingModel = modelThenTools([toolActivity("save_draft")], state);
-      assert(pendingModel.includes(label));
+      assert(pendingModel.includes("正在处理"));
+      assert(!pendingModel.includes("创作接口"));
       assert(!pendingModel.includes("稿件内容已返回"));
       assert(!pendingModel.includes("稿件已保存"));
     }
     const proposedSearch = modelThenTools([{ ...toolActivity("search_xhs_notes"), state: "waiting", keyword: "咖啡" }]);
-    assert(proposedSearch.includes("已提出笔记检索需求"));
+    assert(!proposedSearch.includes("已提出笔记检索需求"));
     assert(proposedSearch.includes("等待处理 · 查询“咖啡”"));
     assert(!proposedSearch.includes("查询结果已返回"));
     const completedSearch = modelThenTools([{ ...toolActivity("search_xhs_notes"), state: "completed", keyword: "咖啡" }]);
-    assert(completedSearch.includes("已提出笔记检索需求"));
+    assert(!completedSearch.includes("已提出笔记检索需求"));
     assert(completedSearch.includes("查询“咖啡” · 查询结果已返回"));
     const analysisPending = modelThenTools([toolActivity("analyze_xhs_research")]);
-    assert(analysisPending.includes("爆款规律分析已返回"));
+    assert(!analysisPending.includes("爆款规律分析已返回"));
     assert(analysisPending.includes("准备整理爆款规律"));
     assert(!analysisPending.includes("已保存爆款规律分析"));
     const analysisSaved = modelThenTools([{ ...toolActivity("analyze_xhs_research"), state: "completed" }]);
@@ -888,7 +980,8 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(analysisFailed.includes("整理爆款规律 · 失败"));
     assert(!analysisFailed.includes("已保存爆款规律分析"));
     const waitingHistory = renderTask({ ...projected, status: "waiting", activities: projected.activities.map((a) => a.id === "model:m2" ? { ...a, state: "waiting" as const } : a) });
-    assert(waitingHistory.includes("等待处理 · 调用创作接口"));
+    assert(waitingHistory.includes("正在处理"));
+    assert(!waitingHistory.includes("创作接口"));
     assert(!waitingHistory.includes("assistant-activity-dot"));
     const onlyCompleted = { ...projected, activities: projected.activities.slice(0, 3) };
     for (const phase of ["executing", "waiting_child"] as const) {
@@ -898,7 +991,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       ]]) {
         const queued = renderTask({ ...onlyCompleted, phase, activities });
         const summary = queued.slice(queued.indexOf("<summary"), queued.indexOf("</summary>"));
-        assert(summary.includes("等待下一步处理"));
+        assert(summary.includes("正在处理"));
         assert(summary.includes('data-state="waiting"'));
         assert(!summary.includes('data-state="done"'));
         assert(!queued.includes("assistant-activity-dot"));
@@ -909,7 +1002,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const stoppedHistory = renderTask({ ...onlyCompleted, phase: "stopped", status: "stopped" });
     assert(stoppedHistory.includes('data-state="stopped"'));
     assert(stoppedHistory.includes("已停止"));
-    assert(stoppedHistory.includes("已加载创作技能"));
+    assert(!stoppedHistory.includes("创作技能"));
     const approvalHistory = renderTask({ ...session.turn!, activities: [
       { id: "request:t", kind: "request_received", state: "completed" },
       { id: "call:search", kind: "search_xhs_notes", state: "waiting", callId: session.turn!.calls[0]!.callId, keyword: "咖啡" },
