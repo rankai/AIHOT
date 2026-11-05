@@ -1,0 +1,17 @@
+{
+  "write/success": {
+    "moduleId": "write",
+    "case": "success",
+    "expected": "text-draft"
+  },
+  "write/missing-input": {
+    "moduleId": "write",
+    "case": "missing-input",
+    "expected": "ask_question"
+  },
+  "write/delivery": {
+    "moduleId": "write",
+    "case": "delivery",
+    "expected": "text-draft"
+  }
+}

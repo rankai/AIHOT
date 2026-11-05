@@ -12,7 +12,7 @@ import type {
 import { Button } from "../admin/ui";
 import { usePrivateAccount } from "../account/use-private-account";
 import { useToolCommand } from "../tools/client";
-import { sessionHref, type SessionPage } from "./data";
+import { sessionHref, submissionErrorCovered, type SessionPage } from "./data";
 import { draftKey, rememberDraft, useAssistantDraft, draftSelection, editDraftText, chooseDraftAction, hasComposerDraft, rejectedCreateDraft } from "./drafts";
 import { AssistantWorkspace } from "./workspace";
 import { AssistantComposer } from "./composer";
@@ -97,6 +97,7 @@ function EntryContent({
   );
   const navigate = useNavigate();
   const [createdSession, setCreatedSession] = useState<string | null>(null);
+  const [sendingCreate, setSendingCreate] = useState<string | null>(null);
   // Navigate after the cleared frozen command has rendered. The child blocker then
   // sees only a genuinely newer draft, which still requires the ordinary guard.
   useEffect(() => {
@@ -133,6 +134,7 @@ function EntryContent({
       configureFees,
       unknown: false,
     }), creationKey: draft.pendingCreate?.creationKey ?? crypto.randomUUID() };
+    if (!draft.pendingCreate) setSendingCreate(frozen.creationKey);
     if (!draft.pendingCreate?.creationKey)
       update((previous) => ({
         ...previous,
@@ -155,6 +157,7 @@ function EntryContent({
       const status = command.failure.current?.status;
       if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => rejectedCreateDraft({ ...previous, pendingCreate: frozen }));
       else update(previous => ({ ...previous, pendingCreate: { ...frozen, unknown: true } }));
+      setSendingCreate(null);
       return;
     }
     if (result.initialRequest?.quote) {
@@ -162,13 +165,14 @@ function EntryContent({
       catch { /* The session retains an explicit recovery action if browser storage fails. */ }
     }
     rememberDraft(draftKey(identity, result.sessionId), {
-      ...(frozen.configureFees || !result.initialRequest?.quote ? {...frozen,attachments:[],inputIds:result.initialRequest?.input.inputIds??[]} : { text: "", actionId: null, attachments: [] }),
+      ...(frozen.configureFees || !result.initialRequest?.quote ? {...frozen,taskChoice:result.initialRequest?.input.taskChoice??frozen.taskChoice,attachments:[],inputIds:result.initialRequest?.input.inputIds??[]} : { text: "", actionId: null, attachments: [] }),
     });
     update((previous) =>
       previous.pendingCreate?.creationKey === frozen.creationKey
         ? { ...previous, pendingCreate: undefined }
         : previous,
     );
+    setSendingCreate(null);
     if (alive.current) setCreatedSession(result.sessionId);
   }
   const title = assistantId === "creative" ? "创作助手" : "小红书助手";
@@ -181,8 +185,14 @@ function EntryContent({
         subtitle="新对话"
         chat={
           <>
-            <div className="assistant-message-scroll assistant-entry-welcome">
-              <div className="assistant-welcome">
+            <div className={`assistant-message-scroll${draft.pendingCreate ? "" : " assistant-entry-welcome"}`}>
+              {draft.pendingCreate ? <div className="assistant-message-column">
+                <div className="assistant-message assistant-message-user">
+                  <p className="mb-2 text-[11px] font-medium text-ink-4">你</p>
+                  <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] [overflow-wrap:anywhere]">{draft.pendingCreate.text}</p>
+                </div>
+                {sendingCreate === draft.pendingCreate.creationKey && <p role="status" className="mt-3 text-[13px] text-ink-3">正在准备本次费用…</p>}
+              </div> : <div className="assistant-welcome">
                 <RingMark className="assistant-welcome-mark size-9 text-accent" />
                 <h2 className="text-[28px] font-medium leading-tight text-ink">
                   {assistantId === "creative"
@@ -220,7 +230,7 @@ function EntryContent({
                     {profile.reason ?? "此助手暂不可用。"}
                   </p>
                 )}
-              </div>
+              </div>}
             </div>
             <AssistantComposer
               text={draft.text}
@@ -229,20 +239,15 @@ function EntryContent({
               disabled={!ready || !profile?.available || unavailableSelection(profile, draftSelection(draft)) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
               busy={command.pending}
               maxLength={options.limits.inputCharacters}
-              hint={
-                command.pending
-                  ? "正在免费建立会话，随后确认本次费用…"
-                  : undefined
-              }
               controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
               attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
               {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
               {unavailableSelection(profile, draftSelection(draft)) && <AssistantSkillNotice />}
-              {draft.pendingCreate && (
+              {draft.pendingCreate && sendingCreate !== draft.pendingCreate.creationKey && (
                 <div className="assistant-inline-notice" role="status">
                   <p>
-                    正在确认建会话结果。原需求已单独保留；下一轮草稿可以继续记录。
+                    {draft.pendingCreate.rejected ? "这次发送未受理，原需求和新草稿都已保留。" : command.pending ? "正在核对上次发送…" : "上次发送的结果尚未确认，原需求和新草稿都已保留。"}
                   </p>
                   <details className="mt-2">
                     <summary>查看原需求</summary>
@@ -250,18 +255,16 @@ function EntryContent({
                       {draft.pendingCreate.text}
                     </p>
                   </details>
-                  {!command.pending && (
-                    <Button size="sm" onClick={() => void send()}>
-                      重试原建会话命令
+                  {!draft.pendingCreate.rejected && (
+                    <Button size="sm" disabled={command.pending} onClick={() => void send()}>
+                      核对上次发送
                     </Button>
                   )}
                   {draft.pendingCreate.rejected && <><Button size="sm" disabled={hasComposerDraft(draft)} onClick={() => update(rejectedCreateDraft)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
-                  <p className="mt-2 text-[11px] text-ink-4">
-                    本次页面会话内可按原命令恢复；刷新或重新登录后先核对历史，不自动重发。
-                  </p>
+                  {!draft.pendingCreate.rejected && <p className="mt-2 text-[11px] text-ink-4">核对时沿用上次需求。刷新或重新登录后请先查看会话历史。</p>}
                 </div>
               )}
-              {command.error && (
+              {command.error && !submissionErrorCovered(command.failure.current, draft.pendingCreate?.creationKey, draft.pendingCreate?.unknown) && (
                 <p role="alert" className="mb-3 text-[13px] text-hot">
                   {command.error}
                 </p>

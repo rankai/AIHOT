@@ -1,3 +1,4 @@
+import { finishResearchTask } from "./assistant-research-window-fixture.ts";
 import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
 import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
@@ -28,6 +29,8 @@ import { recoverAssistantChildren } from "@aihot/backend/assistant/execution";
 import { updateAssistantSkill, readSkillPolicies } from "@aihot/backend/assistant/skill-policy";
 import { analyzeWechatResearch, wechatResearchResults } from "@aihot/backend/assistant/wechat-research";
 import { contextTokens } from "@aihot/backend/assistant/context";
+import { buildApp } from "../apps/api/src/app.ts";
+import { loginSiteUser } from "@aihot/backend/users/auth";
 const parameters = { keyword: "职场,成长", startDate: "2026-10-26", endDate: "2026-11-02" };
 const sample = (i:number) => ({ id:`sample-${i}`, title:`职场成长的${i}个方法`, author:"合成作者", summary:"先观察具体场景，再对照实际需求。".repeat(20), url:`https://mp.weixin.qq.com/s/sample${i}`, clicksCount:0, publicTime:"2026-11-01 12:00:00" });
 const completion = (name:string,input:unknown) => ({id:"stub",created:1,model:"stub",choices:[{index:0,message:{role:"assistant",content:null,tool_calls:[{id:"call_0",type:"function",function:{name,arguments:JSON.stringify(input)}}]},finish_reason:"tool_calls"}]});
@@ -80,7 +83,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
  let hits=0, status=200, response:any={code:2000,data:{articles:[sample(1),sample(2)]}};
  const requests:any[]=[];let invalidDraft=true, invalidSearch=0, mode="normal";
  let reuse: any;
- const server=http.createServer((req,res)=>{let body="";req.on("data",c=>body+=c);req.on("end",()=>{hits++;requests.push({url:req.url,headers:req.headers,method:req.method,body:JSON.parse(body)});res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(response));});});
+ const server=http.createServer((req,res)=>{let body="";req.on("data",c=>body+=c);req.on("end",()=>{hits++;requests.push({url:req.url,headers:req.headers,method:req.method,body:JSON.parse(body)});res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(typeof response==="function"?response():response));});});
  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
  const supplier=await stub((_hit,req)=>{
   const request=JSON.parse(req.body),messages=request.messages.filter((m:any)=>m.role==="tool").map((m:any)=>JSON.parse(m.content));
@@ -91,7 +94,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   const searches=messages.filter((m:any)=>m.results),search=searches.at(-1);
   if(mode==="normal" && invalidSearch<2) return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,...(invalidSearch++===0?{keyword:"a,b,c,d,e,f"}:{startDate:"2026-02-30"})});
   if(mode==="maximum" && searches.length===1) return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,keyword:"补充成长"});
-  if(!search){const clock=JSON.stringify(request.messages).match(/"today":"(\d{4}-\d{2}-\d{2})"/);return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,...(clock?{endDate:clock[1]}:{})});}
+  if(!search){const system=request.messages.find((m:any)=>m.role==="system").content,clock=JSON.parse(system.split("\n可信的冻结目录及限制：").at(-1)).researchClock;return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,startDate:clock.defaultStartDate,endDate:clock.today});}
   const ids=search.results.map((r:any)=>`search:${r.id}`),analysis=messages.find((m:any)=>m.analysisCallId);
   if(!analysis){const p={sampleIds:ids,observation:mode==="maximum"?"标题先说明适用场景，摘要用具体问题引出行动，再交代观察和记录方法。接口没有给出互动数据，不能据此比较热度。".repeat(4):"接口没有给出互动数据，不能据此比较热度"};return completion("analyze_wechat_research",{activationId:loaded.activationId,topic:"职场成长",samples:ids.map((sourceId:string)=>({sourceId,relevance:"样本讨论职场成长与行动方法"})),titlePattern:p,openingPattern:p,structurePattern:p,languagePattern:p,interactionPattern:p,keywordPattern:p,applicationPlan:"以实际场景切入并说明行动方法",limitations:[]});}
   const activationId=invalidDraft?"not-a-uuid":loaded.activationId;invalidDraft=false;
@@ -117,6 +120,38 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   await updateAssistantSkill("wechat-write",{acceptingNew:true,expectedRevision:0,reason:"Synthetic local fixture"},"test");
   const user=await createSiteUser({username:`wechat_${tag()}`,displayName:"Wechat fixture",password:"synthetic-password"},"test");
   await grantCredits(user.id,{amount:100,reason:"Synthetic fixture"},"test",randomUUID());
+  await t.test("initial date corrections keep the created session and replay without queries, quotes or credit reservations",async()=>{
+   const login=await loginSiteUser({username:user.username,password:"synthetic-password"});
+   const headers={cookie:`aihot_user=${login.token}`,"x-csrf-token":login.principal.csrf};
+   const app=await buildApp();
+   const counts=async()=>(await sql`SELECT
+    (SELECT count(*) FROM assistant_sessions WHERE owner_user_id=${user.id})::int sessions,
+    (SELECT count(*) FROM member_tool_quotes WHERE user_id=${user.id})::int quotes,
+    (SELECT count(*) FROM member_credit_charges WHERE user_id=${user.id})::int charges,
+    (SELECT count(*) FROM receipts)::int receipts`)[0]!;
+   try {
+    for(const message of ["查询本周的职场文章，写公众号文章","查询2020-01-01至2020-01-02的职场文章，写公众号文章"]){
+     const before=await counts(),queryHits=hits,modelHits=supplier.hits(),key=randomUUID();
+     const payload={assistantId:"creative",initialRequest:{message,skillSelection:{actionId:"wechat-write"},taskChoice:{skillId:"wechat-write",moduleId:"write",delivery:"writing"}}};
+     const create=()=>app.inject({method:"POST",url:"/api/assistant/sessions",headers:{...headers,"idempotency-key":key},payload});
+     const response=await create();assert.equal(response.statusCode,201,response.body);
+     const saved=response.json();assert.equal(saved.initialRequest.quote,null);
+     assert.equal(saved.initialRequest.input.message,message);
+     assert.equal(saved.initialRequest.clarification.code,"assistant_research_date_required");
+     assert.match(saved.initialRequest.clarification.message,/日期/);
+     assert.deepEqual((await sessionSnapshot(user.id,saved.sessionId)).initialRequest,saved.initialRequest);
+     // Treat the first successful reply as lost; both retries must return its exact durable result.
+     const retries=await Promise.all([create(),create()]);
+     for(const retry of retries){assert.equal(retry.statusCode,201,retry.body);assert.deepEqual(retry.json(),saved);}
+     assert.deepEqual(await counts(),{...before,sessions:before.sessions+1});
+     assert.equal(hits,queryHits);assert.equal(supplier.hits(),modelHits);
+     const corrected=await currentQuoteTurn(user.id,saved.sessionId,{...saved.initialRequest.input,message:"查询近7天的职场文章，写公众号文章"});
+     assert(corrected.quoteId);assert.equal(corrected.amount,10);
+     assert.equal((await counts()).sessions,before.sessions+1,"corrected input stays in the existing session");
+     assert.equal(hits,queryHits);assert.equal(supplier.hits(),modelHits);
+    }
+   } finally {await app.close();}
+  });
   const session=await createSession(user.id,{assistantId:"creative"},randomUUID());
   const raw={message:"公众号职场成长文章，风格不提供",expectedRevision:1,skillSelection:{actionId:"wechat-write"}};
   const quote=await quoteTurn(user.id,session.sessionId,raw), turn=await submitTurn(user.id,session.sessionId,{...raw,quoteId:quote.quoteId},randomUUID());
@@ -159,7 +194,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   for(let i=0;i<2;i++)await advance(turn.runId);
   snap=await sessionSnapshot(user.id,session.sessionId);
   assert.equal(snap.turn?.status,"completed");assert.equal(snap.artifacts.length,1);assert.equal(snap.artifacts[0]!.kind,"text-draft");
-  assert.match(snap.artifacts[0]!.content.body,/公众号爆款规律来源/);assert.equal(hits,1);assert(!snap.artifacts[0]!.content.sources.includes("search:999999999"));
+  assert.equal(snap.artifacts[0]!.content.research?.platform,"wechat");assert(!snap.artifacts[0]!.content.body.includes("公众号爆款规律来源"));assert.equal(hits,1);assert(!snap.artifacts[0]!.content.sources.includes("search:999999999"));
   assert.equal(requests[0].url,"/story/api/gzh/search/hotArticleNew");assert.equal(requests[0].method,"POST");assert.equal(requests[0].headers["x-api-key"],"synthetic-key");assert.equal(requests[0].headers.redfox_api_key,undefined);assert.equal(requests[0].body.source,WECHAT_HOT_SOURCE);
   const charges=await sql`SELECT amount,state FROM member_credit_charges WHERE root_run_id IN (${turn.runId},${child!.child_run_id})`;assert.deepEqual(charges.map(r=>r.amount).sort(),[3,7]);assert(charges.every(r=>r.state==="settled"));
   const [receipt]=await sql`SELECT model,attempts FROM receipts WHERE id=(SELECT receipt_id FROM operation_results WHERE run_id=${child!.child_run_id} LIMIT 1)`;assert.equal(receipt!.model,operationId);assert.equal(receipt!.attempts,1);
@@ -245,22 +280,35 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
     for(const attempt of attempts)await sql`UPDATE receipt_attempts SET response=${attempt.response===null?null:sql.json(attempt.response)} WHERE id=${attempt.id}`;
    }
   });
-  await t.test("current wechat task researches, analyzes and delivers with one frozen charge",async()=>{
-   mode='normal';invalidSearch=2;invalidDraft=false;const beforeCurrentQueries=hits;
-   await sql`UPDATE operation_runs SET created_at=now()-interval '2 minutes' WHERE actor=${`user:${user.id}`}`;
-   const fresh=await createSession(user.id,{assistantId:'creative'},randomUUID()),raw={message:'研究职场成长并写公众号文章',expectedRevision:1,skillSelection:{actionId:'wechat-write'}};
-   const q=await currentQuoteTurn(user.id,fresh.sessionId,raw);assert(q.task);assert.equal(q.amount,13);
-   const run=await currentSubmitTurn(user.id,fresh.sessionId,{...raw,quoteId:q.quoteId},randomUUID());
-   let result:any;
-   for(let i=0;i<30;i++){
-    result=await sessionSnapshot(user.id,fresh.sessionId);if(result.turn.status==='completed')break;
-    assert.notEqual(result.turn.phase,'waiting_approval');assert.notEqual(result.turn.status,'needs_review');
-    const call=result.turn.calls.find((c:any)=>c.state==='running');const [child]=call?await sql`SELECT status FROM operation_runs WHERE id=${call.childRunId}`:[];
-    await advance(child&&['active','waiting'].includes(child.status)?call.childRunId:run.runId);
+  await t.test("current WeChat uses the raw count for one same-term expansion; final zero does not bill a draft",async()=>{
+   mode="window";invalidSearch=2;invalidDraft=false;
+   for(const scenario of ["nine","ten-duplicates","empty","malformed"] as const) {
+    const start=hits, written=scenario==="nine"||scenario==="ten-duplicates", twice=scenario!=="ten-duplicates";
+    response=()=>({code:2000,data:scenario==="malformed"&&hits>start+1?{articles:null}:{articles:scenario==="empty"?[]:scenario==="ten-duplicates"?Array(10).fill(sample(1)):hits===start+1?Array.from({length:9},(_,i)=>sample(i+1)):[sample(20),sample(21)]}});
+    await sql`UPDATE operation_runs SET created_at=now()-interval '2 minutes' WHERE actor=${`user:${user.id}`}`;
+    const fresh=await createSession(user.id,{assistantId:"creative"},randomUUID()),raw={message:"研究职场成长并写公众号文章",expectedRevision:1,skillSelection:{actionId:"wechat-write"}};
+    const q=await currentQuoteTurn(user.id,fresh.sessionId,raw);assert.equal(q.amount,13);
+    const run=await currentSubmitTurn(user.id,fresh.sessionId,{...raw,quoteId:q.quoteId},randomUUID());
+    const result=await finishResearchTask(user.id,fresh.sessionId,run.runId,scenario==="malformed"?"needs_review":"completed");
+    const [turn]=await sql`SELECT snapshot FROM assistant_turns WHERE id=${run.turnId}`;
+    const clock=turn!.snapshot.researchClock, recent=requests.slice(start).map(r=>r.body);
+    assert.deepEqual(recent.map(r=>[r.keyword,r.startDate,r.endDate]),(twice?[clock.defaultStartDate,clock.earliestDate]:[clock.defaultStartDate]).map(d=>[parameters.keyword,d,clock.today]));
+    assert.equal(result.artifacts.length,written?1:0);
+    if(scenario==="malformed"){
+     assert.equal(result.turn!.credits!.state,"review");assert.equal(result.turn!.credits!.consumed,0);
+     assert(!result.messages.some(m=>m.role==="assistant"&&/暂无相关爆款/.test(m.text)));
+     await recoverAssistantChildren(run.runId);assert.equal(hits,start+2);continue;
+    }
+    if(!written) assert.match(result.messages.filter(m=>m.role==="assistant").map(m=>m.text).join(" "),/暂无相关爆款/);
+    if(scenario==="nine"){
+     const [analysis]=await sql`SELECT result FROM assistant_tool_calls WHERE turn_id=${run.turnId} AND name='analyze_wechat_research' AND state='completed'`;
+     assert.deepEqual(analysis!.result.samples.map((s:any)=>s.title).sort(),[sample(20).title,sample(21).title].sort());
+    }
+    const [charge]=await sql`SELECT id,amount,consumed,released FROM member_credit_charges WHERE root_run_id=${run.runId}`;
+    const cost=recent.length*3+(written?7:0);
+    assert.deepEqual([charge!.amount,charge!.consumed,charge!.released],[13,cost,13-cost]);
+    assert.equal((await sql`SELECT count(*)::int n FROM member_credit_entries WHERE charge_id=${charge!.id} AND kind='reserve'`)[0]!.n,1);
    }
-   assert.equal(result.turn.status,'completed');assert.equal(result.artifacts.length,1);assert.equal(hits,beforeCurrentQueries+1);
-   const [charge]=await sql`SELECT id,amount,consumed,released FROM member_credit_charges WHERE root_run_id=${run.runId}`;assert.deepEqual([charge!.amount,charge!.consumed,charge!.released],[13,10,3]);
-   const [ledger]=await sql`SELECT count(*)::int n FROM member_credit_entries WHERE charge_id=${charge!.id} AND kind='reserve'`;assert.equal(ledger!.n,1);
   });
  }finally{
   if(beforePolicy)await sql`UPDATE settings SET value=${sql.json(beforePolicy.value)} WHERE key='assistant.skills.wechat-write'`;else await sql`DELETE FROM settings WHERE key='assistant.skills.wechat-write'`;

@@ -15,6 +15,9 @@ import { CoverPlanBody } from "./cover-plan";
 import { artifactDisplayName, imageDownloadName, type ArtifactTarget } from "./artifact-display";
 function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
   const { content } = artifact;
+  const titles = [...new Set(content.titles.map(title => title.trim()).filter(Boolean))].filter(title => title !== content.title.trim());
+  const tags = [...new Set(content.tags.map(tag => tag.trim().replace(/^#+/, "")).filter(Boolean))];
+  const materials = artifact.sources.filter(source => content.sources.includes(source.id) && source.kind !== "research");
   return (
     <div className="min-w-0 space-y-4">
       <h3 className="break-words text-[19px] font-semibold text-ink">
@@ -23,11 +26,11 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
       <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] text-ink-2 [overflow-wrap:anywhere]">
         {content.body}
       </div>
-      {!!content.titles.length && (
+      {!!titles.length && (
         <div>
           <h4 className="text-[12px] font-medium text-ink-3">备选标题</h4>
           <ul className="mt-2 list-inside list-decimal space-y-1 text-[14px] text-ink-2">
-            {content.titles.map((title, i) => (
+            {titles.map((title, i) => (
               <li key={i} className="break-words">
                 {title}
               </li>
@@ -35,18 +38,16 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
           </ul>
         </div>
       )}
-      {!!content.tags.length && (
+      {!!tags.length && (
         <p className="break-words text-[13px] text-accent">
-          {content.tags.map((tag) => `#${tag.replace(/^#/, "")}`).join(" ")}
+          {tags.map(tag => `#${tag}`).join(" ")}
         </p>
       )}
-      <DraftResearchDetails content={content} />
-      <div>
+      <DraftResearchDetails key={artifact.version} content={content} sources={artifact.sources} />
+      {!!materials.length && <div>
         <h4 className="text-[12px] font-medium text-ink-3">材料与引用</h4>
         <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
-          {artifact.sources
-            .filter((source) => content.sources.includes(source.id))
-            .map((source) => {
+          {materials.map((source) => {
               const href = safeSourceHref(source.url);
               const label = source.kind === "user-material" && source.id === "current-message" ? "你提供的材料" : source.label;
               return (
@@ -70,19 +71,39 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
               );
             })}
         </ul>
-      </div>
+      </div>}
     </div>
   );
 }
 
-function DraftResearchDetails({ content }: { content: AssistantArtifactContent }) {
-  return <div className="text-[12px] leading-relaxed text-ink-3">
-    {content.partial && <p className="mb-2">这份稿件为部分交付，详情见研究范围。</p>}
-    <details className="rounded-control bg-bg-sunk p-3">
-      <summary className="cursor-pointer font-medium">研究范围</summary>
-      <p className="mt-2 whitespace-pre-wrap">{content.scope || "未记录研究范围。"}</p>
-    </details>
-  </div>;
+function DraftResearchDetails({ content, sources }: { content: AssistantArtifactContent; sources: AssistantArtifact["sources"] }) {
+  const research = content.research;
+  const seen = new Set<string>();
+  const references: NonNullable<AssistantArtifactContent["research"]>["references"] = research?.references ?? sources.flatMap(source => {
+    if (source.kind !== "research" || !content.sources.includes(source.id) || !source.label.trim() || source.label === source.id) return [];
+    const url = safeSourceHref(source.url), key = url ?? source.id;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ sourceId: source.id, title: source.label, url, metrics: [] }];
+  });
+  if (!research?.patterns.length && !references.length && !research?.application) return null;
+  return <details className="rounded-control bg-bg-sunk p-3 text-[12px] leading-relaxed text-ink-3">
+    <summary className="cursor-pointer font-medium">参考规律与作品</summary>
+    <div className="mt-3 space-y-3">
+      {research?.patterns.map((pattern, index) => <p key={index} className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><span className="font-medium">{pattern.label}：</span>{pattern.observation}</p>)}
+      {research?.application && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><span className="font-medium">本稿采用的写法：</span>{research.application}</p>}
+      {!!references.length && <ul className="space-y-3">{references.map((reference, index) => {
+        const href = safeSourceHref(reference.url);
+        const authorHref = safeSourceHref(reference.authorUrl ?? null);
+        return <li key={index} className="space-y-1 break-words [overflow-wrap:anywhere]">
+          <p>{href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline">{reference.title}</a> : reference.title}</p>
+          {reference.author && <p>作者：{authorHref ? <a href={authorHref} target="_blank" rel="noopener noreferrer" className="text-accent underline">{reference.author}</a> : reference.author}</p>}
+          {!reference.author && authorHref && <p><a href={authorHref} target="_blank" rel="noopener noreferrer" className="text-accent underline">作者主页</a></p>}
+          {!!reference.metrics.length && <p>{reference.metrics.map(metric => `${metric.label} ${metric.value}`).join(" · ")}</p>}
+        </li>;
+      })}</ul>}
+    </div>
+  </details>;
 }
 
 export function AssistantArtifactPanel({
@@ -295,10 +316,11 @@ function WritingArtifactCard({
         .filter(Boolean),
       tags: editing.content.tags.map((value) => value.trim()).filter(Boolean),
     };
+    const { research, ...editableContent } = content;
     const result = await command.run<AssistantArtifact>(path, {
       baseVersion: editing.baseVersion,
       kind: artifact.kind,
-      content,
+      content: editableContent,
     });
     if (!alive.current) return !!result;
     if (result) {
@@ -366,7 +388,7 @@ function WritingArtifactCard({
       data-artifact-id={artifact.artifactId}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Badge tone={selected.content.partial ? "warn" : "ok"}>
+        <Badge tone={(cover || image) && selected.content.partial ? "warn" : "ok"}>
           {cover ? "小红书封面方案" : image ? artifactDisplayName(selected) : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
         </Badge>
         <span className="text-[12px] text-ink-4">
@@ -406,7 +428,7 @@ function WritingArtifactCard({
             }
           }}
         >
-          复制
+          {cover ? "复制" : "复制文案"}
         </Button>}
         <Button
           size="sm"
@@ -534,7 +556,7 @@ function WritingArtifactCard({
               }
             />
           </label>
-          <DraftResearchDetails content={editing.original} />
+          <DraftResearchDetails content={editing.original} sources={selected.sources} />
           <p className="text-[12px] text-ink-4">
             保存追加新版本，保留原版本和来源。只有保存成功才会显示已保存。
           </p>

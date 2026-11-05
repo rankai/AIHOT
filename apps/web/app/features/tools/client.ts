@@ -9,7 +9,7 @@ export function useToolCommand(csrf: string, commandScope?: string) {
   const [error, setError] = useState<string | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const busy = useRef(false);
-  const failure = useRef<{ status: number | null; code: string | null; message: string } | null>(null);
+  const failure = useRef<{ commandKey: string; status: number | null; code: string | null; message: string } | null>(null);
   const commands = useRef(new Map<string, string>());
   async function run<T>(path: string, body: unknown, method: "POST" | "DELETE" = "POST", identityInput?: unknown, commandKey?: string): Promise<T | null> {
     if (busy.current) return null;
@@ -36,11 +36,11 @@ export function useToolCommand(csrf: string, commandScope?: string) {
         return null;
       }
       const data = await response.json().catch(() => null);
-      if (!response.ok) { setErrorStatus(response.status); const message = response.status === 403 ? "权限或登录校验已过期，请刷新页面后重试。" : data?.detail ?? `操作未完成（${response.status}）`; failure.current = { status: response.status, code: data?.code ?? data?.error ?? null, message }; throw new Error(message); }
+      if (!response.ok) { setErrorStatus(response.status); const message = response.status === 403 ? "权限或登录校验已过期，请刷新页面后重试。" : data?.detail ?? `操作未完成（${response.status}）`; failure.current = { commandKey: key, status: response.status, code: data?.code ?? data?.error ?? null, message }; throw new Error(message); }
       commandKeys.delete(fingerprint);
       return data as T;
     } catch (error) {
-      if (!failure.current) failure.current = { status: null, code: null, message: error instanceof Error ? error.message : "连接中断" };
+      if (!failure.current) failure.current = { commandKey: key, status: null, code: null, message: error instanceof Error ? error.message : "连接中断" };
       setError(error instanceof Error && error.name !== "TypeError" && error.name !== "TimeoutError" ? error.message : "连接中断或超时。可先查看执行记录；使用相同输入重试不会重复创建任务。");
       return null;
     } finally {

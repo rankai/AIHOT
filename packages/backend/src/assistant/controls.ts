@@ -1,3 +1,4 @@
+import { articleInputProjection, projectArticleVersions } from "./article-research.ts";
 import { CoverChoice } from "./cover-plan-contract.ts";
 import { coverPlanImageAvailability } from "./cover-plan.ts";
 import { recoverMessageQueues } from "./message-queue.ts";
@@ -14,6 +15,7 @@ import { ownedSession, command, conflict, event, message } from "./store.ts";
 import { accepting } from "./config.ts";
 import { profile } from "./catalog.ts";
 import { skillAdmission } from "./skill-policy.ts";
+import { closeResearchCallsForStop } from "./research-window.ts";
 export async function ownedTurn(tx: Tx, userId: number, id: string, turnId: string) {
   await lockMemberAdmission(tx, `user:${userId}`);
   const s = await ownedSession(tx, userId, id, true);
@@ -88,6 +90,7 @@ async function stopTx(tx: Tx, t: Record<string, any>, reason = "Stopped by owner
 
     }
   // Stop every dispatcher before inspecting the shared charge. Legacy runs still settle individually.
+  await closeResearchCallsForStop(tx,t);
   for (const r of runs) await settleForRun(tx, { runId: r.id, outcome: "stopped" });
   await tx`UPDATE assistant_turns SET snapshot=snapshot || jsonb_build_object('stoppedThroughGeneration',
     (SELECT generation FROM operation_runs WHERE id=${t.parent_operation_run_id})) WHERE id=${t.id}`;
@@ -276,13 +279,14 @@ export async function handoff(userId: number, id: string, raw: unknown, key: unk
     const p = profile(input.targetAssistantId);
     await skillAdmission(tx, p.id, null, true);
     const [a] =
-      await tx`SELECT content FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${input.artifactId} AND version=${input.version} AND kind IN ('text-draft','xhs-note')`;
+      await tx`SELECT kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${input.artifactId} AND version=${input.version} AND kind IN ('text-draft','xhs-note')`;
     if (!a) throw new AccountError(404, "not_found", "稿件版本不存在");
     const [count] =
       await tx`SELECT count(*)::int n FROM assistant_sessions WHERE owner_user_id=${userId} AND deleted_at IS NULL`;
     if (count!.n >= 100) throw conflict("会话数量已达上限");
+    const [projected] = await projectArticleVersions(tx, id, [a as any]);
     const target = randomUUID(),
-      text = JSON.stringify(a.content);
+      text = JSON.stringify(articleInputProjection(projected!).content);
     await tx`INSERT INTO assistant_sessions(id,owner_user_id,assistant_id,assistant_name,profile_version,title,brief,command_key,command_hash) VALUES (${target},${userId},${p.id},${p.name},${p.version},${"继续创作：" + String(a.content.title).slice(0, 120)},${input.brief},${`handoff:${c.key}`},${c.hash})`;
     await tx`INSERT INTO assistant_session_inputs(id,session_id,text,hash,source) VALUES (${randomUUID()},${target},${text},${creditHash(text)},${tx.json({ sourceSessionId: id, artifactId: input.artifactId, version: input.version })})`;
     await tx`INSERT INTO assistant_handoffs(owner_user_id,command_key,request_hash,source_session_id,target_session_id) VALUES (${userId},${c.key},${c.hash},${id},${target})`;

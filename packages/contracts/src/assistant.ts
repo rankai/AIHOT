@@ -59,7 +59,16 @@ export interface AssistantCoverPlan {
     samples:Array<{sourceId:string;resultId:number;title:string|null;url:string;coverUrl:string;authorName:string|null;userId:string|null;publicTime:string|null;fans:number|null;collectedCount:number|null;useShareCount:number|null;useCommentCount:number|null;useLikeCount:number|null;interactiveCount:number|null;sha256:string;fileKey:string;observation:{sourceId:string;status:"observed"|"unreadable";text:string;subject:string;colors:string;layout:string;uncertainties:string[]}}>};
 }
 export interface AssistantCoverChoiceContext { artifactId:string;version:number;schemes:Array<{schemeId:string;name:string}>;imageAvailable:boolean;imageUnavailableReason:string|null;feeNotice:string }
+/** Server-owned research snapshot, saved with the exact article version. */
+export interface AssistantArticleResearch {
+  platform: "xiaohongshu" | "wechat";
+  analysisCallId: string;
+  application: string;
+  patterns: Array<{ label: string; observation: string }>;
+  references: Array<{ sourceId: string; title: string; url: string | null; author?: string; authorUrl?: string; metrics: Array<{ label: string; value: string | number }> }>;
+}
 export interface AssistantArtifactContent {
+  research?: AssistantArticleResearch;
   coverPlan?: AssistantCoverPlan;
   planReference?: {artifactId:string;version:number;schemeId:string};
   prompt?: string;
@@ -164,6 +173,8 @@ export interface AssistantInitialRequest {
   commandKey: string;
   input: { message: string; expectedRevision: number; skillSelection: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: AssistantTaskChoice; inputIds: string[]; artifactVersions: { artifactId: string; version: number }[] };
   quote: AssistantTurnQuote | null;
+  /** The session exists; correct this saved request before requesting a quote. */
+  clarification?: { code: "assistant_research_date_required"; message: string };
 }
 export interface AssistantSession {
   /** Explicit recovery only; never automatically submits or resurrects a dismissed quote. */

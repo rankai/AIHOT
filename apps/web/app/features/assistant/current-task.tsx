@@ -5,7 +5,7 @@ import { IconCheck, IconChevronDown, IconClock, IconInfo, IconMinus } from "../.
 import { Button } from "../admin/ui";
 import { useToolCommand } from "../tools/client";
 import { SearchCallCard } from "./turn-cards";
-import { coverChoiceSchemes } from "./artifact-display";
+import { artifactDeliveries, coverChoiceSchemes } from "./artifact-display";
 import { PHASE_LABELS, SEARCH_STATE_LABELS, activityLabel, activityIcon, sessionApi } from "./data";
 
 function ExecutionIcon({ state }: { state: "done" | "active" | "waiting" | "attention" | "stopped" }) {
@@ -54,10 +54,14 @@ export function CurrentTask({
     return () => clearTimeout(timer);
   }, [turn?.turnId, turn?.phase, working]);
   if (!turn) return null;
-  const waitingNext = !!turn.activities && !currentActivity && ["executing", "waiting_child"].includes(turn.phase);
-  const completedActivity = (kind: "generate_image" | "save_xhs_cover_plan" | "save_draft") =>
-    turn.phase === "completed" && turn.activities?.some((item) => item.kind === kind && item.state === "completed");
-  const summaryLabel = waitingNext ? "等待下一步处理" : completedActivity("generate_image") ? "图片已保存" : completedActivity("save_xhs_cover_plan") ? "封面方案已保存" : completedActivity("save_draft") ? "稿件已保存" : PHASE_LABELS[turn.phase];
+  const deliveries = artifactDeliveries(session).filter((item) => item.turnId === turn.turnId);
+  // A projected empty result is authoritative. Older snapshots may still prove
+  // a save through this turn's completed activity, never through old artifacts.
+  const completedDelivery = (kinds: string[], activityKind: "generate_image" | "save_xhs_cover_plan" | "save_draft") =>
+    turn.phase === "completed" && (deliveries.some((item) => kinds.includes(item.kind)) ||
+      (session.deliveries === undefined && turn.activities?.some((item) => item.kind === activityKind && item.state === "completed")));
+  const summaryLabel = completedDelivery(["image"], "generate_image") ? "图片已保存" : completedDelivery(["xhs-cover-plan"], "save_xhs_cover_plan") ? "封面方案已保存" : completedDelivery(["text-draft", "xhs-note"], "save_draft") ? "稿件已保存" : PHASE_LABELS[turn.phase];
+  const businessActivities = turn.activities?.filter(activity => !["model_request", "load_skill", "read_skill_reference"].includes(activity.kind));
   const coverChoice = question?.coverPlan;
   const choiceSchemes = coverChoice ? coverChoiceSchemes(coverChoice, session.artifacts) : [];
   const choiceScope = JSON.stringify([session.sessionId, turn.turnId, question?.questionId, coverChoice?.artifactId, coverChoice?.version]);
@@ -93,7 +97,7 @@ export function CurrentTask({
   const statusLabel = readError ? reading ? "正在读取上次请求" : "连接暂时中断，状态待确认" :
     question ? question.coverPlan ? "等你选封面方案" : question.text :
     !phaseSummary && working ? businessLabels[currentActivity?.kind ?? "model_request"] ?? "正在处理" :
-    !phaseSummary && currentActivity ? "等待下一步处理" : summaryLabel;
+    !phaseSummary ? "正在处理" : summaryLabel;
   const needsAction = (call: (typeof turn.calls)[number]) =>
     (call.state === "proposed" && turn.phase === "waiting_approval" && turn.status === "waiting") ||
     call.state === "needs_review" ||
@@ -121,7 +125,8 @@ export function CurrentTask({
         </summary>
         <div className="assistant-execution-content">
           <ul className="assistant-execution-steps" aria-label="已记录的执行状态">
-            {turn.activities ? turn.activities.map((activity) => {
+            {businessActivities?.length === 0 && <li className="assistant-execution-step"><ExecutionIcon state={phaseState} /><p>{statusLabel}</p></li>}
+            {businessActivities ? businessActivities.map((activity) => {
               const call = activity.callId ? turn.calls.find((call) => call.callId === activity.callId) : undefined;
               const label = activity.state === "waiting" && call?.state === "proposed"
                 ? activity.kind === "generate_image"

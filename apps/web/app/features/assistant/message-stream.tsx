@@ -47,10 +47,12 @@ export function AssistantMessageStream({
   setView,
   view,
   actions,
+  showWelcome,
   actionsStamp = "",
   canQueue = false,
 }: {
   actions?: ReactNode;
+  showWelcome: boolean;
   actionsStamp?: string;
   session: AssistantSession;
   messages: AssistantMessage[];
@@ -178,7 +180,7 @@ export function AssistantMessageStream({
               </Button>
             </div>
           )}
-          {!messages.length && (
+          {!messages.length && showWelcome && (
             <div className="assistant-conversation-welcome">
               <h2 className="text-[24px] font-semibold text-ink">
                 开始这次创作
@@ -260,7 +262,6 @@ export function AssistantMessageStream({
             setView={setView}
             canQueue={canQueue}
           />
-          {session.turn?.phase === "completed" && !deliveries.some((delivery) => delivery.turnId === session.turn?.turnId) && !!session.artifacts.length && <button type="button" className="assistant-task-artifacts" onClick={() => showArtifacts()}>查看作品</button>}
           {actions}
         </div>
         </div>

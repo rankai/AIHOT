@@ -9,6 +9,7 @@ import { Size } from "../providers/redfox/image-models.ts";
 import { WechatAnalysis, analyzeWechatResearch, verifyWechatDelivery } from "./wechat-research.ts";
 import { WECHAT_HOT_OPERATION, WechatHotInput } from "../providers/redfox/wechat-hot-contract.ts";
 import { ResearchAnalysis, ResearchApplication, analyzeResearch, verifyResearchDelivery } from "./xhs-research.ts";
+import { researchTaskPolicy, validateResearchSearch } from "./research-window.ts";
 import { DraftArgumentsError } from "./tool-arguments.ts";
 export { DraftArgumentsError } from "./tool-arguments.ts";
 import { checkAuto, linkAuto } from "./fees.ts";
@@ -104,7 +105,7 @@ export const businessTools = {
     schema: z.toJSONSchema(ResearchAnalysis),
   },
   save_draft: {
-    description: "保存并交付符合已激活模块合同的稿件；遵循该模块已加载的写作规程。本次唯一成功研究由服务端关联，不必复述analysisCallId；有多份或明确指定时使用researchApplication。研究附注和参考由服务端生成，正文不要重复附注或把摘要写成已核实原文引语。新建不传artifactId且baseVersion为0；修改仅使用已给定稿件ID和版本。sources使用输入消息ID或真实取得的引用，不编造来源。改写直接依据用户原文，不要求研究、风格确认或遥测。",
+    description: "保存并交付符合已激活模块合同的稿件；遵循该模块已加载的写作规程。本次唯一成功研究由服务端关联，不必复述analysisCallId；有多份或明确指定时使用researchApplication。规律和参考由服务端保存并单独展示，body只填可发布正文，不写主标题、备选标题列表、标签或研究附注或把摘要写成已核实原文引语。新建不传artifactId且baseVersion为0；修改仅使用已给定稿件ID和版本。sources使用输入消息ID或真实取得的引用，不编造来源。改写直接依据用户原文，不要求研究、风格确认或遥测。",
     schema: z.toJSONSchema(SaveDraftInput),
   },
   search_xhs_notes: {
@@ -148,7 +149,7 @@ export async function sourceCandidates(tx: Tx, turn: Record<string, any>): Promi
     }
   }
   const research =
-    await tx`SELECT z.id,z.kind,z.data FROM operation_results z JOIN assistant_tool_calls c ON c.child_run_id=z.run_id JOIN operation_runs r ON r.id=z.run_id WHERE c.turn_id=${turn.id} AND c.state='completed' AND r.status='completed' AND c.name IN ('search_xhs_notes','search_wechat_articles')`;
+    await tx`SELECT z.id,z.kind,z.data FROM operation_results z JOIN assistant_tool_calls c ON c.child_run_id=z.run_id JOIN operation_runs r ON r.id=z.run_id WHERE c.turn_id=${turn.id} AND c.state='completed' AND r.status='completed' AND coalesce(c.result->>'researchSuperseded','false')<>'true' AND c.name IN ('search_xhs_notes','search_wechat_articles')`;
   for (const row of research) {
     const projected = projectToolResult({ id: row.id, kind: row.kind, data: row.data });
     sourceSnapshot.push({ id: `search:${row.id}`, kind: "research", label: projected.title, url: projected.url });
@@ -178,6 +179,12 @@ export async function activeTools(tx: Tx, turn: Record<string, any>) {
     };
     for(const [name,description] of Object.entries(descriptions)){
       if(tools[name])tools[name]={...tools[name],description};
+    }
+    if(researchTaskPolicy(turn.snapshot)) {
+      const name=researchTaskPolicy(turn.snapshot)==='xhs-empty-window@1'?'search_xhs_notes':'search_wechat_articles';
+      if(tools[name])tools[name]={...tools[name],description:`使用一次已确认费用的冻结研究查询；首查日期由taskScope.research确定。模型仅调用一次；宿主按真实已保存结果自动决定是否同词扩至30天，最多两次，不换词或翻页。指定日期或只查一次时不扩。最终无可用样本由宿主正常结束并说明查询结果，不保存稿件，不另行询问写稿。${name==='search_wechat_articles'?'按接口原始数0–9扩期，10及以上不扩；扩期后使用第二次结果。':'仅无可分析关键词命中才扩，一条可用笔记即可继续；热门推荐不算命中。'}`};
+      const [searched]=await tx`SELECT 1 FROM assistant_tool_calls WHERE turn_id=${turn.id} AND name=${name} AND child_run_id IS NOT NULL LIMIT 1`;
+      if(searched)delete tools[name];
     }
     if(turn.snapshot.taskScope.delivery==='plans-only')delete tools.generate_image;
   }
@@ -338,11 +345,11 @@ export async function localCall(
     i.content.sources = i.content.sources.filter((source) => permitted.has(source));
     if (module.tools.includes("analyze_wechat_research")) {
       const application = await researchApplication(tx, turn, a.id, "analyze_wechat_research", i.researchApplication, i);
-      const verified = await verifyWechatDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId:i.artifactId, baseVersion:i.baseVersion });
+      const verified = await verifyWechatDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId:i.artifactId, baseVersion:i.baseVersion }, Number(module.version) >= 5);
       sourceSnapshot = verified.sources; i.content = verified.content;
     } else if (module.tools.includes("analyze_xhs_research")) {
       const application = await researchApplication(tx, turn, a.id, "analyze_xhs_research", i.researchApplication, i);
-      const verified = await verifyResearchDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId: i.artifactId, baseVersion: i.baseVersion });
+      const verified = await verifyResearchDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId: i.artifactId, baseVersion: i.baseVersion }, Number(module.version) >= 9);
       sourceSnapshot = verified.sources;
       i.content = verified.content;
     } else if (module.tools.includes("search_xhs_notes")) {
@@ -409,6 +416,7 @@ export async function prepareSearch(turn: Record<string, any>, call: Record<stri
   await sql.begin(async (tx) => {
     const { module } = await activation(tx, turn, i.activationId);
     if (!module.tools.includes(call.name)) throw conflict("当前模块不允许检索");
+    await validateResearchSearch(tx,turn,call,i);
     if (cover) {
       const clock = turn.snapshot.researchClock;
       if (!clock) throw conflict("缺少可信日期，请重新发起任务");
@@ -441,7 +449,7 @@ export async function prepareSearch(turn: Record<string, any>, call: Record<stri
     parameters: { keyword: i.keyword, startDate: i.startDate, ...("endDate" in i ? {endDate:i.endDate} : {}), ...(wechat || cover ? {} : { pageNum: 1, pageSize: 50 }) },
   }, { assistantSearch: true });
   await assertMemberCostEligible(normalized.intent);
-  return { normalized, quote: await proposalQuote(turn,normalized.intent) };
+  return { normalized, quote: await proposalQuote(turn,normalized.intent), ...(researchTaskPolicy(turn.snapshot)?{correctedInput:i}:{}) };
 }
 export async function decideCall(
   userId: number,
@@ -531,6 +539,12 @@ export async function refreshCallQuote(userId: number, sessionId: string, callId
 async function startSearch(tx:Tx,userId:number,t:Record<string,any>,call:Record<string,any>,authorizationId?:string){
  if (authorizationId && call.name !== "search_xhs_notes") throw conflict("本次查询需要人工确认");
  const { a } = await activation(tx, t, call.input.activationId);
+ const researchInput={...call.input};
+ if(await validateResearchSearch(tx,t,call,researchInput)) {
+  const parameters=call.result.normalized.commandInput.parameters;
+  if(parameters.keyword!==researchInput.keyword||parameters.startDate!==researchInput.startDate||parameters.endDate!==researchInput.endDate)
+   throw conflict("查询参数与冻结研究范围不一致");
+ }
  const [parent] = await tx`SELECT generation FROM operation_runs WHERE id=${t.parent_operation_run_id}`;
  const allocation=t.snapshot.taskScope ? {parentRunId:t.parent_operation_run_id,generation:parent!.generation,callId:call.id} : undefined;
  const authorization=(intent:import("@aihot/contracts/credits").ToolCreditIntent)=>({quoteId:call.quote.quoteId,intent,...(allocation?{taskAllocation:allocation}:{})});
@@ -568,7 +582,7 @@ async function startSearch(tx:Tx,userId:number,t:Record<string,any>,call:Record<
  return child;
 }
 /** Only newly prepared proposals enter here; existing waiting proposals require manual approval. */
-export async function autoApproveSearch(tx:Tx,turn:Record<string,any>,call:Record<string,any>,proposal:Awaited<ReturnType<typeof prepareSearch>>) {
+export async function autoApproveSearch(tx:Tx,turn:Record<string,any>,call:Record<string,any>,proposal:Pick<Awaited<ReturnType<typeof prepareSearch>>, 'normalized'|'quote'>) {
  if(turn.snapshot.taskScope){
    await startSearch(tx,turn.owner_user_id,turn,{...call,quote:proposal.quote,result:{normalized:proposal.normalized}});
    return true;

@@ -37,6 +37,10 @@ export interface PendingTurn {
   quoteId: string;
   attachments?: import("./materials-data").DraftAttachment[];
 }
+/** Recovery copy covers only an uncertain response from this exact submission. */
+export function submissionErrorCovered(failure: { commandKey: string; status: number | null } | null, commandKey?: string, unknown = false): boolean {
+  return !!commandKey && unknown && failure?.commandKey === commandKey && (failure.status === null || failure.status >= 500);
+}
 export const assistantHref = (id: AssistantId) =>
   id === "creative" ? "/assistant" : "/assistant/xiaohongshu";
 export const sessionHref = (id: string) =>
@@ -107,16 +111,20 @@ export function artifactText(content: AssistantArtifactContent): string {
       `分析范围：${plan.evidence.scope}`,
     ].filter(Boolean).join("\n\n");
   }
-  return [
-    content.title,
-    content.body,
-    content.titles.length ? `备选标题\n${content.titles.join("\n")}` : "",
-    content.tags.length
-      ? content.tags.map((tag) => `#${tag.replace(/^#/, "")}`).join(" ")
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const title = content.title.trim();
+  const tags = [...new Set(content.tags.map(tag => tag.trim().replace(/^#+/, "")).filter(Boolean))];
+  let body = content.body.trim();
+  // Only exact standalone repetitions are omitted; paragraph text and formatting stay intact.
+  while (body && [title, `# ${title}`].includes(body.split("\n", 1)[0]!.trim()))
+    body = body.includes("\n") ? body.slice(body.indexOf("\n") + 1).trimStart() : "";
+  while (tags.length && body) {
+    const lastLine = body.slice(body.lastIndexOf("\n") + 1).trim();
+    const last = lastLine.split(/\s+/);
+    if (!last.every(tag => tag.startsWith("#")) ||
+        JSON.stringify([...new Set(last.map(tag => tag.replace(/^#+/, "")))].sort()) !== JSON.stringify([...tags].sort())) break;
+    body = body.includes("\n") ? body.slice(0, body.lastIndexOf("\n")).trimEnd() : "";
+  }
+  return [title, body, tags.map(tag => `#${tag}`).join(" ")].filter(Boolean).join("\n\n");
 }
 /** Handoff inputs are server-owned text snapshots; known drafts get a readable projection. */
 export function materialText(text: string): string {

@@ -6,6 +6,7 @@ import { conflict } from "./store.ts";
 import { ResearchApplication } from "./xhs-research.ts";
 import { DraftArgumentsError } from "./tool-arguments.ts";
 import { researchCitations, selectResearchSamples } from "./research-sources.ts";
+import { articleResearch, legacyResearchAppendix } from "./article-research.ts";
 const text = z.string().trim().min(1).max(2000);
 const sourceId = z.string().max(200);
 const pattern = z.object({ sampleIds: z.array(sourceId).max(10), observation: text }).strict();
@@ -42,6 +43,7 @@ export async function analyzeWechatResearch(tx: Tx, turn: Record<string, any>, c
   const rows = await tx`SELECT z.id,z.kind,z.data,c.id AS call_id,c.input,c.result AS call_result FROM operation_results z
     JOIN assistant_tool_calls c ON c.child_run_id=z.run_id JOIN operation_runs r ON r.id=z.run_id
     WHERE c.turn_id=${turn.id} AND c.name='search_wechat_articles' AND c.state='completed' AND r.status='completed'
+      AND coalesce(c.result->>'researchSuperseded','false')<>'true'
       AND c.input->>'activationId'=${input.activationId} AND z.kind='wechat_hot_article' ORDER BY z.id`;
   // Preserve the exact summaries actually delivered to the model, including legacy payloads.
   const shown = new Map<string, any>(rows.flatMap((row) => {
@@ -83,7 +85,7 @@ export async function analyzeWechatResearch(tx: Tx, turn: Record<string, any>, c
     ])] };
 }
 export async function verifyWechatDelivery(tx: Tx, turn: Record<string, any>, activationId: string,
-  content: AssistantArtifactContent, sources: AssistantSource[], raw: unknown, target: { artifactId?: string; baseVersion: number }) {
+  content: AssistantArtifactContent, sources: AssistantSource[], raw: unknown, target: { artifactId?: string; baseVersion: number }, publishable = false) {
   const application = ResearchApplication.parse(raw);
   const [analysis] = await tx`SELECT c.*,t.session_id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id
     WHERE c.id=${application.analysisCallId} AND c.name='analyze_wechat_research' AND c.state='completed' AND t.session_id=${turn.session_id}`;
@@ -97,11 +99,15 @@ export async function verifyWechatDelivery(tx: Tx, turn: Record<string, any>, ac
   }
   if (!same && !inherited) throw conflict("研究不属于本激活或精确选定旧稿的已验证研究");
   const citation = researchCitations(analysis.result.samples, content.sources, sources, analysis.id, application.explanation);
-  const labels: Record<string,string> = { title:"标题", opening:"开头", structure:"结构", language:"语言", interaction:"互动", keyword:"关键词" };
-  const patternText = Object.entries(analysis.result.patterns).map(([key,value]:[string,any]) => `${labels[key]}：${value.observation}`).join("\n");
-  const references = citation.cited.slice(0,2).map((s:any) => `- ${s.title}；${s.url ?? "原文链接未提供"}；作者：${s.authorName ?? "未知"}；阅读：${s.clicksCount ?? "未知"}；在看：${s.watchCount ?? "未知"}；点赞：${s.likeCount ?? "未知"}；评论：${s.commentsCount ?? "未知"}`).join("\n");
-  const marker = "\n\n### 公众号爆款规律来源（已验证研究）";
+  const research = { ...analysis.result, analysisCallId: analysis.id };
+  let body = content.body;
+  if (!publishable) {
+    const appendix = legacyResearchAppendix("wechat", research, citation.cited, application.explanation);
+    if (!body.endsWith(appendix)) body += appendix;
+  }
   const scope = `${analysis.result.samples.length}条实际样本；${analysis.result.limitations.join("；")}`.slice(0,1000);
-  return { content: { ...content, sources: citation.sourceIds, body: content.body.split(marker)[0] + marker + `\n${patternText}\n本稿应用：${application.explanation}\n研究范围：${scope}\n以下为本次标题与摘要研究参考，不代表已核实原文或正文中的事实。\n${references}`, partial:true, scope },
+  return { content: { ...content, sources: citation.sourceIds,
+    body,
+    ...(publishable ? { research: articleResearch("wechat", research, citation.cited, application.explanation) } : {}), partial: true, scope },
     sources: citation.sources };
 }
