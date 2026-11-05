@@ -71,20 +71,24 @@ export async function saveArtifact(
   if ((latest?.version ?? 0) !== input.baseVersion || (input.artifactId && !latest?.version))
     throw conflict("稿件版本已变化，请刷新");
   let sources = input.sourceSnapshot;
+  let inheritedContent: AssistantArtifactContent | undefined;
   if (!sources && input.artifactId) {
     const [previous] =
       await tx`SELECT content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${input.sessionId} AND artifact_id=${id} AND version=${input.baseVersion}`;
     sources = previous?.source_snapshot;
     if (previous) {
       const [base] = await projectArticleVersions(tx, input.sessionId, [previous as { content: AssistantArtifactContent; source_snapshot: AssistantSource[] }]);
-      content.sources = base!.content.sources;
-      content.partial = base!.content.partial;
-      content.scope = base!.content.scope;
-      if (base!.content.research) content.research = base!.content.research;
+      inheritedContent = base!.content;
     }
   }
   sources ??= [];
   if (content.sources.some((id) => !sources!.some((s) => s.id === id))) throw conflict("稿件来源不在已保存材料范围");
+  if (inheritedContent) {
+    content.sources = inheritedContent.sources;
+    content.partial = inheritedContent.partial;
+    content.scope = inheritedContent.scope;
+    if (inheritedContent.research) content.research = inheritedContent.research;
+  }
   sources = sources.filter((s) => content.sources.includes(s.id));
   const version = input.baseVersion + 1;
   await tx`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,turn_id,activation_id,content,source_snapshot) VALUES (${input.sessionId},${id},${version},${input.baseVersion},${input.kind},${input.turnId ?? null},${input.activationId ?? null},${tx.json(content as never)},${tx.json(sources as never)})`;
