@@ -43,7 +43,7 @@
         "fixtures#write/missing-input",
         "fixtures#write/delivery"
       ],
-      "hash": "7695ac0b09ca2fd53ba33c3d344b7f252507ec5961a6d4f32e05f383eb33c61c"
+      "hash": "64b1cfc152e7fa1d779db2ad1541a0ab391106a3d731ee17ba525481c81b7e03"
     }
   ],
   "resources": [
@@ -51,8 +51,8 @@
       "resourceId": "write",
       "path": "write.md",
       "type": "text/markdown",
-      "bytes": 11076,
-      "sha256": "4158fd5a1ff24b0d87391db581202d959efaf720ee70d15e998a897a9ea2c889"
+      "bytes": 11075,
+      "sha256": "871860e5dd4a4cfd647647da1a563ab4e33a3e93c5d3ae3598feca473953c87f"
     },
     {
       "resourceId": "fixtures",
@@ -111,6 +111,6 @@
       "sha256": "8aedf6e3f9828ecb1151e34196694fd5b2afe5ed533eed129357748dbff993fc"
     }
   ],
-  "manifestHash": "14eb294e88ecbd1e3418e32c61a6a1345d757a02222ea7cd21d4231c32842e0c",
-  "packageHash": "e63d5d29305555ab342502ae1955d8b66a9a60344f191a2f74b20124ac99731c"
+  "manifestHash": "d9096b98dcd208468b3789ad9f84085bbec6b574a6d9034aba4b7d818f8fd815",
+  "packageHash": "7d1d74e033f42699b459d33564ca97cc22f8c5494458f5656f745ebde2a100e9"
 }
