@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import type { AssistantId } from "@aihot/contracts/assistant";
-import { Button, Select } from "../admin/ui";
+import { IconChevronDown, IconRefresh } from "../../components/icons";
+import { Select } from "../admin/ui";
 import { toolGet } from "../tools/client";
 import { sessionHref, type SessionPage } from "./data";
 
@@ -75,9 +76,10 @@ export function AssistantHistory({
     <section className="assistant-history" aria-label="会话历史">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-[12px] font-medium text-ink-3">会话历史</h2>
-        <Button size="sm" disabled={pending} onClick={() => void read(filter)}>
-          刷新
-        </Button>
+        <button type="button" className="assistant-icon-button" title="刷新会话历史" aria-label="刷新会话历史"
+          disabled={pending} onClick={() => void read(filter)}>
+          <IconRefresh size={16} />
+        </button>
       </div>
       <Select
         aria-label="会话助手筛选"
@@ -130,13 +132,16 @@ export function AssistantHistory({
           ))}
         </ul>
         {hasMore && (
-          <Button
-            size="sm"
+          <button
+            type="button"
+            className="assistant-icon-button mx-auto"
+            title="加载更早会话"
+            aria-label="加载更早会话"
             disabled={pending}
             onClick={() => void read(filter, page.sessions.at(-1)?.createdAt)}
           >
-            加载更早会话
-          </Button>
+            <IconChevronDown size={17} />
+          </button>
         )}
       </div>
     </section>

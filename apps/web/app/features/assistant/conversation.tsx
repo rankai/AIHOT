@@ -21,6 +21,7 @@ import { Button } from "../admin/ui";
 import { usePrivateAccount } from "../account/use-private-account";
 import { toolGet, useToolCommand } from "../tools/client";
 import { AssistantArtifactPanel } from "./artifacts";
+import { artifactDeliveries, currentArtifactTarget, uncoveredArtifactUpdates, type ArtifactTarget } from "./artifact-display";
 import {
   draftKey,
   hasComposerDraft,
@@ -29,6 +30,8 @@ import {
   readDraft,
   settledDraft,
   rejectedDraft,
+  rejectedQueueDraft,
+  restoreDraftInput,
   useAssistantDraft,
   type AssistantDraft,
 } from "./drafts";
@@ -89,6 +92,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const [draft, updateDraft, ready] = useAssistantDraft(key);
   const { options, refresh: refreshOptions, error: optionsError } = useAssistantOptions(data.options,{sessionId:session.sessionId,artifactVersions:draft.references??[]});
   const quoted = draft.pendingQuote ?? null;
+  const requiresRequote = !!quoted && (quoted.input.expectedRevision !== session.revision || ["quote_changed", "price_changed", "quote_expired"].includes(command.failure.current?.code ?? ""));
   function persist(record: Recovery) {
     try { saveRecovery(key, record); return true; }
     catch (error) { setNotice(error instanceof Error ? error.message : "无法保存恢复记录，请核对浏览器存储后重试。"); return false; }
@@ -103,7 +107,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     return true;
   }
   function restoreInput(input: TurnInput) {
-    updateDraft(previous => hasComposerDraft(previous) ? previous : { ...previous, text: input.message, actionId: input.skillSelection?.actionId ?? null, skillSelection: input.skillSelection, taskHint: input.taskHint, attachments: [], inputIds: input.inputIds, references: input.artifactVersions.map(ref => ({ ...ref, title: "已选稿件" })) });
+    updateDraft(previous => restoreDraftInput(previous, input, () => "已选稿件"));
   }
   async function requoteSaved() {
     if (!quoted || command.pending || active || draft.pendingTurn) return;
@@ -127,7 +131,11 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   const [view, setView] = useState<"chat" | "artifacts">("chat");
   const [artifactOpen, setArtifactOpen] = useState(true);
   const [artifactTarget, setArtifactTarget] = useState<{ artifactId: string; version: number } | null>(null);
-  const [newArtifacts, setNewArtifacts] = useState(false);
+  const [newArtifacts, setNewArtifacts] = useState<ArtifactTarget[]>([]);
+  const deliveries = artifactDeliveries(session);
+  const currentArtifact = currentArtifactTarget(session);
+  const legacyArtifactLink = session.turn?.phase === "completed" && !deliveries.some((delivery) => delivery.turnId === session.turn?.turnId) && !!session.artifacts.length;
+  const uncoveredUpdates = legacyArtifactLink ? [] : uncoveredArtifactUpdates(newArtifacts, deliveries);
   const alive = useRef(true);
   const submitting = useRef(false);
   const stopAttempt = useRef<{ turnId: string; generation: number } | null>(null);
@@ -197,7 +205,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     const body = attempt.kind === "enqueue" ? attempt.input : { quoteId: attempt.quoteId };
     const started = beginAttempt({ kind: "queue", value: attempt });
     if (!started) return;
-    if (clearComposer) updateDraft(previous => ({ ...previous, text: "", taskHint: undefined, references: [], attachments: [], inputIds: [] }));
+    if (clearComposer) updateDraft(previous => ({ ...previous, text: "", taskHint: undefined, taskChoice: undefined, references: [], attachments: [], inputIds: [] }));
     const result = await command.run(path, body, "POST", body, attempt.key);
     if (result) clearRecovery(key, { kind: "queue", value: attempt });
     else updateRecoveryFailure(key, { kind: "queue", value: attempt }, started, command.failure.current?.status ?? null);
@@ -261,7 +269,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       if (autoAuthorizationId) void submitConfirmed({ commandKey: crypto.randomUUID(), input, quoteId: quote.quoteId, attachments: current.attachments?.map((row) => ({ ...row })) });
       else {
         if (!setQuoted({ commandKey: crypto.randomUUID(), input, quote })) return;
-        updateDraft(previous => ({ ...previous, text: "", taskHint: undefined, references: [], attachments: [], inputIds: [] }));
+        updateDraft(previous => ({ ...previous, text: "", taskHint: undefined, taskChoice: undefined, references: [], attachments: [], inputIds: [] }));
       }
     } else if (!quote) {
       if (autoAuthorizationId && command.failure.current?.code === "auto_confirmation_required") setManualFallback(true);
@@ -445,14 +453,11 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     ),
   );
   useEffect(() => {
-    if (
-      session.artifacts.some(
-        (artifact) =>
-          !observed.current.has(artifact.artifactId) ||
-          artifact.version > observed.current.get(artifact.artifactId)!,
-      )
-    ) {
-      setNewArtifacts(true);
+    const updates = session.artifacts.filter((artifact) =>
+      !observed.current.has(artifact.artifactId) || artifact.version > observed.current.get(artifact.artifactId)!,
+    ).map(({ artifactId, version }) => ({ artifactId, version }));
+    if (updates.length) {
+      setNewArtifacts((previous) => [...previous.filter((target) => !updates.some((update) => update.artifactId === target.artifactId)), ...updates]);
       if (!observed.current.size) setArtifactOpen(true);
     }
     observed.current = new Map(
@@ -495,7 +500,10 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
     if (target) setArtifactTarget({ ...target });
     setView("artifacts");
     setArtifactOpen(true);
-    setNewArtifacts(false);
+    if (!target) setNewArtifacts([]);
+  }
+  function viewedArtifact(target: ArtifactTarget) {
+    setNewArtifacts(previous => previous.some(update => update.artifactId === target.artifactId && update.version === target.version) ? uncoveredArtifactUpdates(previous, target) : previous);
   }
   const answerText =
     question && draft.answer?.questionId === question.questionId
@@ -528,6 +536,9 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
             session.artifacts.length ? (
               <AssistantArtifactPanel
                 target={artifactTarget}
+                defaultTarget={currentArtifact}
+                reading={view === "artifacts"}
+                onViewed={viewedArtifact}
                 artifacts={session.artifacts}
                 sessionId={session.sessionId}
                 csrf={data.me.csrf}
@@ -554,12 +565,13 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                 showArtifacts={showArtifacts}
                 setView={setView}
                 view={view}
+                canQueue={!sendDisabled && !question && !readError}
                 actionsStamp={`${quoted?.quote.quoteId ?? ""}:${session.queue?.paused}:${session.queue?.entries.map(entry => `${entry.id}:${entry.state}:${entry.quote?.quoteId ?? ""}:${entry.error ?? ""}`).join("|") ?? ""}`}
                 actions={<>{quoted && (                  <TurnQuoteDialog
                     quote={quoted.quote}
                     message={quoted.input.message}
                     pending={command.pending || !!draft.pendingTurn || !!draft.pendingQueue || active}
-                    requiresRequote={quoted.input.expectedRevision !== session.revision || ["quote_changed","price_changed","quote_expired"].includes(command.failure.current?.code??"")}
+                    requiresRequote={requiresRequote}
                     requote={() => void requoteSaved()}
                     error={command.error}
                     close={() => {
@@ -613,22 +625,22 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   question?.coverPlan
                     ? "也可以在这里补充修改要求。"
                     : quoteReading
-                    ? "正在确认本次费用…"
+                    ? "正在估算本次费用…"
                     : active && !question
                       ? "输入后发送到队列；输入为空时可停止当前任务。"
                       : session.archived
                         ? "已归档会话可查看，不能发送新需求。"
-                        : feeAuthorization?.enabled ? `额度内自动 · 剩余 ${feeAuthorization.remaining.toLocaleString()} 积分 · 当前创作 ${feeAuthorization.turnPrice.amount} 积分 · Shift+Enter 换行` : undefined
+                        : undefined
                 }
-                controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskChoice={draft.taskChoice} onTaskChoice={taskChoice=>updateDraft(previous=>({...previous,taskChoice}))} selection={draftSelection(draft)} onSelection={(skillSelection) => { updateDraft((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={options.inputCapabilities} artifacts={session.artifacts} onReference={reference} feeAuthorization={feeAuthorization} manualFees={() => void useManualFees()} configureFees={() => { setFeeOpen(true); }} />}
+                controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} pendingFee={quoted && !requiresRequote && !hasComposerDraft(draft) ? quoted.quote : undefined} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => { updateDraft((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={options.inputCapabilities} artifacts={session.artifacts} onReference={reference} />}
                 attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={options.inputCapabilities.maxAttachments} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
               >
                 {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}
-                {newArtifacts && (
+                {!!uncoveredUpdates.length && (
                   <p role="status" className="mb-2 text-[12px] text-accent">
-                    作品已更新。
-                    <button className="ml-2 underline" onClick={() => showArtifacts()}>
-                      查看作品
+                    {deliveries.length ? "其他作品已更新。" : "作品已更新。"}
+                    <button className="ml-2 underline" onClick={() => showArtifacts(uncoveredUpdates[0])}>
+                      {deliveries.length ? "查看其他作品" : "查看作品"}
                     </button>
                   </p>
                 )}
@@ -656,7 +668,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   {!draft.pendingQueue.unknown && !command.pending && <Button size="sm" onClick={() => updateDraft(previous => {
                     const attempt = previous.pendingQueue;
                     if (attempt) clearRecovery(key, { kind: "queue", value: attempt });
-                    return { ...previous, pendingQueue: undefined, ...(attempt?.kind === "enqueue" && !hasComposerDraft(previous) ? { text: attempt.input.message, actionId: attempt.input.skillSelection?.actionId ?? null, skillSelection: attempt.input.skillSelection, taskHint: attempt.input.taskHint, inputIds: attempt.input.inputIds, references: attempt.input.artifactVersions.map(ref => ({ ...ref, title: "已选稿件" })) } : {}) };
+                    return rejectedQueueDraft(previous);
                   })}>返回编辑</Button>}
                 </div>}
                 {draft.pendingTurn && (
@@ -733,7 +745,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                     </Button>
                   </div>
                 )}
-                {profile && !quoted && !active && !waitingEntries.length && hasComposerDraft(draft) && (command.failure.current?.code==='assistant_task_selection_required' || session.initialRequest && !session.initialRequest.quote && !session.initialRequest.input.taskChoice && !draft.taskChoice && draft.text===session.initialRequest.input.message) && <TaskClarification key={JSON.stringify(draftSelection(draft))} profile={profile} selection={draftSelection(draft)} disabled={command.pending||quoteReading} confirm={taskChoice=>{updateDraft(previous=>({...previous,taskChoice}));void requestQuote(draft.text);}} />}
+                {profile && !quoted && !active && !waitingEntries.length && hasComposerDraft(draft) && (command.failure.current?.code==='assistant_task_selection_required' || session.initialRequest && !session.initialRequest.quote && !session.initialRequest.input.taskChoice && !draft.taskChoice && draft.text===session.initialRequest.input.message) && <TaskClarification key={JSON.stringify([draftSelection(draft),draft.taskHint])} profile={profile} selection={draftSelection(draft)} taskHint={draft.taskHint} disabled={command.pending||quoteReading} confirm={taskChoice=>{updateDraft(previous=>({...previous,taskChoice}));void requestQuote(draft.text);}} />}
                 {command.error && !quoted && command.failure.current?.code!=='assistant_task_selection_required' && (
                   <p role="alert" className="mb-2 text-[12px] text-hot">
                     {command.error}

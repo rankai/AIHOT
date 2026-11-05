@@ -9,7 +9,7 @@ import { readCreditCharge } from "./credits-read.ts";
 type Outcome = "completed" | "failed" | "needs_review" | "stopped";
 interface DeliveryFacts {
   visionReports: number; assistantDeliveries: number; images: number; videos: number; answers: number; transcriptions: number; commentCompletions: number; uploads: number; genericResults: number;
-  successTasks: number; failedTasks: number; incompleteVideo: boolean; pendingReceipts: number; unknownReceipts: number; receivedReceipts: number;
+  successTasks: number; failedTasks: number; unavailableVisionReports: number; undeliveredModelResponses: number; incompleteVideo: boolean; pendingReceipts: number; unknownReceipts: number; receivedReceipts: number;
   otherExecutableRuns: number;
 }
 
@@ -26,8 +26,12 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number, it
       count(*) FILTER (WHERE r.kind = 'media_upload' AND r.data->>'resourceUrl' IS NOT NULL) AS uploads,
       count(*) FILTER (WHERE r.kind NOT IN ('image_reference','video_reference','image_task','video_task','ai_search_task','transcription_task','xhs_comment_task')) AS generic_results,
       count(*) FILTER (WHERE r.kind IN ('image_task','video_task','ai_search_task','transcription_task') AND r.data->>'status' IN ('succeeded','completed')) AS success_tasks,
-      count(*) FILTER (WHERE r.kind IN ('image_task','video_task','ai_search_task','transcription_task','xhs_comment_task')
-        AND (r.data->>'status' = 'failed' OR (r.kind = 'ai_search_task' AND length(trim(coalesce(r.data->>'failReason', ''))) > 0))) AS failed_tasks,
+      count(*) FILTER (WHERE (r.kind IN ('image_task','video_task','ai_search_task','transcription_task','xhs_comment_task')
+        AND (r.data->>'status' = 'failed' OR (r.kind = 'ai_search_task' AND length(trim(coalesce(r.data->>'failReason', ''))) > 0)))
+        OR (r.kind='assistant_vision_report' AND r.data->>'complete'='false' AND r.data->>'status'='failed' AND r.data->>'reason'='no_readable_covers')
+        OR (r.kind='assistant_model' AND r.data->>'deliveryStatus'='missing')) AS failed_tasks,
+      count(*) FILTER (WHERE r.kind='assistant_vision_report' AND r.data->>'complete'='false' AND r.data->>'status'='failed' AND r.data->>'reason'='no_readable_covers') AS unavailable_vision_reports,
+      count(*) FILTER (WHERE r.kind='assistant_model' AND r.data->>'deliveryStatus'='missing') AS undelivered_model_responses,
       coalesce(bool_or(r.data->>'lastFrameMissing' = 'true'), false) AS incomplete_video
     FROM member_credit_authorized_runs l JOIN operation_results r ON r.run_id = l.run_id LEFT JOIN stored_files f ON f.key = r.file_key WHERE l.charge_id = ${charge.id} AND (${!itemRuns} OR l.run_id = ANY(${itemRuns ?? []}::bigint[]))`;
   const [receipts] = await tx`WITH linked AS (SELECT run_id FROM member_credit_authorized_runs WHERE charge_id = ${charge.id} AND (${!itemRuns} OR run_id = ANY(${itemRuns ?? []}::bigint[]))), ids AS (
@@ -50,7 +54,7 @@ async function deliveryFacts(tx: Tx, charge: ChargeRow, currentRunId: number, it
     WHERE l.charge_id = ${charge.id} AND l.run_id <> ${currentRunId} AND r.status IN ('active','waiting') AND (${!itemRuns} OR l.run_id = ANY(${itemRuns ?? []}::bigint[]))`;
   return { visionReports:Number(facts!.vision_reports), assistantDeliveries: Number(facts!.assistant_deliveries), images: Number(facts!.images), videos: Number(facts!.videos), answers: Number(facts!.answers), transcriptions: Number(facts!.transcriptions),
     commentCompletions: Number(facts!.comment_completions), uploads: Number(facts!.uploads), genericResults: Number(facts!.generic_results),
-    successTasks: Number(facts!.success_tasks), failedTasks: Number(facts!.failed_tasks), incompleteVideo: facts!.incomplete_video,
+    successTasks: Number(facts!.success_tasks), failedTasks: Number(facts!.failed_tasks), unavailableVisionReports: Number(facts!.unavailable_vision_reports), undeliveredModelResponses: Number(facts!.undelivered_model_responses), incompleteVideo: facts!.incomplete_video,
     pendingReceipts: Number(receipts!.pending), unknownReceipts: Number(receipts!.unknown), receivedReceipts: Number(receipts!.received), otherExecutableRuns: Number(other!.n) };
 }
 
@@ -113,8 +117,10 @@ export async function settleForRun(tx: Tx, input: { runId: number; outcome: Outc
   }
   // A completed provider receipt without a saved delivery can mean a parse or local save failure.
   // Never release that reservation merely because the operation's status says failed.
-  if (input.outcome === "failed" && !anyDelivery(facts) && !facts.successTasks && !facts.pendingReceipts && !facts.unknownReceipts && !facts.otherExecutableRuns
-      && (facts.failedTasks > 0 || facts.receivedReceipts === 0)) {
+  if (input.outcome === "failed" && !facts.successTasks && !facts.pendingReceipts && !facts.unknownReceipts && !facts.otherExecutableRuns
+      && ((!anyDelivery(facts) && (facts.failedTasks > 0 || facts.receivedReceipts === 0)) ||
+        (["assistant-vision", "assistant-turn"].includes(charge.pricing_snapshot.kind) && !delivered(charge, facts) && facts.unavailableVisionReports > 0) ||
+        (charge.pricing_snapshot.kind === "assistant-turn" && !delivered(charge, facts) && facts.undeliveredModelResponses > 0))) {
     await finalizeCharge(tx, charge, 0, "system:member-credits", "已确认失败且没有交付，退回占用积分", evidence);
     return;
   }
@@ -148,7 +154,7 @@ async function settleTask(tx: Tx, charge: ChargeRow, input: { runId: number; out
   if (["active","waiting"].includes(root!.status)) return;
   const facts = await deliveryFacts(tx, charge, -1);
   if (unresolved || facts.pendingReceipts || facts.unknownReceipts || facts.otherExecutableRuns || root!.status === "needs_review") {
-    await markReview(tx, charge, "已停止后续执行，费用核对中", { task: true, ...input, facts });
+    await markReview(tx, charge, root!.status === "stopped" ? "已停止后续执行，费用核对中" : "任务已暂停，费用核对中", { task: true, ...input, facts });
     return;
   }
   await finalizeCharge(tx, charge, consumed, "system:member-credits", "按任务实际交付项目结算，释放未执行额度", { task: true, ...input, facts });

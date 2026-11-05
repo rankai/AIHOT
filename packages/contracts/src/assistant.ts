@@ -11,11 +11,12 @@ export type AssistantPhase =
   | "waiting_approval"
   | "waiting_child"
   | "completed"
+  | "failed"
   | "stopped"
   | "needs_review";
 export type AssistantSkillSelection = { skillId: string; actionId?: never } | { actionId: string; skillId?: never };
 export interface AssistantTaskChoice { skillId: string; moduleId: string; delivery: "writing" | "plans-only" | "image"; size?: string }
-export interface AssistantTaskOption { choice: AssistantTaskChoice; label: string; sizes: string[] }
+export interface AssistantTaskOption { actionId?: string; choice: AssistantTaskChoice; label: string; sizes: string[] }
 export interface AssistantTaskHint {
   actionId: string;
 }
@@ -91,9 +92,21 @@ export interface AssistantArtifact {
   content: AssistantArtifactContent;
   sources: AssistantSource[];
 }
+/** Saved generated versions only; manual edits have no generating turn. */
+export interface AssistantArtifactDelivery {
+  turnId: string;
+  artifactId: string;
+  version: number;
+  kind: AssistantArtifact["kind"];
+  title: string;
+  /** Session event order, only when the saved version has an unambiguous artifact event. */
+  eventSeq?: number;
+}
 export interface AssistantMessage {
   id: string;
   seq: number;
+  /** Shares the session event order with deliveries; seq remains the message-only order. */
+  eventSeq?: number;
   role: "user" | "assistant" | "tool";
   text: string;
   turnId: string | null;
@@ -143,7 +156,7 @@ export interface AssistantTurn {
   canResume: boolean;
 }
 export interface AssistantQueuedMessage {
-  taskSelectionRequired?: boolean; skillSelection?: AssistantSkillSelection | null;
+  taskSelectionRequired?: boolean; skillSelection?: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null;
   id: string; position: number; message: string; state: "pending" | "quoted" | "submitted" | "cancelled";
   quote: AssistantTurnQuote | null; error: string | null; turnId: string | null; commandKey: string;
 }
@@ -167,6 +180,8 @@ export interface AssistantSession {
   inputs: { id: string; text: string; source: Record<string, unknown> }[];
   messages: AssistantMessage[];
   artifacts: AssistantArtifact[];
+  /** Optional for older API snapshots. Contains no tool inputs or artifact bodies. */
+  deliveries?: AssistantArtifactDelivery[];
   turn: AssistantTurn | null;
   eventSeq: number;
 }

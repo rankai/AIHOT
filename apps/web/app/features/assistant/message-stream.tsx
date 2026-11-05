@@ -9,12 +9,28 @@ import { Button } from "../admin/ui";
 import { PHASE_LABELS, materialText } from "./data";
 import { CurrentTask } from "./current-task";
 import { ConversationNavigation, messageAnchorId } from "./conversation-navigation";
+import { artifactDeliveries, indexArtifactDeliveries } from "./artifact-display";
+import { AssistantDelivery } from "./delivery";
+import { IconCheck, IconCopy } from "../../components/icons";
 const scrollPositions = new Map<string, number>();
 function messageTopInset(element: HTMLElement): number {
   const toggle = element.parentElement?.querySelector<HTMLElement>(".assistant-conversation-nav-toggle");
   return toggle?.getClientRects().length
     ? Math.max(24, toggle.getBoundingClientRect().bottom - element.getBoundingClientRect().top + 16)
     : 24;
+}
+export function MessageCopy({ text, role }: { text: string; role: "user" | "assistant" }) {
+  const [result, setResult] = useState<"copied" | "failed" | null>(null);
+  return <div className="assistant-message-actions">
+    <button type="button" className="assistant-message-copy" title={result === "copied" ? "已复制" : role === "user" ? "复制需求" : "复制回复"} aria-label={role === "user" ? "复制需求" : "复制回复"} onClick={async () => {
+      try { await navigator.clipboard.writeText(text); setResult("copied"); }
+      catch { setResult("failed"); }
+    }}>
+      {result === "copied" ? <IconCheck size={14} /> : <IconCopy size={14} />}
+    </button>
+    {result === "failed" && <span role="alert" className="text-[12px] text-hot">复制失败，请选择文字后复制。</span>}
+    {result === "copied" && <span role="status" className="sr-only">文字已复制</span>}
+  </div>;
 }
 export function AssistantMessageStream({
   session,
@@ -32,6 +48,7 @@ export function AssistantMessageStream({
   view,
   actions,
   actionsStamp = "",
+  canQueue = false,
 }: {
   actions?: ReactNode;
   actionsStamp?: string;
@@ -48,11 +65,16 @@ export function AssistantMessageStream({
   showArtifacts: (target?: { artifactId: string; version: number }) => void;
   setView: (view: "chat" | "artifacts") => void;
   view: "chat" | "artifacts";
+  canQueue?: boolean;
 }) {
   const persisted = useMemo(
     () => new Set(messages.map((message) => message.id)),
     [messages],
   );
+  const savedMessages = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const deliveries = artifactDeliveries(session);
+  const { afterMessage: deliveriesAfter, unanchored } = indexArtifactDeliveries(messages, deliveries);
+  const imageFiles = new Map(session.artifacts.filter((artifact) => artifact.kind === "image" && !!artifact.content.fileKey).map((artifact) => [`${artifact.artifactId}:${artifact.version}`, artifact.content.fileKey!]));
   const userMessages = useMemo(() => messages.filter((message) => message.role === "user"), [messages]);
   const [activeMessage, setActiveMessage] = useState<string | null>(userMessages[0]?.id ?? null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -82,8 +104,8 @@ export function AssistantMessageStream({
   }, [scopeKey]);
   const activityStamp = session.turn?.activities?.map((item) => `${item.id}:${item.state}`).join(":") ?? "";
   const messageStamp =
-    messages.map((message) => message.id).join(":") +
-    `:${actionsStamp}:${activityStamp}:${session.turn?.phase}:${session.turn?.question?.questionId}:${session.turn?.calls.map((call) => call.state).join(":")}`;
+    messages.map((message) => `${message.id}:${message.eventSeq ?? ""}`).join(":") +
+    `:${deliveries.map((delivery) => `${delivery.artifactId}:${delivery.version}:${delivery.eventSeq ?? ""}`).join(":")}:${actionsStamp}:${activityStamp}:${session.turn?.phase}:${session.turn?.question?.questionId}:${session.turn?.calls.map((call) => call.state).join(":")}`;
   const previousStamp = useRef({ scopeKey, messageStamp });
   useEffect(() => {
     const changed = previousStamp.current.scopeKey === scopeKey &&
@@ -144,7 +166,7 @@ export function AssistantMessageStream({
         <div ref={column} className="assistant-message-column">
           {readError && (
             <div role="alert" className="assistant-inline-notice text-hot">
-              状态更新暂时中断。上次已知状态：
+              连接暂时中断，恢复连接后会继续读取上次请求。上次已知状态：
               {session.turn ? PHASE_LABELS[session.turn.phase] : "尚未开始"}
               。已读内容仍在；恢复连接后先读取。
               <Button
@@ -152,7 +174,7 @@ export function AssistantMessageStream({
                 disabled={reading}
                 onClick={() => void refresh()}
               >
-                重新读取
+                重新连接
               </Button>
             </div>
           )}
@@ -199,31 +221,33 @@ export function AssistantMessageStream({
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 persisted.has(message.id) ? (
+                  <div key={message.id}>
                   <MessagePrimitive.Root
                     id={messageAnchorId(message.id)}
                     tabIndex={-1}
                     data-message-id={message.id}
-                    data-message-role={messages.find((saved) => saved.id === message.id)?.role}
+                    data-message-role={savedMessages.get(message.id)?.role}
                     className={`assistant-message ${message.role === "user" ? "assistant-message-user" : "assistant-message-response"}`}
                   >
                     <p className="mb-2 text-[11px] font-medium text-ink-4">
                       {message.role === "user"
                         ? "你"
-                        : messages.find(
-                              (persistedMessage) =>
-                                persistedMessage.id === message.id,
-                            )?.role === "tool"
+                        : savedMessages.get(message.id)?.role === "tool"
                           ? "检索结果"
                           : session.assistantName}
                     </p>
                     <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] text-ink-2 [overflow-wrap:anywhere]">
                       <MessagePrimitive.Parts />
                     </div>
+                    {savedMessages.get(message.id)?.role !== "tool" && <MessageCopy text={savedMessages.get(message.id)!.text} role={message.role === "user" ? "user" : "assistant"} />}
                   </MessagePrimitive.Root>
+                  {deliveriesAfter.has(message.id) && <AssistantDelivery deliveries={deliveriesAfter.get(message.id)!} hasReply={savedMessages.get(message.id)?.role === "assistant"} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
+                  </div>
                 ) : null
               }
             </ThreadPrimitive.Messages>
           </section>
+          {!!unanchored.length && <AssistantDelivery deliveries={unanchored} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
           <CurrentTask
             session={session}
             csrf={csrf}
@@ -234,7 +258,9 @@ export function AssistantMessageStream({
             control={control}
             showArtifacts={showArtifacts}
             setView={setView}
+            canQueue={canQueue}
           />
+          {session.turn?.phase === "completed" && !deliveries.some((delivery) => delivery.turnId === session.turn?.turnId) && !!session.artifacts.length && <button type="button" className="assistant-task-artifacts" onClick={() => showArtifacts()}>查看作品</button>}
           {actions}
         </div>
         </div>

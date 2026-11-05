@@ -98,6 +98,15 @@ export function AssistantWorkspace({
     setDrawer(false);
   }, [pathname]);
   useEffect(() => {
+    const query = matchMedia("(min-width: 900px) and (min-height: 560px)");
+    const sync = () => {
+      if (query.matches && view === "artifacts") setArtifactOpen?.(true);
+    };
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, [view, setArtifactOpen]);
+  useEffect(() => {
     if (!drawer || wide) return;
     const previous = document.activeElement as HTMLElement | null;
     side.current?.querySelector<HTMLElement>("button, a, select")?.focus();
@@ -164,6 +173,7 @@ export function AssistantWorkspace({
           <button
             className="assistant-icon-button"
             aria-label="收起导航"
+            title="收起导航"
             onClick={() => (wide ? setCollapsed(true) : setDrawer(false))}
           >
             <IconClose size={18} />
@@ -210,17 +220,15 @@ export function AssistantWorkspace({
           </Link>
         </nav>
         <div className="mt-2 border-t border-line pt-3">
-          <p className="mb-2 flex items-center gap-2 px-2 text-[12px] font-semibold text-accent">
-            <IconMessage size={17} />
-            助手
-          </p>
-          <Link
-            to={assistantHref(assistantId)}
-            className="assistant-new-conversation flex items-center gap-2"
-          >
-            <IconPlus size={16} />
-            新对话
-          </Link>
+          <div className="flex items-center justify-between gap-2">
+            <p className="flex items-center gap-2 px-2 text-[12px] font-semibold text-accent">
+              <IconMessage size={17} />助手
+            </p>
+            <Link to={assistantHref(assistantId)} className="assistant-icon-button"
+              title="新建会话" aria-label="新建会话" onClick={() => setDrawer(false)}>
+              <IconPlus size={18} />
+            </Link>
+          </div>
           <nav aria-label="选择助手">
             {(
               [
@@ -285,11 +293,10 @@ export function AssistantWorkspace({
           {!!artifactCount && (
             <button
               className="assistant-panel-toggle"
-              aria-pressed={artifactOpen}
-              onClick={() => {
-                setArtifactOpen?.(!artifactOpen);
-                setView?.(view === "artifacts" ? "chat" : "artifacts");
-              }}
+              aria-label={artifactOpen ? "收起作品面板" : "展开作品面板"}
+              aria-expanded={artifactOpen}
+              aria-controls="assistant-artifact-panel"
+              onClick={() => setArtifactOpen?.(!artifactOpen)}
             >
               作品 {artifactCount}
             </button>
@@ -322,7 +329,7 @@ export function AssistantWorkspace({
             {chat}
           </section>
           {artifacts && (
-            <aside className="assistant-artifact-panel" aria-label="会话作品">
+            <aside id="assistant-artifact-panel" className="assistant-artifact-panel" aria-label="会话作品">
               {artifacts}
             </aside>
           )}

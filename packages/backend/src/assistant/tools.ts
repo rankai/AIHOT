@@ -9,6 +9,8 @@ import { Size } from "../providers/redfox/image-models.ts";
 import { WechatAnalysis, analyzeWechatResearch, verifyWechatDelivery } from "./wechat-research.ts";
 import { WECHAT_HOT_OPERATION, WechatHotInput } from "../providers/redfox/wechat-hot-contract.ts";
 import { ResearchAnalysis, ResearchApplication, analyzeResearch, verifyResearchDelivery } from "./xhs-research.ts";
+import { DraftArgumentsError } from "./tool-arguments.ts";
+export { DraftArgumentsError } from "./tool-arguments.ts";
 import { checkAuto, linkAuto } from "./fees.ts";
 import { AccountError } from "../users/accounts.ts";
 import { assertMemberCostEligible } from "../users/member-pricing.ts";
@@ -50,24 +52,13 @@ const SaveDraftInput = z.object({
   artifactId: z.string().uuid().optional(),
   baseVersion: z.number().int().min(0),
   content: Content,
-  researchApplication: ResearchApplication.optional(),
+  researchApplication: ResearchApplication.partial().optional(),
 }).strict();
 // Research scope is computed from verified server evidence; other writing contracts stay unchanged.
 const ResearchDraftInput = SaveDraftInput.extend({
-  content: Content.extend({ partial: Content.shape.partial.default(false), scope: Content.shape.scope.default("研究范围由服务端生成") }),
+  content: Content.extend({ sources: z.array(Content.shape.sources.element).max(50).default([]),
+    partial: Content.shape.partial.default(false), scope: Content.shape.scope.default("研究范围由服务端生成") }),
 });
-/** Only explicit argument errors before external calls or writes are safe for model correction. */
-export class DraftArgumentsError extends Error {
-  readonly result: { error: string; fields: string[]; message: string };
-  constructor(error: z.ZodError, correction?: string) {
-    super("Invalid tool arguments");
-    this.result = {
-      error: "invalid_tool_arguments",
-      fields: [...new Set(error.issues.map((issue) => issue.path.map(String).join(".") || "input"))].slice(0, 10),
-      message: correction ?? "请按工具schema修正字段。新建稿件省略artifactId并使用baseVersion=0；修改仅使用已提供的稿件UUID与版本。不得重新检索。",
-    };
-  }
-}
 export const ImageProposal = z.object({ activationId:z.string().uuid(), title:z.string().trim().min(1).max(300), prompt:z.string().min(1).max(10000), size:Size.default("1:1"),planReference:CoverPlanReference.optional() }).strict();
 /** Deterministic supported subset; resource text has already passed package integrity validation. */
 export function resolveImageSize(prompt: string, candidate?: z.infer<typeof Size>, platformSpecs?: string): z.infer<typeof Size> {
@@ -103,17 +94,17 @@ const dateArgumentsError = (message: string) => new DraftArgumentsError(new z.Zo
 ]), `${message}。${searchCorrection}`);
 export const businessTools = {
   generate_image: { description:"准备单张1K图片的独立报价，不会外发。仅用户专用批准入口可执行；不支持参考图、编辑、批量或其他模型。提示词应明确主题、构图、风格与文字要求。", schema:z.toJSONSchema(ImageProposal, {io:"input"}) },
-  analyze_wechat_research: { description: "分析本激活实际公众号标题和摘要的六维规律与主题关联；全文开头/段落/结尾无法判断的项明确不足，缺失互动数未知。有样本直接继续，不为不足10条或摘要截断增加范围确认。", schema: z.toJSONSchema(WechatAnalysis) },
-  save_xhs_cover_plan: {description:"保存恰好三套有真实视觉研究依据的封面方案。仅方案用next=plans-only结束；否则next=choose保存后等待用户选择，选择不等于付款。历史方案仅限本轮明确选中版本，修订使用artifactId/baseVersion。",schema:z.toJSONSchema(SaveCoverPlan)},
+  analyze_wechat_research: { description: "分析本激活真实返回标题和摘要的六维规律；显式选样和规律引用共同确定研究样本，只使用真实可用来源并去重。仅有摘要不能声称读过全文、引用原文断言或验证全文开头/段落/结尾；无依据维度如实写不足，缺失互动数未知。有样本直接继续，不为不足10条或摘要截断增加范围确认。", schema: z.toJSONSchema(WechatAnalysis) },
+  save_xhs_cover_plan: {description:"保存恰好三套有真实视觉研究依据的封面方案。summary 概括观察到的设计规律，不另报检索、去重或观察数量；页面使用本版研究记录展示这些数据。仅方案用next=plans-only结束；否则next=choose保存后等待用户选择，选择不等于付款。历史方案仅限本轮明确选中版本，修订使用artifactId/baseVersion。",schema:z.toJSONSchema(SaveCoverPlan,{io:"input"})},
   analyze_xhs_covers: { description: "对本回合已查询的真实封面进行视觉分析，最多20个sourceId并说明选样理由。仅创建独立报价，必须人工专用入口批准，旧检索自动授权无效。不得传URL或声称仅凭元数据看过图。", schema:z.toJSONSchema(CoverVisionProposal) },
   search_xhs_covers: { description: "创建爆款封面候选查询报价，最多5个去重词，含分隔逗号总长最多30个UTF-16单元（emoji计2）。每父回合仅一次，必须专用入口人工确认，旧自动授权无效。startDate默认researchClock.earliestDate，须在冻结近30天范围内；供应商T+1数据，仅支持起始日期，不接受endDate。不自动补查或重试；返回元数据不是看图分析。", schema: z.toJSONSchema(SearchInput.omit({ endDate: true }).extend({ keyword: z.string().min(1).max(30).describe("1–5个去重关键词，用英文逗号分隔；包括逗号总长≤30个UTF-16单元，emoji计2。超限需重新精简选择，不截断或拆成多次查询") })) },
   search_wechat_articles: { description: "创建公众号热文查询报价：关键词用英文逗号合并，最多5词200字符。每次必须用户专用入口人工确认，父创作自动授权无效。researchClock.today为冻结业务日期，默认D-7至D，保留用户明确日期。不会自动扩期或重试。", schema: z.toJSONSchema(SearchInput.extend({ keyword: z.string().min(1).max(200).regex(/^[^,，]+(?:[,，][^,，]+){0,4}$/).describe("1–5个去重关键词，以英文逗号分隔；总长不超过200个Unicode字符") })) },
   analyze_xhs_research: {
-    description: "基于当前激活已完成关键词检索的实际样本，保存可观察的标题、内容结构、标签、互动规律及应用计划。只引用search:ID；逐条说明主题关联，推荐回退不算样本。缺少互动数据明确未知。有可用主题样本即可完整创作；样本不足50条或正文截断只需如实披露，不另行询问范围确认。",
+    description: "基于当前激活已完成关键词检索的实际样本，保存可观察的标题、内容结构、标签、互动规律及应用计划。显式选样与四种规律引用共同确定实际研究样本；不需要重复抄写同一ID，只引用真实search:ID，说明可判断的主题关联，推荐回退不算样本。缺少依据的维度如实说明不足，缺少互动数据明确未知。有可用样本即可继续创作；样本不足50条或正文截断只需如实披露，不另行询问范围确认。",
     schema: z.toJSONSchema(ResearchAnalysis),
   },
   save_draft: {
-    description: "保存并交付符合已激活模块合同的稿件；遵循该模块已加载的写作规程。需要研究的模块须提供researchApplication，说明真实分析在本稿的应用；已验证研究附注由服务端生成，正文不要重复附注。新建不传artifactId且baseVersion为0；修改仅使用已给定稿件ID和版本。sources使用输入消息ID或真实取得的引用，不编造来源。",
+    description: "保存并交付符合已激活模块合同的稿件；遵循该模块已加载的写作规程。本次唯一成功研究由服务端关联，不必复述analysisCallId；有多份或明确指定时使用researchApplication。研究附注和参考由服务端生成，正文不要重复附注或把摘要写成已核实原文引语。新建不传artifactId且baseVersion为0；修改仅使用已给定稿件ID和版本。sources使用输入消息ID或真实取得的引用，不编造来源。改写直接依据用户原文，不要求研究、风格确认或遥测。",
     schema: z.toJSONSchema(SaveDraftInput),
   },
   search_xhs_notes: {
@@ -213,7 +204,6 @@ export async function activeTools(tx: Tx, turn: Record<string, any>) {
     const sources = await sourceCandidates(tx, turn);
     const researchDraft = requiredAnalyses.length > 0;
     const schema: any = researchDraft ? z.toJSONSchema(ResearchDraftInput, { io: "input" }) : structuredClone(tools.save_draft.schema);
-    if (researchDraft) schema.required.push("researchApplication");
     const allArtifacts = await tx`SELECT artifact_id AS "artifactId",max(version)::int AS version FROM assistant_artifact_versions WHERE session_id=${turn.session_id} AND kind IN ('text-draft','xhs-note') GROUP BY artifact_id ORDER BY artifact_id`;
     const artifacts = inheritedTargets ? allArtifacts.filter((a) => inheritedTargets.includes(a.artifactId)) : allArtifacts;
     if (inheritedTargets) schema.required.push("artifactId");
@@ -234,6 +224,36 @@ export async function activation(tx: Tx, turn: Record<string, any>, id: string) 
   if (!a) throw conflict("技能激活记录不可访问");
   return { a, ...(await resolveCandidate(turn.snapshot.candidates, a.candidate.skillId, a.candidate.moduleId)) };
 }
+async function researchApplication(tx: Tx, turn: Record<string, any>, activationId: string, name: string,
+  raw: unknown, target: { artifactId?: string; baseVersion: number }) {
+  const parsed = ResearchApplication.partial().safeParse(raw ?? {});
+  if (!parsed.success) throw new DraftArgumentsError(parsed.error, "请说明使用哪份已完成研究；不重新检索。");
+  const explanation = parsed.data.explanation ?? "沿用本次已完成研究，以下来源作为写作参考。";
+  const requested = parsed.data.analysisCallId;
+  const candidates = await tx`SELECT id FROM assistant_tool_calls WHERE turn_id=${turn.id} AND name=${name}
+    AND state='completed' AND input->>'activationId'=${activationId} AND result->>'activationId'=${activationId}`;
+  if ((!candidates.length || requested) && target.artifactId && target.baseVersion > 0) {
+    const selected = (turn.snapshot.selected ?? []).filter((item: any) => item.artifact_id === target.artifactId && item.version);
+    const exact = selected.find((item: any) => item.version === target.baseVersion);
+    const ids = new Set<string>();
+    for (const item of !requested && exact ? [exact] : selected) {
+      const [version] = await tx`SELECT source_snapshot FROM assistant_artifact_versions WHERE session_id=${turn.session_id} AND artifact_id=${target.artifactId} AND version=${item.version}`;
+      for (const source of (version?.source_snapshot ?? []) as AssistantSource[]) if (source.research) ids.add(source.research.analysisCallId);
+    }
+    if (ids.size) candidates.push(...await tx`SELECT c.id FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id
+      WHERE c.id IN ${tx([...ids])} AND c.name=${name} AND c.state='completed' AND t.session_id=${turn.session_id}`);
+  }
+  if (requested) {
+    if (!candidates.some((candidate) => candidate.id === requested)) throw new DraftArgumentsError(new z.ZodError([
+      { code: "custom", path: ["researchApplication", "analysisCallId"], message: "本次任务无法使用这份分析" },
+    ]), "本次任务无法使用所填分析编号。请引用本次已完成或精确选定稿件附带的真实研究；只有一份时可省略编号由服务端关联，不重新检索。");
+    return { analysisCallId: requested, explanation };
+  }
+  if (candidates.length !== 1) throw new DraftArgumentsError(new z.ZodError([
+    { code: "custom", path: ["researchApplication", "analysisCallId"], message: "需要可唯一确定的已完成研究" },
+  ]), "尚无可唯一确定的研究。已有多份时请明确analysisCallId；没有完成研究时先分析已有材料或说明材料不足，不重新检索。");
+  return { analysisCallId: candidates[0]!.id, explanation };
+}
 export async function localCall(
   tx: Tx,
   turn: Record<string, any>,
@@ -244,7 +264,9 @@ export async function localCall(
   if (call.name === "load_skill") {
     if (turn.snapshot.model.tokenizer !== "cl100k_base" || !turn.snapshot.model.capabilities.includes("text-tools"))
       throw conflict("模型能力不兼容");
-    const i = z.object({ skillId: z.string(), moduleId: z.string() }).strict().parse(call.input);
+    const parsed = z.object({ skillId: z.string(), moduleId: z.string() }).strict().safeParse(call.input);
+    if (!parsed.success) throw new DraftArgumentsError(parsed.error, "请使用冻结目录中的skillId和moduleId修正加载参数；无需询问用户是否允许加载模块。");
+    const i = parsed.data;
     const { candidate, skill, module } = await resolveCandidate(turn.snapshot.candidates, i.skillId, i.moduleId),
       hash = creditHash(candidate);
     const [a] =
@@ -259,14 +281,18 @@ export async function localCall(
     };
   }
   if (call.name === "read_skill_reference") {
-    const i = z.object({ activationId: z.string().uuid(), resourceId: z.string() }).strict().parse(call.input);
+    const parsed = z.object({ activationId: z.string().uuid(), resourceId: z.string() }).strict().safeParse(call.input);
+    if (!parsed.success) throw new DraftArgumentsError(parsed.error, "请使用已加载模块返回的activationId和resourceId修正读取参数；不要重新检索。");
+    const i = parsed.data;
     const { skill, module } = await activation(tx, turn, i.activationId);
     if (!module.resources.includes(i.resourceId)) throw conflict("资源不属于当前模块");
     const resource = skill.manifest.resources.find((r) => r.resourceId === i.resourceId)!;
     return { text: skill.texts.get(i.resourceId), type: resource.type, hash: resource.sha256 };
   }
   if (call.name === "ask_question") {
-    const input = z.object({ text: z.string().min(1).max(2000) }).strict().parse(call.input);
+    const parsed = z.object({ text: z.string().min(1).max(2000) }).strict().safeParse(call.input);
+    if (!parsed.success) throw new DraftArgumentsError(parsed.error, "请将需要用户回答的问题放入text字段，长度为1至2000字符；不要重新检索。");
+    const input = parsed.data;
     return { question: input.text };
   }
   if (call.name === "analyze_xhs_research" || call.name === "analyze_wechat_research") {
@@ -280,10 +306,9 @@ export async function localCall(
   }
   if(call.name === "save_xhs_cover_plan") {
     assertBusinessTool(turn,call.name);
-    const parsed=SaveCoverPlan.safeParse(call.input);if(!parsed.success)throw new DraftArgumentsError(parsed.error,"请修正方案结构：恰好三个唯一schemeId、3:4比例及实际观察来源");
+    const parsed=SaveCoverPlan.safeParse(call.input);if(!parsed.success)throw new DraftArgumentsError(parsed.error,"请提供三套封面方案的名称和提示词；构图、配色缺失可省略，不补造观察，来源只使用实际成功观察的图片；方案编号和本任务后续动作由服务端补齐");
     const {a,module}=await activation(tx,turn,parsed.data.activationId);
     if(module.deliveryContract!==COVER_DELIVERY_CONTRACT||!module.tools.includes(call.name)||!module.outputKinds.includes("xhs-cover-plan"))throw conflict("模块不允许保存封面方案");
-    if(turn.snapshot.taskScope?.delivery==='plans-only' && parsed.data.next!=='plans-only')throw new DraftArgumentsError(new z.ZodError([{code:"custom",path:["next"],message:"plans-only required"}]),"本次只交付三套方案，next必须plans-only，保存后直接结束。");
     return persistCoverPlan(tx,turn,a.id,parsed.data);
   }
   if (call.name === "save_draft") {
@@ -306,26 +331,24 @@ export async function localCall(
     }
     let sourceSnapshot = await sourceCandidates(tx, turn);
     const permitted = new Set(sourceSnapshot.map((source) => source.id));
-    if (i.content.sources.some((source) => !permitted.has(source)))
-      throw conflict("稿件引用不属于已确认材料或已完成检索");
+    if (i.content.sources.some((source) => !permitted.has(source)) &&
+        !module.tools.some((tool) => tool === "analyze_wechat_research" || tool === "analyze_xhs_research"))
+      throw new DraftArgumentsError(new z.ZodError([{ code: "custom", path: ["content", "sources"], message: "引用编号不在可用来源中" }]),
+        "稿件sources只能使用工具列出的真实来源ID；本次用户原文可用current-message。请修正来源编号，不编造来源或重新检索。");
+    i.content.sources = i.content.sources.filter((source) => permitted.has(source));
     if (module.tools.includes("analyze_wechat_research")) {
-      const application = ResearchApplication.safeParse(i.researchApplication);
-      if (!application.success) throw new DraftArgumentsError(application.error, "请提供已验证研究的analysisCallId和应用说明");
-      const verified = await verifyWechatDelivery(tx, turn, a.id, i.content, sourceSnapshot, application.data, { artifactId:i.artifactId, baseVersion:i.baseVersion });
+      const application = await researchApplication(tx, turn, a.id, "analyze_wechat_research", i.researchApplication, i);
+      const verified = await verifyWechatDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId:i.artifactId, baseVersion:i.baseVersion });
       sourceSnapshot = verified.sources; i.content = verified.content;
     } else if (module.tools.includes("analyze_xhs_research")) {
-      const application = ResearchApplication.safeParse(i.researchApplication);
-      if (!application.success) throw new DraftArgumentsError(application.error, "请填写researchApplication的analysisCallId及explanation，说明已完成分析如何用于本稿；不重新检索。");
-      const verified = await verifyResearchDelivery(tx, turn, a.id, i.content, sourceSnapshot, i.researchApplication, { artifactId: i.artifactId, baseVersion: i.baseVersion });
+      const application = await researchApplication(tx, turn, a.id, "analyze_xhs_research", i.researchApplication, i);
+      const verified = await verifyResearchDelivery(tx, turn, a.id, i.content, sourceSnapshot, application, { artifactId: i.artifactId, baseVersion: i.baseVersion });
       sourceSnapshot = verified.sources;
       i.content = verified.content;
     } else if (module.tools.includes("search_xhs_notes")) {
       // Previously accepted v2 turns retain their frozen delivery contract; new turns only select v3.
-      if (!i.content.sources.some((source) => source.startsWith("search:")) && !i.content.partial)
-        throw conflict("未取得研究引用的材料稿必须标记partial");
       const cited = sourceSnapshot.filter((source) => i.content.sources.includes(source.id) && source.kind === "research" && source.url);
-      if (!i.content.partial && (cited.length < 2 || i.content.titles.length < 3 || i.content.tags.length < 5))
-        throw conflict("完整研究稿需要至少2条有效参考、3个标题和5个标签");
+      if (!cited.length) i.content = { ...i.content, partial: true, scope: "未取得可引用的研究资料，仅依据已确认的用户材料创作" };
     }
     const [before] =
       await tx`SELECT artifact_id,version,kind,content FROM assistant_artifact_versions WHERE turn_id=${turn.id} AND activation_id=${a.id} AND content=${tx.json(i.content)}`;
@@ -359,7 +382,16 @@ export async function prepareCall(turn: Record<string, any>, call: Record<string
     if (!module.tools.includes(call.name) || !module.outputKinds.includes("image")) throw conflict("当前模块不允许生成图片");
     const activations=await tx`SELECT candidate FROM assistant_activations WHERE turn_id=${turn.id}`;
     for(const row of activations){const selected=await resolveCandidate(turn.snapshot.candidates,row.candidate.skillId,row.candidate.moduleId);if(selected.module.deliveryContract===COVER_DELIVERY_CONTRACT&&module.deliveryContract!==COVER_DELIVERY_CONTRACT)throw conflict("封面任务不能切换独立图片模块绕过方案研究");}
-    if(module.deliveryContract===COVER_DELIVERY_CONTRACT&&!i.planReference)throw new DraftArgumentsError(CoverPlanReference.safeParse(undefined).error!,"封面生成必须引用已保存的精确planReference");
+    if(module.deliveryContract===COVER_DELIVERY_CONTRACT&&!i.planReference&&turn.snapshot.coverChoice){
+      const {artifactId,version,schemeId}=turn.snapshot.coverChoice;
+      i.planReference=CoverPlanReference.parse({artifactId,version,schemeId});
+    }
+    if(module.deliveryContract===COVER_DELIVERY_CONTRACT&&!i.planReference)throw new DraftArgumentsError(CoverPlanReference.safeParse(undefined).error!,"先保存封面方案并等待用户明确选择；不能替用户选择或直接生图。");
+    if(i.planReference&&turn.snapshot.coverChoice){
+      const selected=turn.snapshot.coverChoice;
+      if(i.planReference.artifactId!==selected.artifactId||i.planReference.version!==selected.version||i.planReference.schemeId!==selected.schemeId)
+        throw new DraftArgumentsError(new z.ZodError([{code:"custom",path:["planReference"],message:"方案引用与本轮已选方案不一致"}]),"请使用用户本轮已选方案的引用；也可省略planReference由服务端补齐。不要要求用户再次选择、改用其他方案或重新检索。");
+    }
     if(i.planReference){const chosen=await resolveCoverImage(tx,turn,i.planReference);i.prompt=chosen.prompt;i.title=chosen.title;i.size=chosen.size;return chosen.size;}
     return resolveImageSize(i.prompt, i.size, module.resources.includes("platform-specs") ? skill.texts.get("platform-specs") : undefined);
   });

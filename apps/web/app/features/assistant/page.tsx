@@ -13,7 +13,7 @@ import { Button } from "../admin/ui";
 import { usePrivateAccount } from "../account/use-private-account";
 import { useToolCommand } from "../tools/client";
 import { sessionHref, type SessionPage } from "./data";
-import { draftKey, rememberDraft, useAssistantDraft, draftSelection, editDraftText, chooseDraftAction } from "./drafts";
+import { draftKey, rememberDraft, useAssistantDraft, draftSelection, editDraftText, chooseDraftAction, hasComposerDraft, rejectedCreateDraft } from "./drafts";
 import { AssistantWorkspace } from "./workspace";
 import { AssistantComposer } from "./composer";
 import { AssistantComposerControls, AssistantSkillNotice } from "./composer-controls";
@@ -140,6 +140,7 @@ function EntryContent({
         actionId: null,
         skillSelection: null,
         taskHint: undefined,
+        taskChoice: undefined,
         attachments: [],
         pendingCreate: frozen,
       }));
@@ -152,9 +153,7 @@ function EntryContent({
     creating.current = false;
     if (!result) {
       const status = command.failure.current?.status;
-      if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => !previous.text && !previous.attachments?.length
-        ? { ...previous, pendingCreate: undefined, text: frozen.text, actionId: frozen.actionId, skillSelection: draftSelection(frozen), taskHint: frozen.taskHint, attachments: frozen.attachments }
-        : { ...previous, pendingCreate: { ...frozen, rejected: true } });
+      if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => rejectedCreateDraft({ ...previous, pendingCreate: frozen }));
       else update(previous => ({ ...previous, pendingCreate: { ...frozen, unknown: true } }));
       return;
     }
@@ -235,7 +234,7 @@ function EntryContent({
                   ? "正在免费建立会话，随后确认本次费用…"
                   : undefined
               }
-              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskChoice={draft.taskChoice} onTaskChoice={taskChoice=>update(previous=>({...previous,taskChoice}))} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} configureFees={() => void send(true)} />}
+              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
               attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
               {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}
@@ -256,7 +255,7 @@ function EntryContent({
                       重试原建会话命令
                     </Button>
                   )}
-                  {draft.pendingCreate.rejected && <><Button size="sm" disabled={!!draft.text || !!draft.attachments?.length} onClick={() => update(previous => previous.pendingCreate ? { ...previous, text: previous.pendingCreate.text, actionId: previous.pendingCreate.actionId, skillSelection: draftSelection(previous.pendingCreate), taskHint: previous.pendingCreate.taskHint, attachments: previous.pendingCreate.attachments, pendingCreate: undefined } : previous)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
+                  {draft.pendingCreate.rejected && <><Button size="sm" disabled={hasComposerDraft(draft)} onClick={() => update(rejectedCreateDraft)}>返回修改原需求</Button><p className="text-[11px] text-ink-4">原需求未受理。请先保存或清空新草稿，再返回修改原需求。</p></>}
                   <p className="mt-2 text-[11px] text-ink-4">
                     本次页面会话内可按原命令恢复；刷新或重新登录后先核对历史，不自动重发。
                   </p>

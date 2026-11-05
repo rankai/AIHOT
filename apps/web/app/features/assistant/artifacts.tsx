@@ -12,6 +12,7 @@ import { toolGet, useToolCommand } from "../tools/client";
 import { artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
 import { useEditorGuard } from "./unsaved";
 import { CoverPlanBody } from "./cover-plan";
+import { artifactDisplayName, imageDownloadName, type ArtifactTarget } from "./artifact-display";
 function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
   const { content } = artifact;
   return (
@@ -39,12 +40,7 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
           {content.tags.map((tag) => `#${tag.replace(/^#/, "")}`).join(" ")}
         </p>
       )}
-      <div className="rounded-control bg-bg-sunk p-3 text-[12px] leading-relaxed text-ink-3">
-        <span className="font-medium">
-          {content.partial ? "部分交付" : "交付范围"}：
-        </span>
-        {content.scope}
-      </div>
+      <DraftResearchDetails content={content} />
       <div>
         <h4 className="text-[12px] font-medium text-ink-3">材料与引用</h4>
         <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
@@ -79,13 +75,29 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
   );
 }
 
+function DraftResearchDetails({ content }: { content: AssistantArtifactContent }) {
+  return <div className="text-[12px] leading-relaxed text-ink-3">
+    {content.partial && <p className="mb-2">这份稿件为部分交付，详情见研究范围。</p>}
+    <details className="rounded-control bg-bg-sunk p-3">
+      <summary className="cursor-pointer font-medium">研究范围</summary>
+      <p className="mt-2 whitespace-pre-wrap">{content.scope || "未记录研究范围。"}</p>
+    </details>
+  </div>;
+}
+
 export function AssistantArtifactPanel({
   artifacts,
   target,
+  defaultTarget,
+  reading = false,
+  onViewed,
   ...props
 }: {
   artifacts: AssistantArtifact[];
-  target?: { artifactId: string; version: number } | null;
+  target?: ArtifactTarget | null;
+  defaultTarget?: ArtifactTarget | null;
+  reading?: boolean;
+  onViewed?: (target: ArtifactTarget) => void;
   sessionId: string;
   csrf: string;
   active: boolean;
@@ -93,18 +105,33 @@ export function AssistantArtifactPanel({
   refresh: () => Promise<unknown>;
   onReference: (artifact: AssistantArtifact) => void;
 }) {
-  const [chosen, setChosen] = useState(artifacts[0]?.artifactId);
+  const [chosen, setChosen] = useState<string | undefined>();
+  const [acceptedTarget, setAcceptedTarget] = useState<ArtifactTarget | null>(null);
   const selectedId = artifacts.some(
     (artifact) => artifact.artifactId === chosen,
   )
     ? chosen
-    : artifacts[0]?.artifactId;
+    : defaultTarget?.artifactId ?? artifacts[0]?.artifactId;
   const guard = useEditorGuard();
+  function pinSelection() {
+    setChosen(selectedId);
+    if (acceptedTarget && acceptedTarget.artifactId === selectedId) onViewed?.(acceptedTarget);
+    else if (defaultTarget && defaultTarget.artifactId === selectedId) onViewed?.(defaultTarget);
+  }
+  // Opening the mobile works page is already an explicit reading choice.
+  // Freeze the item visible on entry; later default targets must not take it over.
   useEffect(() => {
-    if (target) guard.request(() => setChosen(target.artifactId));
+    if (reading) pinSelection();
+  }, [reading]);
+  useEffect(() => {
+    if (target && artifacts.some((artifact) => artifact.artifactId === target.artifactId)) guard.request(() => {
+      setChosen(target.artifactId);
+      setAcceptedTarget(target);
+      onViewed?.(target);
+    });
   }, [target]);
   return (
-    <div className="assistant-artifact-inner">
+    <div className="assistant-artifact-inner" onPointerDownCapture={pinSelection} onFocusCapture={pinSelection} onScrollCapture={pinSelection} onWheelCapture={pinSelection}>
       <div className="assistant-artifact-heading">
         <h2 className="text-[14px] font-semibold text-ink">
           会话作品{" "}
@@ -119,12 +146,16 @@ export function AssistantArtifactPanel({
             value={selectedId}
             onChange={(event) => {
               const id = event.target.value;
-              guard.request(() => setChosen(id));
+              guard.request(() => {
+                setChosen(id); setAcceptedTarget(null);
+                const artifact = artifacts.find(item => item.artifactId === id);
+                if (artifact) onViewed?.({ artifactId: artifact.artifactId, version: artifact.version });
+              });
             }}
           >
-            {artifacts.map((artifact, index) => (
+            {artifacts.map((artifact) => (
               <option key={artifact.artifactId} value={artifact.artifactId}>
-                作品 {index + 1} · {{ "xhs-cover-plan": "封面方案", image: "图片", "text-draft": "文章", "xhs-note": "笔记" }[artifact.kind]} · {artifact.content.title}
+                {artifactDisplayName(artifact)} · {artifact.content.title}
               </option>
             ))}
           </Select>
@@ -136,7 +167,7 @@ export function AssistantArtifactPanel({
             key={artifact.artifactId}
             hidden={artifact.artifactId !== selectedId}
           >
-            <AssistantArtifactCard artifact={artifact} versionTarget={selectedId === artifact.artifactId && target?.artifactId === artifact.artifactId ? target : undefined} {...props} />
+            <AssistantArtifactCard artifact={artifact} followLatest={!chosen && !reading && !acceptedTarget} versionTarget={selectedId === artifact.artifactId && acceptedTarget?.artifactId === artifact.artifactId ? acceptedTarget : undefined} {...props} />
           </div>
         ))}
       </div>
@@ -144,17 +175,23 @@ export function AssistantArtifactPanel({
   );
 }
 export function AssistantArtifactCard(props: Parameters<typeof WritingArtifactCard>[0]) {
-  const {artifact} = props;
-  if (artifact.kind === "image") {
-    const c=artifact.content, href=`/api/tools/assets/${encodeURIComponent(c.fileKey ?? "")}/content`;
-    return <article className="min-w-0 space-y-4" aria-label={`图片：${c.title}`} data-artifact-id={artifact.artifactId}>
-      <Badge tone="ok">图片</Badge><h3 className="break-words text-[19px] font-semibold">{c.title}</h3>
-      <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
-      <p className="whitespace-pre-wrap break-words text-[13px] text-ink-2 [overflow-wrap:anywhere]">{c.prompt}</p>
-      <a href={href} download className="text-accent underline">下载图片</a>
-    </article>;
-  }
   return <WritingArtifactCard {...props} />;
+}
+function ImageBody({ artifact }: { artifact: AssistantArtifact }) {
+  const c = artifact.content;
+  if (!c.fileKey) return <p className="text-[13px] text-ink-3">图片文件暂不可读，请重新打开该作品或核对处理结果。</p>;
+  const href = `/api/tools/assets/${encodeURIComponent(c.fileKey)}/content`;
+  return <div className="min-w-0 space-y-4">
+    <h3 className="break-words text-[19px] font-semibold">{c.title}</h3>
+    <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
+    <a href={href} download={imageDownloadName(c.title, artifact.version)} className="text-accent underline">下载图片</a>
+    <details className="text-[12px] text-ink-3">
+      <summary className="cursor-pointer">图片生成记录</summary>
+      <p className="mt-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{c.prompt}</p>
+      {c.planReference && <p className="mt-2">依据封面方案版本 {c.planReference.version} 生成。</p>}
+      <p className="mt-2">{c.scope}</p>
+    </details>
+  </div>;
 }
 function WritingArtifactCard({
   artifact,
@@ -165,6 +202,7 @@ function WritingArtifactCard({
   refresh,
   onReference,
   versionTarget,
+  followLatest = false,
 }: {
   artifact: AssistantArtifact;
   sessionId: string;
@@ -174,6 +212,7 @@ function WritingArtifactCard({
   refresh: () => Promise<unknown>;
   onReference?: (artifact: AssistantArtifact) => void;
   versionTarget?: { artifactId: string; version: number };
+  followLatest?: boolean;
 }) {
   const command = useToolCommand(csrf, `assistant:session:${sessionId}`);
   const [versions, setVersions] = useState<AssistantArtifact[]>([]);
@@ -187,6 +226,9 @@ function WritingArtifactCard({
   } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [targetRead, setTargetRead] = useState<"loading" | "failed" | null>(null);
+  const [targetRequest, setTargetRequest] = useState<ArtifactTarget | null>(null);
+  const targetBlocked = !!targetRead || (!!versionTarget && targetRequest !== versionTarget);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [handoff, setHandoff] = useState<AssistantArtifact | null>(null);
@@ -198,6 +240,7 @@ function WritingArtifactCard({
     JSON.stringify(editing.content) !== JSON.stringify(editing.original);
   const newer = artifact.version > selected.version;
   const cover = selected.kind === "xhs-cover-plan";
+  const image = selected.kind === "image";
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -205,37 +248,46 @@ function WritingArtifactCard({
       read.current?.abort();
     };
   }, []);
+  useEffect(() => {
+    if (followLatest && !editing) {
+      setSelected(artifact);
+      selectedRef.current = artifact;
+    }
+  }, [followLatest, artifact, !!editing]);
   const path = `${sessionApi(sessionId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/versions`;
   useEffect(() => {
+    setTargetRequest(versionTarget ?? null);
+    setTargetRead(null);
+    setError(null);
     if (!versionTarget) return;
+    setLoading(false);
     const targetVersion = versionTarget.version;
     if (targetVersion === artifact.version) {
-      request(() => {
-        setEditing(null);
-        setSelected(artifact);
-        selectedRef.current = artifact;
-      });
+      setEditing(null);
+      setSelected(artifact);
+      selectedRef.current = artifact;
       return;
     }
     const controller = new AbortController();
+    read.current?.abort();
+    read.current = controller;
     setLoading(true);
-    toolGet<{ versions: AssistantArtifact[] }>(path, controller.signal).then((result) => {
+    setTargetRead("loading");
+    toolGet<{ versions: AssistantArtifact[] }>(`${path}?version=${targetVersion}`, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      setVersions(result.versions);
       const version = result.versions.find((value) => value.version === targetVersion);
-      if (!version) { setError("指定作品版本暂不可读，请重新读取。"); return; }
-      request(() => {
-        setEditing(null);
-        setSelected(version);
-        selectedRef.current = version;
-      });
+      if (!version) { setTargetRead("failed"); setError("指定作品版本暂不可读，请重新打开该作品条。"); return; }
+      setTargetRead(null);
+      setEditing(null);
+      setSelected(version);
+      selectedRef.current = version;
     }).catch((cause) => {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "读取版本失败。");
+      if (!controller.signal.aborted) { setTargetRead("failed"); setError(cause instanceof Error ? cause.message : "读取版本失败。"); }
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
+    return () => { controller.abort(); setLoading(false); };
   }, [versionTarget, path]);
   async function save(): Promise<boolean> {
-    if (!editing || cover || artifact.kind === "xhs-cover-plan" || active || command.pending) return false;
+    if (!editing || image || cover || artifact.kind === "xhs-cover-plan" || active || command.pending) return false;
     const content = {
       ...editing.content,
       titles: editing.content.titles
@@ -310,23 +362,24 @@ function WritingArtifactCard({
   return (
     <article
       className="min-w-0 space-y-4"
-      aria-label={`${cover ? "封面方案" : "稿件"}：${selected.content.title}`}
+      aria-label={`${cover ? "封面方案" : image ? "图片" : "稿件"}：${selected.content.title}`}
       data-artifact-id={artifact.artifactId}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge tone={selected.content.partial ? "warn" : "ok"}>
-          {cover ? "小红书封面方案" : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
+          {cover ? "小红书封面方案" : image ? artifactDisplayName(selected) : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
         </Badge>
         <span className="text-[12px] text-ink-4">
           版本 {selected.version}
           {dirty ? " · 未保存" : ""}
         </span>
       </div>
-      {newer && (
+      {!targetBlocked && newer && (
         <div className="assistant-inline-notice" role="status">
           <p>有新版本可查看，当前内容和本地修改不会被覆盖。</p>
           <Button
             size="sm"
+            disabled={loading}
             onClick={() =>
               request(() => {
                 setEditing(null);
@@ -339,8 +392,8 @@ function WritingArtifactCard({
           </Button>
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button
+      {!targetBlocked && <div className="flex flex-wrap gap-2">
+        {!image && <Button
           size="sm"
           onClick={async () => {
             try {
@@ -354,7 +407,7 @@ function WritingArtifactCard({
           }}
         >
           复制
-        </Button>
+        </Button>}
         <Button
           size="sm"
           disabled={loading}
@@ -362,11 +415,12 @@ function WritingArtifactCard({
         >
           {historyOpen ? "收起版本" : "历史版本"}
         </Button>
-        {!cover && <Button
+        {!cover && !image && <Button
           size="sm"
           disabled={
             active ||
             command.pending ||
+            loading ||
             selected.version !== artifact.version ||
             !!editing
           }
@@ -381,7 +435,7 @@ function WritingArtifactCard({
         >
           编辑稿件
         </Button>}
-        {!cover && <Button
+        {!cover && !image && <Button
           size="sm"
           disabled={
             command.pending ||
@@ -396,14 +450,14 @@ function WritingArtifactCard({
         >
           转交助手
         </Button>}
-      </div>
-      {historyOpen && (
+      </div>}
+      {!targetBlocked && historyOpen && (
         <label className="block space-y-2 text-[12px] text-ink-3">
           <span>查看版本</span>
           <Select
-            aria-label={cover ? "封面方案版本" : "稿件版本"}
+            aria-label={cover ? "封面方案版本" : image ? "图片版本" : "稿件版本"}
             value={selected.version}
-            disabled={command.pending}
+            disabled={command.pending || loading}
             onChange={(event) => {
               const version = Number(event.target.value);
               const next = [artifact, selected, ...versions].find(
@@ -433,7 +487,7 @@ function WritingArtifactCard({
           </Select>
         </label>
       )}
-      {cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
+      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody artifact={selected} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
         <form
           className="space-y-4"
           onSubmit={(event) => {
@@ -480,24 +534,7 @@ function WritingArtifactCard({
               }
             />
           </label>
-          <label className="block space-y-1 text-[13px] text-ink-2">
-            <span>交付范围</span>
-            <Textarea
-              required
-              rows={2}
-              maxLength={1000}
-              value={editing.content.scope}
-              onChange={(event) => edit({ scope: event.target.value })}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-[13px] text-ink-2">
-            <input
-              type="checkbox"
-              checked={editing.content.partial}
-              onChange={(event) => edit({ partial: event.target.checked })}
-            />
-            这是部分交付
-          </label>
+          <DraftResearchDetails content={editing.original} />
           <p className="text-[12px] text-ink-4">
             保存追加新版本，保留原版本和来源。只有保存成功才会显示已保存。
           </p>
@@ -521,7 +558,7 @@ function WritingArtifactCard({
       ) : (
         <DraftBody artifact={selected} />
       )}
-      {onReference && (
+      {onReference && !image && !targetBlocked && (
         <Button
           size="sm"
           tone="primary"
@@ -531,7 +568,7 @@ function WritingArtifactCard({
           用这版继续修改
         </Button>
       )}
-      {active && !cover && (
+      {active && !cover && !image && (
         <p className="text-[12px] text-ink-4">
           处理进行中或结果待核对时不能保存，请先完成或停止后续执行。
         </p>
@@ -546,7 +583,7 @@ function WritingArtifactCard({
           {error || command.error}
         </p>
       )}
-      {handoff && !cover && (
+      {handoff && !cover && !image && (
         <HandoffDialog
           artifact={handoff}
           sessionId={sessionId}

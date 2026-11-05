@@ -11,6 +11,9 @@ import {
   canRejectTurn,
   settledDraft,
   rejectedDraft,
+  restoreDraftInput,
+  rejectedQueueDraft,
+  rejectedCreateDraft,
   type AssistantDraft,
 } from "../app/features/assistant/drafts.ts";
 import type { PendingTurn } from "../app/features/assistant/data.ts";
@@ -127,13 +130,66 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
   assert.equal(failedTurn(draft,attempt,null),draft,"late failure cannot mark another pending attempt");
 });
 
-test("new shortcuts freeze skill scope and intent; editing clears only the unsent hint", () => {
+test("editing preserves the chosen quick action but clears priced scope; reselection clears scope", () => {
   const action = { actionId: "xiaohongshu-rewrite", skillId: "xiaohongshu-creator", skillName: "小红书创作", label: "改写", available: true, reason: null };
   const selected = chooseDraftAction(emptyDraft(), action);
   assert.deepEqual(draftSelection(selected), { skillId: "xiaohongshu-creator" });
-  assert.deepEqual(selected.taskHint, { actionId: "xiaohongshu-rewrite" }); assert(selected.text.includes("改写")); assert(selected.text.includes("\n主题或原文："));
-  const edited = editDraftText(selected, "我要研究后写笔记");
-  assert.equal(edited.taskHint, undefined); assert.deepEqual(draftSelection(edited), draftSelection(selected));
+  assert.deepEqual(selected.taskHint, { actionId: "xiaohongshu-rewrite" });
+  assert.equal(selected.text, "");
+  const cover = { ...action, actionId: "xiaohongshu-cover", label: "做封面" };
+  assert.equal(chooseDraftAction(selected, cover).text, "");
+  const material = " 用户自己填写的主题与原文 \n";
+  for (const nextAction of [cover, null, action]) assert.equal(chooseDraftAction({ ...selected, text: material }, nextAction).text, material);
+  const priced = { ...selected, taskChoice: { skillId: action.skillId, moduleId: "M2", delivery: "writing" as const } };
+  const edited = editDraftText(priced, "我要研究后写笔记");
+  assert.deepEqual(edited.taskHint, selected.taskHint);
+  assert.equal(edited.taskChoice, undefined);
+  assert.equal(chooseDraftAction(priced, null).taskHint, undefined);
+  assert.equal(chooseDraftAction(priced, null).taskChoice, undefined);
+  assert.equal(chooseDraftAction(priced, action).taskChoice, undefined); assert.deepEqual(draftSelection(edited), draftSelection(selected));
   assert.deepEqual(draftSelection({ actionId: "xiaohongshu-rewrite" }), { actionId: "xiaohongshu-rewrite" });
   assert.deepEqual(draftSelection({ actionId: "xiaohongshu-rewrite", skillSelection: { skillId: "xiaohongshu-creator" } }), { skillId: "xiaohongshu-creator" });
+});
+
+
+test("cancelled quotes and rejected create, queue and turn restore the explicit scope only to an empty composer", () => {
+  const input: PendingTurn["input"] = { message: "春季穿搭封面", expectedRevision: 4, skillSelection: { skillId: "xiaohongshu-creator" },
+    taskHint: { actionId: "xiaohongshu-cover" }, taskChoice: { skillId: "xiaohongshu-creator", moduleId: "M4", delivery: "plans-only" },
+    inputIds: ["material"], artifactVersions: [{ artifactId: "plan", version: 2 }] };
+  const turn: PendingTurn = { commandKey: "turn", input, quoteId: "old-quote" };
+  const queue = { kind: "enqueue" as const, key: "queue", input };
+  const creation = { creationKey: "create", text: input.message, actionId: null, skillSelection: input.skillSelection, taskHint: input.taskHint, taskChoice: input.taskChoice };
+  const frozen = emptyDraft();
+  const restore = [
+    (draft: AssistantDraft) => restoreDraftInput(draft, input, () => "原方案"),
+    (draft: AssistantDraft) => rejectedDraft({ ...draft, pendingTurn: turn }, () => "原方案"),
+    (draft: AssistantDraft) => rejectedQueueDraft({ ...draft, pendingQueue: queue }),
+    (draft: AssistantDraft) => rejectedCreateDraft({ ...draft, pendingCreate: creation }),
+  ];
+  for (const operation of restore) {
+    const restored = operation(frozen);
+    assert.equal(restored.text, input.message);
+    assert.deepEqual(restored.taskHint, input.taskHint);
+    assert.deepEqual(restored.taskChoice, input.taskChoice);
+    assert.equal(restored.pendingTurn, undefined);
+    assert.equal(restored.pendingQueue, undefined);
+    assert.equal(restored.pendingCreate, undefined);
+    assert.equal(restored.pendingQuote, undefined, "return to editing does not reuse the cancelled quote");
+    assert.equal(editDraftText(restored, "另一个主题").taskChoice, undefined);
+    assert.equal(chooseDraftAction(restored, null).taskChoice, undefined);
+    for (const newer of [{ text: "新草稿" }, { references: [{ artifactId: "new", version: 1, title: "新稿" }] }, { inputIds: ["new-input"] }]) {
+      const next = { ...emptyDraft(), ...newer };
+      const retained = operation(next);
+      assert.equal(retained.text, next.text);
+      assert.deepEqual(retained.taskChoice, next.taskChoice);
+      assert.deepEqual(retained.references, next.references);
+      assert.deepEqual(retained.inputIds, next.inputIds);
+    }
+  }
+  const unknownTurn = { ...frozen, pendingTurn: { ...turn, hasUnknownResult: true } };
+  assert.equal(rejectedDraft(unknownTurn, () => ""), unknownTurn);
+  const unknownQueue = { ...frozen, pendingQueue: { ...queue, unknown: true } };
+  assert.equal(rejectedQueueDraft(unknownQueue), unknownQueue);
+  const unknownCreate = { ...frozen, pendingCreate: { ...creation, unknown: true } };
+  assert.equal(rejectedCreateDraft(unknownCreate), unknownCreate);
 });

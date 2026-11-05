@@ -32,12 +32,11 @@ export function draftSelection(draft: { skillSelection?: AssistantSkillSelection
   return draft.skillSelection !== undefined ? draft.skillSelection : draft.actionId ? { actionId: draft.actionId } : null;
 }
 export function editDraftText(draft: AssistantDraft, text: string): AssistantDraft {
-  return { ...draft, text, taskHint: undefined, taskChoice: undefined };
+  return { ...draft, text, taskChoice: undefined };
 }
 export function chooseDraftAction(draft: AssistantDraft, action: AssistantAction | null): AssistantDraft {
-  return { ...draft, actionId: null, skillSelection: action ? { skillId: action.skillId } : null,
-    taskHint: action ? { actionId: action.actionId } : undefined,
-    text: draft.text.trim() ? draft.text : action ? `请帮我完成「${action.label}」。\n主题或原文：` : "" };
+  return { ...draft, actionId: null, taskChoice: undefined, skillSelection: action ? { skillId: action.skillId } : null,
+    taskHint: action ? { actionId: action.actionId } : undefined };
 }
 const drafts = new Map<string, AssistantDraft>();
 const listeners = new Map<string, Set<(draft: AssistantDraft) => void>>();
@@ -59,6 +58,27 @@ export function readDraft(key: string): AssistantDraft {
 export function hasComposerDraft(draft: AssistantDraft): boolean {
   return !!(draft.text.trim() || draft.attachments?.length || draft.references?.length || draft.inputIds?.length);
 }
+/** Return the original input and its explicit scope together, without replacing a newer draft. */
+export function restoreDraftInput(draft: AssistantDraft, input: TurnInput, title: (id: string) => string, attachments: DraftAttachment[] = []): AssistantDraft {
+  if (hasComposerDraft(draft)) return draft;
+  return { ...draft, text: input.message, actionId: input.skillSelection?.actionId ?? null,
+    skillSelection: input.skillSelection, taskHint: input.taskHint, taskChoice: input.taskChoice, attachments,
+    inputIds: input.inputIds.filter(id => !attachments.some(attachment => attachment.inputId === id)),
+    references: input.artifactVersions.map(reference => ({ ...reference, title: title(reference.artifactId) })) };
+}
+export function rejectedCreateDraft(draft: AssistantDraft): AssistantDraft {
+  const attempt = draft.pendingCreate;
+  if (!attempt || attempt.unknown) return draft;
+  if (hasComposerDraft(draft)) return { ...draft, pendingCreate: { ...attempt, rejected: true } };
+  return { ...draft, text: attempt.text, actionId: attempt.actionId, skillSelection: draftSelection(attempt),
+    taskHint: attempt.taskHint, taskChoice: attempt.taskChoice, attachments: attempt.attachments, pendingCreate: undefined };
+}
+export function rejectedQueueDraft(draft: AssistantDraft): AssistantDraft {
+  const attempt = draft.pendingQueue;
+  if (!attempt || attempt.unknown) return draft;
+  const restored = attempt.kind === "enqueue" ? restoreDraftInput(draft, attempt.input, () => "已选稿件") : draft;
+  return { ...restored, pendingQueue: undefined };
+}
 /** Clear only the frozen submission. A later draft is a separate piece of user input. */
 export function settledDraft(
   draft: AssistantDraft,
@@ -76,6 +96,7 @@ export function freezeTurn(
     ...draft,
     text: "",
     taskHint: undefined,
+    taskChoice: undefined,
     references: [],
     attachments: [],
     inputIds: [],
@@ -98,22 +119,7 @@ export function rejectedDraft(
   title: (id: string) => string,
 ): AssistantDraft {
   if (!draft.pendingTurn || draft.pendingTurn.hasUnknownResult) return draft;
-  if (hasComposerDraft(draft)) return { ...draft, pendingTurn: undefined };
-  const input = draft.pendingTurn.input;
-  return {
-    ...draft,
-    text: input.message,
-    actionId: input.skillSelection?.actionId ?? null,
-    skillSelection: input.skillSelection,
-    taskHint: input.taskHint,
-    attachments: draft.pendingTurn.attachments,
-    inputIds: input.inputIds.filter((id) => !draft.pendingTurn!.attachments?.some((attachment) => attachment.inputId === id)),
-    references: input.artifactVersions?.map((reference) => ({
-      ...reference,
-      title: title(reference.artifactId),
-    })),
-    pendingTurn: undefined,
-  };
+  return { ...restoreDraftInput(draft, draft.pendingTurn.input, title, draft.pendingTurn.attachments), pendingTurn: undefined };
 }
 
 export function useAssistantDraft(key: string) {

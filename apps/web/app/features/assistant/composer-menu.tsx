@@ -2,9 +2,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from "react-dom";
 
 /** Private to the composer: the caller owns the single open menu. */
-export function ComposerMenu({ open, setOpen, disabled, label, className, trigger, children, onOpen }: {
+export function ComposerMenu({ open, setOpen, disabled, label, className, trigger, children, onOpen, informational = false }: {
   open: boolean; setOpen: (open: boolean) => void; disabled: boolean; label: string;
-  className: string; trigger: ReactNode; children: ReactNode; onOpen?: () => void;
+  className: string; trigger: ReactNode; children: ReactNode; onOpen?: () => void; informational?: boolean;
 }) {
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
@@ -47,7 +47,7 @@ export function ComposerMenu({ open, setOpen, disabled, label, className, trigge
     }
     place();
     const rows = items();
-    (last.current ? rows.at(-1) : rows[0])?.focus();
+    ((last.current ? rows.at(-1) : rows[0]) ?? menu.current)?.focus();
     const observer = new ResizeObserver(place);
     if (button.current) observer.observe(button.current);
     if (menu.current) observer.observe(menu.current);
@@ -88,7 +88,7 @@ export function ComposerMenu({ open, setOpen, disabled, label, className, trigge
       document.removeEventListener("keydown", escape);
     };
   }, [open]);
-  const panel = <div id={id} ref={menu} role="menu" aria-label={label} hidden={!open}
+  const panel = <div id={id} ref={menu} role={informational ? "dialog" : "menu"} tabIndex={-1} aria-label={label} hidden={!open}
     className="assistant-composer-menu" style={open ? position : undefined}
     onClick={(event) => {
       if (event.target instanceof Element && event.target.closest('button[role^="menuitem"]:not(:disabled)')) close(true);
@@ -103,7 +103,7 @@ export function ComposerMenu({ open, setOpen, disabled, label, className, trigge
     }}>{children}</div>;
   return <div className={className}>
     <button type="button" ref={button} disabled={disabled} aria-label={label} title={label}
-      aria-haspopup="menu" aria-expanded={open} aria-controls={id}
+      aria-haspopup={informational ? "dialog" : "menu"} aria-expanded={open} aria-controls={id}
       onClick={() => { if (!open) { last.current = false; onOpen?.(); } setOpen(!open); }}
       onKeyDown={(event) => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {

@@ -53,7 +53,8 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
     assert.equal((await sql`SELECT count(*)::int n FROM member_tool_quotes WHERE user_id=${user.id}`)[0]!.n, before[0]!.n);
     assert.equal((await sql`SELECT count(*)::int n FROM member_credit_charges WHERE user_id=${user.id}`)[0]!.n, 1);
     const response = await app.inject({ url: `/api/assistant/sessions/${sessionId}`, headers });
-    assert.equal(response.json().queue.entries[0].state, "pending"); assert.equal(supplier.hits(), 0);
+    assert.equal(response.json().queue.entries[0].state, "pending");
+    assert.deepEqual(response.json().queue.entries[0].taskHint, queued.taskHint); assert.equal(supplier.hits(), 0);
     for (let i = 0; i < 4; i++) await advance(first.runId);
     let snapshot = await sessionSnapshot(user.id, sessionId);
     assert.equal(snapshot.turn?.status, "completed"); assert.equal(snapshot.queue!.entries[0]!.state, "quoted");

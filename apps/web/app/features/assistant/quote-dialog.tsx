@@ -2,6 +2,19 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 import type { AssistantTurnQuote } from "@aihot/contracts/assistant";
 import { Button } from "../admin/ui";
+/** Both quote surfaces expire at the same timestamp without polling. */
+export function useQuoteExpired(expiresAt?: string) {
+  const [, refresh] = useState(0);
+  useEffect(() => {
+    if (!expiresAt) return;
+    const remaining = Date.parse(expiresAt) - Date.now();
+    if (!(remaining > 0)) return;
+    const timer = setTimeout(() => refresh(n => n + 1), remaining + 1);
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
+  return !expiresAt || !(Date.parse(expiresAt) > Date.now());
+}
+
 /** An explicit UI action card: this is never rendered as an assistant message. */
 export function TurnQuoteDialog({
   quote,
@@ -30,13 +43,7 @@ export function TurnQuoteDialog({
     : search && image ? "如需检索或生成图片，将另行计费；图片生成前会单独确认。"
     : search ? "如需查询参考，将另行报价并确认。"
     : image ? "图片生成另行计费，生成前会单独确认。" : null;
-  const [expired, setExpired] = useState(false);
-  useEffect(() => {
-    const check = () => setExpired(Date.parse(quote.expiresAt) <= Date.now());
-    check();
-    const timer = setInterval(check, 1000);
-    return () => clearInterval(timer);
-  }, [quote.expiresAt]);
+  const expired = useQuoteExpired(quote.expiresAt);
   return (
     <section
       aria-labelledby={titleId}
@@ -51,8 +58,7 @@ export function TurnQuoteDialog({
             {quote.task?.label ?? "本次创作"} · {quote.task ? "预计最多 " : ""}{quote.amount.toLocaleString()} 积分
           </h2>
           <p role="status" className="mt-1 text-[12px] text-ink-3">
-            可用 {quote.available.toLocaleString()} 积分 ·{" "}
-            {expired ? "报价已过期" : "报价有效"}
+            {expired ? "报价已过期，刷新后查看最新费用和余额。原需求已保留。" : requiresRequote ? "请重新获取报价，查看最新费用和余额。" : `报价时可用 ${quote.available.toLocaleString()} 积分 · 报价有效`}
           </p>
         </div>
 
@@ -63,15 +69,11 @@ export function TurnQuoteDialog({
         <p className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {message}
         </p>
+        {(expired || requiresRequote) && <p className="mt-2">报价时余额：{quote.available.toLocaleString()} 积分。</p>}
         {quote.task?.items.map(item=><p key={item.key} className="mt-1">{item.label} × {item.units}：最多 {item.amount*item.units} 积分</p>)}
         <p className="mt-2">确认后冻结上限并开始任务。未知或部分结果需要核对。</p>
       </details>
-      {expired && (
-        <p role="alert" className="mt-2 text-[12px] text-hot">
-          报价已过期，请返回重新获取。输入会保留。
-        </p>
-      )}
-      {!quote.affordable && (
+      {!expired && !requiresRequote && !quote.affordable && (
         <p role="alert" className="mt-2 text-[12px] text-hot">
           积分不足，还差 {Math.max(0,quote.amount-quote.available).toLocaleString()} 积分。
           <Link to="/account" className="ml-1 underline">

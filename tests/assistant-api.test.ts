@@ -10,6 +10,7 @@ import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
 import { buildApp } from "../apps/api/src/app.ts";
 import { config } from "@aihot/backend/config";
 import { listBudgetScopes } from "@aihot/backend/admin/settings";
+import { event, message } from "@aihot/backend/assistant/store";
 test("assistant HTTP identity, quote hint binding and cross-entry admission", async () => {
   const [db] = await sql`SELECT current_database() name,inet_server_port() port`;
   assertConfiguredTestDatabase(db.name, db.port);
@@ -108,6 +109,7 @@ test("assistant HTTP identity, quote hint binding and cross-entry admission", as
       message: "材料：产品重100克，请改写",
       expectedRevision: 1,
       taskHint: { actionId: "xiaohongshu-rewrite" },
+      taskChoice: { skillId: "xiaohongshu-creator", moduleId: "M2", delivery: "writing" },
     };
     const quote = async (id: string) => {
       const r = await api.inject({
@@ -146,6 +148,43 @@ test("assistant HTTP identity, quote hint binding and cross-entry admission", as
     const read = async () => (await api.inject({ url: `/api/assistant/sessions/${second}`, headers })).json();
     const fixture = await read();
     assert.deepEqual(fixture.turn.activities, [{ id: `request:${fixture.turn.turnId}`, kind: "request_received", state: "completed" }]);
+    // A choice is another message in the same turn. Use the common event clock to keep
+    // the saved plans before that choice and the later image after it.
+    const planId = randomUUID(), imageId = randomUUID(), missingEventId = randomUUID();
+    const deliveryContent = { title: "封面方案", body: "保存原文", intent: "draft", titles: [], tags: [], sources: [], partial: false, scope: "fixture" };
+    let questionMessageId = "", choiceMessageId = "";
+    await sql.begin(async (tx) => {
+      await tx`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,turn_id,content)
+        VALUES (${second},${planId},1,0,'xhs-cover-plan',${fixture.turn.turnId},${tx.json(deliveryContent)})`;
+      await event(tx, second, "artifact", planId);
+      questionMessageId = await message(tx, second, fixture.turn.turnId, "assistant", "请选择封面方案");
+      choiceMessageId = await message(tx, second, fixture.turn.turnId, "user", "选择第二套");
+      await tx`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,turn_id,content)
+        VALUES (${second},${imageId},1,0,'image',${fixture.turn.turnId},${tx.json({ ...deliveryContent, title: "生成的图片" })}),
+          (${second},${missingEventId},1,0,'text-draft',${fixture.turn.turnId},${tx.json(deliveryContent)})`;
+      await event(tx, second, "artifact", imageId);
+      await event(tx, first, "artifact", planId);
+    });
+    const ordered = await read();
+    const delivery = (snapshot: typeof ordered, artifactId: string) => snapshot.deliveries.find((item: { artifactId: string }) => item.artifactId === artifactId);
+    const orderedMessage = (id: string) => ordered.messages.find((item: { id: string }) => item.id === id);
+    assert(ordered.messages[0].eventSeq < delivery(ordered, planId).eventSeq);
+    assert(delivery(ordered, planId).eventSeq < orderedMessage(questionMessageId).eventSeq);
+    assert(orderedMessage(questionMessageId).eventSeq < orderedMessage(choiceMessageId).eventSeq);
+    assert(orderedMessage(choiceMessageId).eventSeq < delivery(ordered, imageId).eventSeq);
+    assert.equal(delivery(ordered, missingEventId).eventSeq, undefined);
+    assert.deepEqual(Object.keys(delivery(ordered, planId)).sort(), ["artifactId", "eventSeq", "kind", "title", "turnId", "version"]);
+    await sql.begin(async (tx) => {
+      // A manual version participates in ambiguity even though it is not a delivery.
+      await tx`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,content)
+        VALUES (${second},${planId},2,1,'xhs-cover-plan',${tx.json(deliveryContent)})`;
+      await event(tx, second, "artifact", imageId);
+      await event(tx, second, "message", choiceMessageId);
+    });
+    const ambiguous = await read();
+    assert.equal(delivery(ambiguous, planId).eventSeq, undefined, "several versions cannot identify an unversioned event");
+    assert.equal(delivery(ambiguous, imageId).eventSeq, undefined, "repeated events cannot identify a publication");
+    assert.equal(ambiguous.messages.find((item: { id: string }) => item.id === choiceMessageId).eventSeq, undefined);
     const [laterId, earlierId] = [randomUUID(), randomUUID()].sort();
     const secret = "PRIVATE_ACTIVITY_SENTINEL_provider_prompt_skill_reference";
     await sql`INSERT INTO assistant_model_steps(id,turn_id,model_ordinal,operation_step_version,request_snapshot,request_hash,decision)

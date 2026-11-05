@@ -49,6 +49,7 @@ export const PHASE_LABELS: Record<string, string> = {
   waiting_approval: "等待费用确认",
   waiting_child: "正在等待外部服务返回",
   completed: "已处理完成",
+  failed: "本次处理已结束",
   stopped: "已停止",
   needs_review: "本次结果需要核对",
 };
