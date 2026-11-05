@@ -19,18 +19,30 @@ import { contextTokens } from "./context.ts";
 import { coverVisionModel,coverVisionOutbound } from "./cover-vision-model.ts";
 import { COVER_VISION_OPERATION,COVER_PREPROCESS_VERSION,CoverVisionProposal,CoverVisionInput,CoverObservation,type VisionInput,type Observation } from "./cover-vision-contract.ts";
 import { conflict } from "./store.ts";
+import { DraftArgumentsError } from "./tool-arguments.ts";
 import type { ToolAuthorization } from "../users/credits.ts";
 import { assertMemberCostEligible } from "../users/member-pricing.ts";
 
 type Reference={sourceId:string;status:"ready"|"download_failed";fileKey?:string;sha256?:string;mime?:string;bytes?:number;error?:string};
 type Progress={references:Reference[];batches:string[][];nextBatch:number;observations:Observation[]};
 const progressOf=(run:RunRow):Progress=>({references:[],batches:[],nextBatch:0,observations:[],...run.progress} as Progress);
+async function finishUnreadable(tx:Tx,execution:Execution,run:RunRow,input:VisionInput,progress:Progress,receiptId?:number){
+ await saveResult(tx,execution,{itemKey:"report",kind:"assistant_vision_report",...(receiptId?{receiptId}:{}),data:{complete:false,status:"failed",reason:"no_readable_covers",observedCount:0,selectedCount:input.selections.length,analyzedCount:progress.observations.length,failed:progress.references.filter(r=>r.status!=="ready"),observations:progress.observations,references:progress.references,queryRunId:input.queryRunId,activationId:input.activationId,preprocessVersion:input.preprocessVersion}});
+ if(receiptId)await advanceRun(tx,execution,{stepKey:run.step_key,progress});
+ await setRunState(tx,receiptId?{...execution,stepVersion:execution.stepVersion+1}:execution,"failed","没有可读取并确认的封面图片，未交付视觉报告；不自动重试或新增查询");
+}
 export const coverVisionIntent=(input:VisionInput)=>({kind:"assistant-vision" as const,provider:"assistant",model:input.model.model,input:input as unknown as Record<string,unknown>});
 export async function prepareCoverVisionInput(turn:Record<string,any>,raw:unknown):Promise<VisionInput> {
  const proposal=CoverVisionProposal.parse(raw);
  const rows=await sql`SELECT z.id,z.run_id,z.data FROM operation_results z JOIN operation_runs r ON r.id=z.run_id JOIN assistant_tool_calls c ON c.child_run_id=r.id
- WHERE r.operation_key='redfox.sync.query' AND r.input->>'operationId'=${XHS_COVER_OPERATION} AND c.turn_id=${turn.id} AND c.name='search_xhs_covers' AND c.state='completed' AND r.status='completed' AND r.actor=${`user:${turn.owner_user_id}`} AND z.kind='xhs_cover_candidate'`;
- const selections=proposal.samples.map(sample=>{const row=rows.find(r=>r.data.sourceId===sample.sourceId);if(!row)throw conflict("只能选择本回合已完成封面查询的来源");return {resultId:row.id,sourceId:sample.sourceId,reason:sample.reason,coverUrl:row.data.coverUrl};});
+ WHERE r.operation_key='redfox.sync.query' AND r.input->>'operationId'=${XHS_COVER_OPERATION} AND c.turn_id=${turn.id} AND c.name='search_xhs_covers' AND c.state='completed' AND c.input->>'activationId'=${proposal.activationId} AND r.status='completed' AND r.actor=${`user:${turn.owner_user_id}`} AND z.kind='xhs_cover_candidate'`;
+ const used=new Set<string>();
+ const selections=proposal.samples.flatMap(sample=>{
+  const matches=rows.filter(r=>r.data.sourceId===sample.sourceId);if(matches.length!==1||used.has(sample.sourceId)||used.has(matches[0]!.data.coverUrl))return [];
+  const row=matches[0]!;used.add(sample.sourceId);used.add(row.data.coverUrl);
+  return [{resultId:row.id,sourceId:sample.sourceId,reason:sample.reason,coverUrl:row.data.coverUrl}];
+ });
+ if(!selections.length)throw new DraftArgumentsError(new z.ZodError([{code:"custom",path:["samples"],message:"没有可用封面样本"}]),"只使用本激活已完成封面查询的真实来源；没有可用图片时说明材料不足并暂停，不假称观察，也不重新付费查询。");
  const runIds=new Set(rows.filter(r=>selections.some(s=>s.resultId===r.id)).map(r=>r.run_id));if(runIds.size!==1)throw conflict("封面样本必须来自同一次查询");
  return CoverVisionInput.parse({assistantParentTurnId:turn.id,activationId:proposal.activationId,queryRunId:[...runIds][0],selections,model:await coverVisionModel(),preprocessVersion:COVER_PREPROCESS_VERSION});
 }
@@ -78,7 +90,7 @@ async function prepareReferences(execution:Execution,run:RunRow,input:VisionInpu
   } finally {await temporary.release();}
  }
  if(progress.references.length<input.selections.length){await sql.begin(async tx=>{await advanceRun(tx,execution,{stepKey:"assistant.coverVision.prepare",progress});await queueOperationStep(tx,run.id);});return;}
- const ready=progress.references.filter(r=>r.status==="ready");if(!ready.length)throw new Error("没有可分析的封面图片，不能交付视觉报告");
+ const ready=progress.references.filter(r=>r.status==="ready");if(!ready.length){await sql.begin(tx=>finishUnreadable(tx,execution,run,input,progress));return;}
  progress.batches=[];for(let i=0;i<ready.length;i+=5)progress.batches.push(ready.slice(i,i+5).map(r=>r.sourceId));
  await sql.begin(async tx=>{await advanceRun(tx,execution,{stepKey:"assistant.coverVision.batch",progress});await queueOperationStep(tx,run.id);});
 }
@@ -113,16 +125,30 @@ async function analyzeBatch(execution:Execution,run:RunRow,input:VisionInput) {
   await base.onReceipt!(tx,id,info);
  }});
  const raw=receipt.response as {status:number;body:string};if(raw.status!==200)throw new Error("视觉模型响应失败，回执已保留");
- const response=JSON.parse(raw.body),choice=response.choices?.[0];if(choice?.finish_reason!=="stop")throw new Error("视觉响应未完整结束，不能交付");
- const observations=z.object({observations:z.array(CoverObservation).min(1).max(5)}).strict().parse(JSON.parse(choice.message?.content)).observations;
- if(observations.length!==ids.length||new Set(observations.map(o=>o.sourceId)).size!==ids.length||observations.some(o=>!ids.includes(o.sourceId)))throw new Error("视觉结果缺图或来源ID不匹配");
+ let reported:unknown[]=[],unavailable="本图结果缺失、重复或字段不可验证，未作为观察依据";
+ // HTTP 200 with unusable content is a known observation failure. Keep its receipt
+ // and finish this batch without inventing observations or dispatching it again.
+ try{
+  const response=JSON.parse(raw.body),choice=response.choices?.[0];
+  if(choice?.finish_reason!=="stop")unavailable="视觉响应未完整结束，本批图片未作为观察依据";
+  else{
+   const parsed=z.object({observations:z.array(z.unknown()).max(100)}).safeParse(JSON.parse(choice.message?.content));
+   if(parsed.success)reported=parsed.data.observations;
+   else unavailable="视觉响应没有可验证的观察记录，本批图片未作为观察依据";
+  }
+ }catch{unavailable="视觉响应不是有效JSON，本批图片未作为观察依据";}
+ const observations:Observation[]=ids.map(sourceId=>{
+  const matching=reported.filter(value=>value&&typeof value==="object"&&"sourceId" in value&&value.sourceId===sourceId);
+  const parsed=matching.length===1?CoverObservation.safeParse(matching[0]):null;
+  return parsed?.success?parsed.data:{sourceId,status:"unreadable",text:"",subject:"",colors:"",layout:"",uncertainties:[unavailable]};
+ });
  progress.observations.push(...observations);progress.nextBatch++;
  await sql.begin(async tx=>{
   await requireExecution(tx,execution);
   await saveResult(tx,execution,{itemKey:`batch:${progress.nextBatch-1}`,kind:"assistant_vision_batch",receiptId:receipt.receiptId,data:{sourceIds:ids,observations}});
   if(progress.nextBatch<progress.batches.length){await advanceRun(tx,execution,{stepKey:"assistant.coverVision.batch",progress});await queueOperationStep(tx,run.id);return;}
   const observedCount=progress.observations.filter(o=>o.status==="observed").length;
-  if(!observedCount)throw new Error("视觉模型未成功观察任何图片，不能结算报告");
+  if(!observedCount){await finishUnreadable(tx,execution,run,input,progress,receipt.receiptId);return;}
   await saveResult(tx,execution,{itemKey:"report",kind:"assistant_vision_report",receiptId:receipt.receiptId,data:{complete:true,observedCount,selectedCount:input.selections.length,analyzedCount:progress.observations.length,failed:progress.references.filter(r=>r.status!=="ready"),observations:progress.observations,references:progress.references,queryRunId:input.queryRunId,activationId:input.activationId,preprocessVersion:input.preprocessVersion}});
   await advanceRun(tx,execution,null);
  });

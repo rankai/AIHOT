@@ -7,8 +7,9 @@ import { sql, closeDb } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits, saveToolPrice } from "@aihot/backend/users/credits";
-import { createSession, submitTurn as currentSubmitTurn, sessionSnapshot, editArtifact } from "@aihot/backend/assistant/sessions";
-import { answerTurn, controlTurn } from "@aihot/backend/assistant/controls";
+import { createSession, quoteTurn as currentQuoteTurn, submitTurn as currentSubmitTurn, sessionSnapshot, editArtifact } from "@aihot/backend/assistant/sessions";
+import { answerTurn, controlAssistantOperation, controlTurn } from "@aihot/backend/assistant/controls";
+import { claimRun, setRunState } from "@aihot/backend/providers/operations/store";
 import { decideCall, localCall, activeTools, sourceCandidates, prepareSearch, DraftArgumentsError } from "@aihot/backend/assistant/tools";
 import { analyzeResearch, researchClock, researchResults, validateResearchWindow, verifyResearchDelivery } from "@aihot/backend/assistant/xhs-research";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
@@ -43,6 +44,19 @@ test("research projection preserves 50 notes plus metadata and Shanghai replay d
   assert.equal(projected.results.length, 50); assert.equal(projected.metadata.length, 1);
   assert.equal(projected.metadata[0]!.details.matchedCount, 50);
   assert.match(projected.metadata[0]!.text, /相机选购/);
+  const sparse = researchResults([{ id: 60, kind: "xiaohongshu_work", data: { role: "keyword_match", title: "真实标题", record: { title: "真实标题", likedCount: 0 } } },
+    { id: 61, kind: "xiaohongshu_work", data: { role: "keyword_match", title: "小红书洞察笔记", record: { id: "missing-title" } } }]);
+  assert.deepEqual(sparse.validSampleIds, ["search:60"]);
+  assert.deepEqual(sparse.results[0]!.availableDimensions, ["titlePattern", "interactionPattern"]);
+  assert.equal(sparse.results[0]!.url, null);
+  const longTitle = "真实标题".repeat(30) + "#未显示标签";
+  const clipped = researchResults([{ id: 62, kind: "xiaohongshu_work", data: { role: "keyword_match", title: longTitle, record: { title: longTitle } } }]);
+  assert.equal(clipped.results[0]!.title.length, 120);
+  assert(!clipped.results[0]!.title.includes("#"));
+  assert.deepEqual(clipped.results[0]!.availableDimensions, ["titlePattern"], "a tag beyond the displayed title cannot support tag analysis");
+  const capped = researchResults(Array.from({ length: 51 }, (_, i) => ({ id: 100 + i, kind: "xiaohongshu_work", data: { role: "keyword_match", title: i ? "真实标题" : "小红书洞察笔记", record: i ? { title: "真实标题" } : { id: "missing-title" } } })));
+  assert.equal(capped.validSampleIds.length, 49);
+  assert(!capped.validSampleIds.includes("search:150"), "unshown notes do not enter the eligible evidence set");
 });
 
 test("M1 persisted search → analysis → draft → credits; bypasses cannot deliver", async (t) => {
@@ -78,6 +92,14 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     const ids = search.results.filter((r: any) => r.details.role === "keyword_match").map((r: any) => `search:${r.id}`);
     if (!ids.length) return completion("ask_question", { text: "未取得可用主题样本，创作暂停。" });
     if (!analysis) {
+      if (mode === "case55") {
+        // Same relative positions as the real 708…757 results. 717 has no body;
+        // 732 is a returned note but was not among the sixteen explicitly listed samples.
+        const selected = [0,5,11,32,36,37,34,12,23,8,4,9,15,21,47,1];
+        const proposal = analysisInput(activationId, selected.map(i => ids[i]!));
+        proposal.interactionPattern.sampleIds = [ids[0]!, ids[24]!];
+        return completion("analyze_xhs_research", proposal);
+      }
       if (mode === "new" && sampleCount === 2 && !invalidAnalysisSent) {
         invalidAnalysisSent = true;
         const { interactionPattern, ...invalid } = analysisInput(activationId, ids);
@@ -88,8 +110,8 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     return completion("save_draft", { activationId, kind: "xhs-note", baseVersion: 0,
       content: researchDraft(ids.slice(0, 2), search.results.slice(0, 2).map((r: any) => r.url)), researchApplication: application(analysis.analysisCallId) });
   });
-  const redfox = await stub(() => ({ articles: Array.from({ length: sampleCount }, (_, index) => index + 1).map(i => ({ id: `fixture-${i}`, title: `新手选相机${i}`, desc: "先看拍摄场景，再做选购比较。#相机 #选购".repeat(sampleCount === 50 ? 50 : 1), shareInfoLink: `https://www.xiaohongshu.com/explore/fixture-${i}` })),
-    latestHotArticles: [{ id: "recommendation", title: "无关美妆推荐", desc: "推荐", shareInfoLink: "https://www.xiaohongshu.com/explore/unrelated" }], keyword, hotTopics: [{ topic: "相机选购" }] }));
+  const redfox = await stub(() => ({ articles: Array.from({ length: sampleCount }, (_, index) => index + 1).map(i => ({ id: `fixture-${i}`, title: `新手选相机${i}`, desc: mode === "case55" && (i === 10 || i === 50) ? "" : "先看拍摄场景，再做选购比较。#相机 #选购".repeat(sampleCount === 50 ? 50 : 1), shareInfoLink: `https://www.xiaohongshu.com/explore/fixture-${i}`, ...(mode === "case55" ? { likedCount: i } : {}) })),
+    latestHotArticles: mode === "case55" ? [] : [{ id: "recommendation", title: "无关美妆推荐", desc: "推荐", shareInfoLink: "https://www.xiaohongshu.com/explore/unrelated" }], keyword, hotTopics: [{ topic: "相机选购" }] }));
   const [priorQueryPrice]=await sql`SELECT * FROM member_tool_prices WHERE kind='query' AND provider='redfox' AND model='3X8FGEEM' AND tier='' AND parameter_match='{}'::jsonb`;
   const previous = config.allowPrivateNetworkFetch;
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
@@ -146,20 +168,38 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
     const sources = await sql.begin(tx => sourceCandidates(tx, frozen));
     const ids = analysis.result.samples.map((s: any) => s.sourceId), urls = analysis.result.samples.map((s: any) => s.url);
     const content = draft(ids, urls);
-    await t.test("server rejects missing analysis, forged samples and recommendation fallback", async () => {
+    await t.test("title and interaction evidence deliver without bodies or links and cannot support missing dimensions", async () => {
+      await assert.rejects(sql.begin(async tx => {
+        for (const [index, id] of ids.entries()) await tx`UPDATE operation_results SET data=${tx.json({ role: "keyword_match", title: `真实标题${index}`, record: { title: `真实标题${index}`, likedCount: 0 } })} WHERE id=${Number(id.slice(7))}`;
+        const actual = await analyzeResearch(tx, frozen, analysis.id, analysisInput(activation.id, ids));
+        assert.equal(actual.samples.length, 2); assert(actual.samples.every(s => !s.text && s.url === null));
+        assert.deepEqual(actual.patterns.title.sampleIds, ids); assert.deepEqual(actual.patterns.interaction.sampleIds, ids);
+        assert.deepEqual(actual.patterns.content.sampleIds, []); assert.deepEqual(actual.patterns.tags.sampleIds, []);
+        assert.match(actual.limitations.join("；"), /未返回正文/); assert.match(actual.limitations.join("；"), /未返回可验证原文链接/);
+        await tx`UPDATE assistant_tool_calls SET result=${tx.json(actual)} WHERE id=${analysis.id}`;
+        const verified = await verifyResearchDelivery(tx, frozen, activation.id, content, await sourceCandidates(tx, frozen), application(analysis.id));
+        assert.match(verified.content.body, /原文链接未返回/); assert.match(verified.content.body, /内容结构：本维度没有可用研究依据/);
+        assert(!verified.content.body.includes("：null"));
+        throw new Error("rollback sparse evidence fixture");
+      }), /rollback sparse evidence fixture/);
+    });
+    await t.test("draft uses actual analyzed samples and excludes forged or recommended sources", async () => {
       const check = (raw: unknown) => sql.begin(tx => verifyResearchDelivery(tx, frozen, activation.id, content, sources, raw));
-      await assert.rejects(check(undefined));
       await assert.rejects(check(application(randomUUID())), /真实检索/);
       const verified = await check(application(analysis.id));
       assert.equal(verified.content.partial, true);
       assert.match(verified.content.scope, /2条实际研究样本/);
-      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, ["search:999999999"]))), /分析样本/);
+      for (const citations of [[ids[0]], ["current-message"]]) {
+        const v = await sql.begin(tx => verifyResearchDelivery(tx, frozen, activation.id, { ...content, sources: citations }, sources, application(analysis.id)));
+        const evidence = v.sources.filter((s: any) => v.content.sources.includes(s.id) && s.research?.analysisCallId === analysis.id);
+        assert(evidence.length > 0 && evidence.every((s: any) => ids.includes(s.id)));
+        if (citations[0] === ids[0]) assert.equal(evidence.length, 1, "one real source is sufficient");
+      }
+      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, ["search:999999999"]))));
       const recommendation = sources.find(s => s.label === "无关美妆推荐")!;
-      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, [recommendation.id]))), /推荐结果不能代替/);
-      const { tools } = await sql.begin(tx => activeTools(tx, frozen));
-      for (const partial of [true, false]) await assert.rejects(sql.begin(tx => localCall(tx, frozen, { request_snapshot: { tools } }, { name: "save_draft", input: { activationId: activation.id, kind: "xhs-note", baseVersion: 0, content: { ...content, partial, sources: ["current-message"] } } })));
+      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, [recommendation.id]))));
       await sql`UPDATE assistant_tool_calls SET state='failed' WHERE id=${searchCall.id}`;
-      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, ids))), /分析样本/);
+      await assert.rejects(sql.begin(tx => analyzeResearch(tx, frozen, randomUUID(), analysisInput(activation.id, ids))));
       await sql`UPDATE assistant_tool_calls SET state='completed' WHERE id=${searchCall.id}`;
     });
     assert.equal((await sql`SELECT count(*)::int n FROM assistant_tool_calls WHERE turn_id=${turn.turnId} AND name='analyze_xhs_research' AND state='completed'`)[0]!.n, 1);
@@ -288,6 +328,69 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
       for (let i = 0; i < 4; i++) await advance(run.runId);
       const result = await sessionSnapshot(rewriteUser.id, session.sessionId);
       assert.equal(result.turn?.status, "completed"); assert.equal(redfox.hits(), 3);
+    });
+    await t.test("task 55 replay: the same completed search and 220-credit reservation survive repeated recovery", async () => {
+      // Everything below is synthetic, including database-generated task, receipt and note IDs.
+      for (const [kind, provider, name, match, amount] of [
+        ["assistant-turn", "assistant", model, {}, 200],
+        ["query", "redfox", "3X8FGEEM", {}, 20],
+        ["query", "redfox", "3X8FGEEM", { "parameters.keyword": keyword }, 20],
+      ] as const) {
+        const [price] = await sql`SELECT id,version FROM member_tool_prices WHERE kind=${kind} AND provider=${provider} AND model=${name} AND parameter_match=${sql.json(match)}`;
+        await saveToolPrice({ id: price!.id, expectedVersion: price!.version, kind, provider, model: name, baseCredits: amount, parameterMatch: match, enabled: true, reason: "Task 55 isolated replay" }, "test");
+      }
+      sampleCount = 50; mode = "case55";
+      const u = await createSiteUser({ username: `case55_${tag()}`, displayName: "Case 55", password: "synthetic-password" }, "test");
+      await grantCredits(u.id, { amount: 280, reason: "Task 55 isolated replay" }, "test", randomUUID());
+      const { sessionId: sid } = await createSession(u.id, { assistantId: "xiaohongshu" }, randomUUID());
+      const raw = { message: "为上班族写一篇小红书笔记：AI时代下，人如何才能不被替代？先研究再写作，不提供风格样本。", expectedRevision: 1, skillSelection: { actionId: "xiaohongshu-write" } };
+      const q = await currentQuoteTurn(u.id, sid, raw);
+      assert.equal(q.amount, 220);
+      const run = await currentSubmitTurn(u.id, sid, { ...raw, quoteId: q.quoteId }, randomUUID());
+      const hits = redfox.hits();
+      for (let i = 0; i < 4; i++) await advance(run.runId);
+      const search = (await sessionSnapshot(u.id, sid)).turn!.calls[0]!;
+      await advance(search.childRunId!);
+      await recoverAssistantChildren(search.childRunId!);
+      await advance(run.runId);
+      // Old runs have no eligibility hint in either the saved search or its transcript.
+      await sql`UPDATE assistant_tool_calls SET result=result-'validSampleIds' WHERE id=${search.callId}`;
+      await sql`UPDATE assistant_messages SET model_message=model_message #- '{content,0,output,value,validSampleIds}'
+        WHERE turn_id=${run.turnId} AND role='tool' AND model_message#>>'{content,0,toolName}'='search_xhs_notes'`;
+      await advance(run.runId);
+      const [pending] = await sql`SELECT state FROM assistant_tool_calls WHERE turn_id=${run.turnId} AND name='analyze_xhs_research'`;
+      assert.equal(pending!.state, "pending");
+      const [r] = await sql`SELECT step_key,step_version,generation FROM operation_runs WHERE id=${run.runId}`;
+      assert.equal(r!.step_key, "assistant.tools");
+      const expected = { runId: run.runId, stepVersion: r!.step_version, generation: r!.generation };
+      // Reproduce the old worker's catch at the exact pending tool; no real run is copied or touched.
+      const paused = await sql.begin(async tx => { const e = await claimRun(tx, expected, randomUUID()); await setRunState(tx, e, "needs_review", "assistant:review"); return e; });
+      const [charge] = await sql`SELECT id,amount,consumed,state FROM member_credit_charges WHERE root_run_id=${run.runId}`;
+      assert.deepEqual([charge!.amount, charge!.consumed, charge!.state], [220, 0, "review"]);
+      const quotes = async () => (await sql`SELECT count(*)::int n FROM member_tool_quotes WHERE user_id=${u.id}`)[0]!.n;
+      const before = await quotes();
+      const resume = () => sql.begin(tx => controlAssistantOperation(tx, paused, "resume", "admin:test", "原任务引用纠错隔离验收"));
+      const doubleClick = await Promise.allSettled([resume(), resume()]);
+      assert.equal(doubleClick.filter(x => x.status === "fulfilled").length, 1);
+      for (let i = 0; i < 8; i++) await advance(run.runId);
+      const done = await sessionSnapshot(u.id, sid);
+      assert.equal(done.turn!.status, "completed"); assert.equal(done.artifacts.length, 1);
+      assert.deepEqual(done.turn!.credits, { amount: 220, consumed: 220, released: 0, state: "settled" });
+      const analyses = await sql`SELECT state,result FROM assistant_tool_calls WHERE turn_id=${run.turnId} AND name='analyze_xhs_research'`;
+      assert.equal(analyses.length, 1, "accept the original analysis without another model correction");
+      const result = analyses[0]!.result;
+      const returned = (done.turn!.calls[0]!.result as { results: { id: number }[] }).results;
+      const idAt = (i: number) => `search:${returned[i]!.id}`;
+      assert(result.samples.some((s: any) => s.sourceId === idAt(9)), "a real returned title remains usable evidence");
+      assert(!result.patterns.content.sampleIds.includes(idAt(9)), "a missing body cannot support content structure");
+      assert(result.samples.some((s: any) => s.sourceId === idAt(24)), "a real pattern-only reference counts");
+      assert(result.patterns.interaction.sampleIds.includes(idAt(24)));
+      assert.deepEqual(done.turn!.calls.map(c => [c.childRunId, c.state]), [[search.childRunId, "completed"]]);
+      assert.equal(redfox.hits(), hits + 1);
+      assert.equal(await quotes(), before);
+      assert.equal((await sql`SELECT count(*)::int n FROM member_credit_charges WHERE user_id=${u.id}`)[0]!.n, 1);
+      const entries = await sql`SELECT kind,amount FROM member_credit_entries WHERE charge_id=${charge!.id} ORDER BY id`;
+      assert.deepEqual(entries.map(e => [e.kind,e.amount]), [["reserve",220],["consume",220]]);
     });
   } finally {
     if(priorQueryPrice)await sql`UPDATE member_tool_prices SET base_credits=${priorQueryPrice.base_credits},enabled=${priorQueryPrice.enabled} WHERE id=${priorQueryPrice.id}`;

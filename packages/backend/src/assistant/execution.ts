@@ -5,7 +5,7 @@ import { xhsCoverResults } from "../providers/redfox/xhs-covers.ts";
 import { deliverImage } from "./image-delivery.ts";
 import { wechatResearchResults } from "./wechat-research.ts";
 import { randomUUID } from "node:crypto";
-import { sql } from "../db.ts";
+import { sql, type Tx } from "../db.ts";
 import { creditHash, requireCreditUser } from "../users/credits-core.ts";
 import {
   lockRunAdmission,
@@ -141,11 +141,11 @@ async function modelStep(execution: Execution, turn: Record<string, any>) {
       await tx`INSERT INTO assistant_model_step_activations(model_step_id,activation_id) VALUES (${row!.id},${activationId})`;
     return row!;
   });
-  // A no-tool response is already committed but cannot advance this step. Replaying its
-  // receipt must not append messages/results again or issue another provider request.
+  // An already committed response must never be dispatched again. A text-only
+  // response is visible conversation text, not a saved creative delivery.
   if (step.decision !== null) {
     await sql.begin(async (tx) => {
-      await setRunState(tx, execution, "needs_review", "assistant:missing_delivery");
+      await finishMissingDelivery(tx, execution, turn, step.id);
     });
     return;
   }
@@ -156,22 +156,42 @@ async function modelStep(execution: Execution, turn: Record<string, any>) {
     for (const m of response.messages) await message(tx, turn.session_id, turn.id, "assistant", response.text, m);
     for (let i = 0; i < response.calls.length; i++) {
       const call = response.calls[i]!;
-      await tx`INSERT INTO assistant_tool_calls(id,turn_id,model_step_id,ordinal,upstream_id,name,input) VALUES (${randomUUID()},${turn.id},${step.id},${i},${call.upstreamId},${call.name},${tx.json(call.input as never)})`;
+      await tx`INSERT INTO assistant_tool_calls(id,turn_id,model_step_id,ordinal,upstream_id,name,input,state,result) VALUES (${randomUUID()},${turn.id},${step.id},${i},${call.upstreamId},${call.name},${tx.json(call.input as never)},${call.argumentError ? "failed" : "pending"},${call.argumentError ? tx.json(call.argumentError) : null})`;
     }
     await saveResult(tx, execution, {
       itemKey: `model:${step.id}`,
       kind: "assistant_model",
-      data: { stepId: step.id },
+      data: { stepId: step.id, ...(!response.calls.length ? { deliveryStatus: "missing" } : {}) },
       receiptId: response.receiptId,
     });
     if (!response.calls.length) {
-      await setRunState(tx, execution, "needs_review", "assistant:missing_delivery");
+      await finishMissingDelivery(tx, execution, turn, step.id);
       return;
     }
     await advanceRun(tx, execution, { stepKey: "assistant.tools", progress: { stepId: step.id } });
     await queueOperationStep(tx, execution.runId);
     await event(tx, turn.session_id, "turn", turn.id);
   });
+}
+async function finishMissingDelivery(tx: Tx, execution: Execution, turn: Record<string, any>, stepId: string) {
+  await requireExecution(tx, execution);
+  const [known] = await tx`SELECT s.decision,s.receipt_id FROM assistant_model_steps s
+    JOIN operation_results z ON z.run_id=${execution.runId} AND z.kind='assistant_model' AND z.item_key=${`model:${stepId}`}
+      AND z.data->>'stepId'=s.id::text AND z.receipt_id=s.receipt_id
+    JOIN receipts p ON p.id=s.receipt_id AND p.status IN ('received','completed')
+    WHERE s.id=${stepId} AND s.turn_id=${turn.id}`;
+  if (!known || !Array.isArray(known.decision?.calls) || known.decision.calls.length || known.decision.receiptId !== known.receipt_id)
+    throw conflict("模型响应与已保存回执不一致，不能确认未交付");
+  const [calls] = await tx`SELECT 1 FROM assistant_tool_calls WHERE model_step_id=${stepId} LIMIT 1`;
+  if (calls) throw conflict("已保存工具调用的模型步骤不能作为缺失交付结束");
+  const [result] = await tx`UPDATE operation_results SET data=data||'{"deliveryStatus":"missing"}'::jsonb
+    WHERE run_id=${execution.runId} AND kind='assistant_model' AND item_key=${`model:${stepId}`} AND data->>'stepId'=${stepId} RETURNING id`;
+  if (!result) throw conflict("缺少已保存的模型响应，不能确认未交付");
+  await message(tx, turn.session_id, turn.id, "assistant", "模型已返回文字回复，但没有保存稿件、方案或图片，本次任务已结束。回复文字已保留，不会自动再次请求；费用按已交付项目结算。");
+  await tx`UPDATE assistant_turns SET phase='failed' WHERE id=${turn.id}`;
+  await advanceRun(tx, execution, { stepKey: "assistant.model", progress: {} });
+  await setRunState(tx, { ...execution, stepVersion: execution.stepVersion + 1 }, "failed", "assistant:missing_delivery");
+  await event(tx, turn.session_id, "turn", turn.id);
 }
 async function toolsStep(execution: Execution, turn: Record<string, any>) {
   const [run] = await sql`SELECT progress FROM operation_runs WHERE id=${execution.runId}`;
@@ -207,6 +227,25 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
       }
       if (c.state === "proposed") return;
       const [child] = await sql`SELECT status FROM operation_runs WHERE id=${c.child_run_id}`;
+      if (c.name === "analyze_xhs_covers" && child?.status === "failed") {
+        const [unreadable] = await sql`SELECT id FROM operation_results WHERE run_id=${c.child_run_id} AND kind='assistant_vision_report'
+          AND data->>'complete'='false' AND data->>'status'='failed' AND data->>'reason'='no_readable_covers'`;
+        if (unreadable) {
+          await sql.begin(async (tx) => {
+            await requireExecution(tx, execution);
+            const result = { complete: false, status: "failed", reason: "no_readable_covers", observedCount: 0 };
+            await tx`UPDATE assistant_tool_calls SET state='failed',result=${tx.json(result)} WHERE id=${c.id}`;
+            await tx`UPDATE assistant_tool_calls SET state='failed',result=${tx.json({ error: "insufficient_cover_material", message: "没有可读封面，后续方案和图片调用未执行" })} WHERE model_step_id=${step.id} AND state='pending'`;
+            await saveResult(tx, execution, { itemKey: `vision-unavailable:${c.id}`, kind: "assistant_vision_report", data: result });
+            await message(tx, turn.session_id, turn.id, "assistant", "本次封面图片均未能可靠读取，无法基于这些图片交付方案，本次任务已结束。没有生成图片，也不会自动重新查询；费用按已交付项目结算。");
+            await tx`UPDATE assistant_turns SET phase='failed' WHERE id=${turn.id}`;
+            await setRunState(tx, execution, "failed", "封面图片均不可读，未交付方案或图片");
+            await event(tx, turn.session_id, "call", c.id);
+            await event(tx, turn.session_id, "turn", turn.id);
+          });
+          return;
+        }
+      }
       if (!child || ["stopped", "failed", "needs_review"].includes(child.status))
         throw conflict("子任务未交付，需要核对");
       if (child.status !== "completed") {
@@ -219,15 +258,37 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
       }
       const results =
         await sql`SELECT id,kind,data FROM operation_results WHERE run_id=${c.child_run_id} ORDER BY id`;
-      await sql.begin(async (tx) => {
+      const ended = await sql.begin(async (tx) => {
         await requireExecution(tx, execution);
         const result = c.name === "generate_image" ? await deliverImage(tx, turn, c) : (c.name === "analyze_xhs_covers" ? coverVisionResults : c.name === "search_xhs_covers" ? xhsCoverResults : c.name === "search_wechat_articles" ? wechatResearchResults : researchResults)(results.map((r) => ({ id: r.id, kind: r.kind, data: r.data })));
+        // A validated, completed query with no candidates is a known material
+        // shortage. Do not buy a model correction, a new query or image generation.
+        if (c.name === "search_xhs_covers" && results.some(r => r.kind === "xhs_cover_research" && r.data.candidateCount === 0)
+            && !results.some(r => r.kind === "xhs_cover_candidate")) {
+          const [uncertain] = await tx`SELECT id FROM receipts WHERE status IN ('pending','unknown') AND id IN (
+            SELECT receipt_id FROM operation_results WHERE run_id=${c.child_run_id} AND receipt_id IS NOT NULL
+            UNION SELECT current_receipt_id FROM operation_runs WHERE id=${c.child_run_id} AND current_receipt_id IS NOT NULL
+            UNION SELECT jsonb_array_elements_text(coalesce(progress->'retainedReceiptIds','[]'))::bigint FROM operation_runs WHERE id=${c.child_run_id}) LIMIT 1`;
+          if (uncertain) throw conflict("封面查询仍有未知或在途回执，需要核对");
+          await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json(result as never)} WHERE id=${c.id}`;
+          await tx`UPDATE assistant_tool_calls SET state='failed',result=${tx.json({ error: "insufficient_cover_material", message: "已完成查询没有可用封面，后续方案和图片调用未执行" })} WHERE model_step_id=${step.id} AND state='pending'`;
+          await saveResult(tx, execution, { itemKey: `cover-unavailable:${c.id}`, kind: "assistant_vision_report", data: {
+            complete: false, status: "failed", reason: "no_readable_covers", cause: "no_cover_candidates", observedCount: 0, selectedCount: 0, queryRunId: c.child_run_id,
+          } });
+          await message(tx, turn.session_id, turn.id, "assistant", "本次封面查询已完成，但没有返回可用封面，无法基于这些图片交付方案，本次任务已结束。没有进行视觉分析或生成图片，也不会自动重新查询；费用按已交付项目结算。");
+          await tx`UPDATE assistant_turns SET phase='failed' WHERE id=${turn.id}`;
+          await setRunState(tx, execution, "failed", "封面查询没有可用候选，未交付方案或图片");
+          await event(tx, turn.session_id, "call", c.id);
+          await event(tx, turn.session_id, "turn", turn.id);
+          return true;
+        }
         if(turn.snapshot.taskScope && c.name==='generate_image') {
           const image=result as {artifactId:string;version:number};
           await saveResult(tx,execution,{itemKey:`delivery:${c.id}`,kind:'assistant_delivery',data:{turnId:turn.id,artifactId:image.artifactId,version:image.version}});
         }
         await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json(result as never)} WHERE id=${c.id}`;
       });
+      if (ended) return;
       continue;
     }
     await sql.begin(async (tx) => {
@@ -277,7 +338,7 @@ async function toolsStep(execution: Execution, turn: Record<string, any>) {
     } else {
       await advanceRun(tx, execution, { stepKey: "assistant.model", progress: {} });
       const coverQuestion=completed.find(c=>c.name==="save_xhs_cover_plan"&&c.state==="completed"&&c.result.next==="choose");
-      const question = coverQuestion ? {...coverQuestion,result:{...coverQuestion.result,question:turn.snapshot.taskScope?"三套封面方案已保存。请选择一个继续生成图片，或只保留方案并释放未执行图片额度。":"三套封面方案已保存。请选择一个生成单张图片，或仅保留方案；生成仍需单独确认费用。"}} : completed.find((c) => c.name === "ask_question");
+      const question = coverQuestion ? {...coverQuestion,result:{...coverQuestion.result,question:turn.snapshot.taskScope?"三套封面方案已保存。请选择一个继续生成图片，或只保留方案并释放未执行图片额度。":"三套封面方案已保存。请选择一个生成单张图片，或仅保留方案；生成仍需单独确认费用。"}} : completed.find((c) => c.name === "ask_question" && c.state === "completed");
       if (question) {
         await tx`UPDATE assistant_turns SET phase='waiting_question',pending_question=${tx.json({ questionId: question.id, text: question.result.question, ...(coverQuestion?{coverPlan:coverQuestion.result.choice}:{}) })} WHERE id=${turn.id}`;
         await tx`UPDATE operation_runs SET status='waiting',wait_reason='assistant:waiting_question',next_attempt_at=NULL WHERE id=${execution.runId}`;

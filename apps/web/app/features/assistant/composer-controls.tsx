@@ -1,19 +1,21 @@
 import { useRef, useState } from "react";
-import type { AssistantArtifact, AssistantFeeAuthorization, AssistantOptions, AssistantProfileDto, AssistantSkillSelection } from "@aihot/contracts/assistant";
-import { IconApps } from "../../components/icons";
+import type { AssistantArtifact, AssistantOptions, AssistantProfileDto, AssistantSkillSelection, AssistantTaskHint } from "@aihot/contracts/assistant";
+import { IconApps, IconChevronDown } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
+import { useQuoteExpired } from "./quote-dialog";
 import { ComposerMenu } from "./composer-menu";
 
-export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeAuthorization, configureFees, manualFees, feeDisabled = disabled, refreshOptions, taskChoice, onTaskChoice }: {
-  taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice; onTaskChoice?: (choice: import("@aihot/contracts/assistant").AssistantTaskChoice | undefined)=>void;
+export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeDisabled = disabled, refreshOptions, taskHint, pendingFee }: {
+  taskHint?: AssistantTaskHint | null;
+  pendingFee?: Pick<import("@aihot/contracts/assistant").AssistantTurnQuote, "amount" | "expiresAt">;
   profile: AssistantProfileDto; selection: AssistantSkillSelection | null; onSelection: (selection: AssistantSkillSelection | null) => void; disabled: boolean;
   addFiles: (files: File[]) => void; capabilities: AssistantOptions["inputCapabilities"];
   artifacts?: AssistantArtifact[]; onReference?: (artifact: AssistantArtifact) => void;
-  feeAuthorization?: AssistantFeeAuthorization | null; configureFees: () => void; manualFees?: () => void;
   feeDisabled?: boolean; refreshOptions?: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [openMenu, setOpenMenu] = useState<"add" | "skill" | "fee" | null>(null);
+  const feeExpired = useQuoteExpired(openMenu === "fee" ? pendingFee?.expiresAt : undefined);
   function changeMenu(owner: "add" | "skill" | "fee", open: boolean) {
     // A previous menu can still observe focus while the next portal is mounting.
     setOpenMenu((current) => open ? owner : current === owner ? null : current);
@@ -24,7 +26,8 @@ export function AssistantComposerControls({ profile, selection, onSelection, dis
     available: profile.actions.some(item => item.skillId === action.skillId && item.available) }])).values()];
   const legacy = selection && "actionId" in selection ? profile.actions.find(action => action.actionId === selection.actionId) : null;
   const selected = selection && "skillId" in selection ? groups.find(group => group.skillId === selection.skillId) : null;
-  const label = legacy ? `${legacy.skillName} · 本次：${legacy.label}` : selected?.name ?? (selection ? "原技能不可用，请重新选择" : "自动选择技能");
+  const hinted = selected && taskHint ? profile.actions.find(action => action.actionId === taskHint.actionId && action.skillId === selected.skillId) : null;
+  const label = hinted ? `${hinted.skillName} · ${hinted.label}` : legacy ? `${legacy.skillName} · 本次：${legacy.label}` : selected?.name ?? (selection ? "原技能不可用，请重新选择" : "自动选择技能");
   return <div className="assistant-composer-controls">
     <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
     <ComposerMenu open={openMenu === "add"} setOpen={(open) => changeMenu("add", open)} disabled={disabled} label="添加材料" className="assistant-add-menu"
@@ -34,13 +37,17 @@ export function AssistantComposerControls({ profile, selection, onSelection, dis
       <p>上传和读取文本不消耗积分。粘贴链接仅作为文字。</p>
     </ComposerMenu>
     <ComposerMenu open={openMenu === "skill"} setOpen={(open) => changeMenu("skill", open)} disabled={disabled} label={`选择技能，当前${label}`} className="assistant-skill-control" onOpen={refreshOptions}
-      trigger={<><IconApps size={16} /><span>{label}</span></>}>
+      trigger={<><IconApps size={16} /><span>{hinted?.label ?? label}</span></>}>
       {selection && !legacy && !selected && <button type="button" role="menuitemradio" aria-checked="true" disabled>原技能不可用，请重新选择</button>}
       {legacy && <button type="button" role="menuitemradio" aria-checked="true" disabled>{legacy.skillName} · 本次：{legacy.label}</button>}
       <button type="button" role="menuitemradio" aria-checked={!selection} disabled={disabled} onClick={() => onSelection(null)}>自动选择技能</button>
       {groups.map((group) => <button type="button" key={group.skillId} role="menuitemradio" aria-checked={selected?.skillId === group.skillId} disabled={disabled || !group.available} onClick={() => onSelection({ skillId: group.skillId })}>{group.name}{!group.available ? " · 暂不可用" : ""}</button>)}
     </ComposerMenu>
-    <span className="text-[11px] text-ink-3" title="每次任务确认一次上限，完成或停止后按实际交付结算">执行前确认费用</span>
+    <ComposerMenu open={openMenu === "fee"} setOpen={(open) => changeMenu("fee", open)} disabled={feeDisabled} label="费用确认" className="assistant-fee-menu" informational
+      trigger={<><span>费用确认</span><IconChevronDown size={12} /></>}>
+      <p>当前方式：每次任务确认</p>
+      <p>{pendingFee && !feeExpired ? `本次最多预留 ${pendingFee.amount.toLocaleString()} 积分。` : "开始前会显示本次最多需要多少积分。"}结束后按实际扣除，余下退回可用余额。</p>
+    </ComposerMenu>
     {pickArtifact && <ArtifactPicker artifacts={referenceableArtifacts} close={() => setPickArtifact(false)} select={(artifact) => { onReference?.(artifact); setPickArtifact(false); }} />}
   </div>;
 }
@@ -63,9 +70,30 @@ export function AssistantSkillNotice() {
   </p>;
 }
 
-export function TaskClarification({profile,selection,disabled,confirm}:{profile:AssistantProfileDto;selection:AssistantSkillSelection|null;disabled:boolean;confirm:(choice:import("@aihot/contracts/assistant").AssistantTaskChoice)=>void}) {
- const options=(profile.taskOptions??[]).filter(o=>!selection||('skillId' in selection?o.choice.skillId===selection.skillId:profile.actions.find(a=>a.actionId===selection.actionId)?.skillId===o.choice.skillId));
- const [index,setIndex]=useState<number|null>(null),[size,setSize]=useState('');
- const current=index===null?null:options[index];
- return <section className="assistant-inline-notice" aria-label="确认本次交付内容"><p className="mb-2 text-[13px]">这次希望完成什么？</p><div className="space-y-2">{options.map((option,i)=><label key={JSON.stringify(option.choice)} className="flex items-start gap-2 text-[12px]"><input type="radio" name="assistant-task-choice" checked={index===i} disabled={disabled} onChange={()=>{setIndex(i);setSize(option.sizes[0]??'');}}/><span>{option.label}</span></label>)}</div>{current?.sizes.length ? <label className="mt-3 flex items-center gap-2 text-[12px]">图片比例<select className="rounded border border-line bg-surface px-2 py-1" aria-label="图片比例" value={size} disabled={disabled} onChange={e=>setSize(e.target.value)}>{current.sizes.map(s=><option key={s}>{s}</option>)}</select></label>:null}<Button className="mt-3" size="sm" disabled={disabled||!current} onClick={()=>current&&confirm({...current.choice,...(current.sizes.length?{size}:{})})}>继续获取费用</Button></section>;
+export function TaskClarification({profile,selection,taskHint,disabled,confirm}:{profile:AssistantProfileDto;selection:AssistantSkillSelection|null;taskHint?:AssistantTaskHint|null;disabled:boolean;confirm:(choice:import("@aihot/contracts/assistant").AssistantTaskChoice)=>void}) {
+ const available=(profile.taskOptions??[]).filter(o=>!selection||('skillId' in selection?o.choice.skillId===selection.skillId:profile.actions.find(a=>a.actionId===selection.actionId)?.skillId===o.choice.skillId));
+ const actionId=taskHint?.actionId??(selection&&'actionId' in selection?selection.actionId:undefined);
+ const hinted=actionId?available.filter(option=>option.actionId===actionId):[];
+ const options=hinted.length?hinted:available;
+ const coverScope=options.length===2&&options.some(o=>o.choice.delivery==='plans-only')&&options.some(o=>o.choice.delivery==='image');
+ const [choiceKey,setChoiceKey]=useState<string|null>(null),[size,setSize]=useState('');
+ const current=options.find(option=>JSON.stringify(option.choice)===choiceKey);
+ const canQuote=current && (!current.sizes.length || current.sizes.length===1 || current.sizes.includes(size));
+ return <section className="assistant-inline-notice" aria-label="确认本次交付内容">
+   <p className="mb-2 text-[13px]">{coverScope?"只要三套封面方案，还是选一套后生成图片？":"这次希望完成什么？"}</p>
+   <div className="space-y-2">{options.map(option=>{
+     const key=JSON.stringify(option.choice);
+     return <label key={key} className="flex items-start gap-2 text-[12px]">
+       <input type="radio" name="assistant-task-choice" checked={choiceKey===key} disabled={disabled} onChange={()=>{setChoiceKey(key);setSize(option.sizes[0]??'');}}/>
+       <span>{option.label}</span>
+     </label>;
+   })}</div>
+   {current?.sizes.length ? <label className="mt-3 flex items-center gap-2 text-[12px]">图片比例
+     {current.sizes.length===1 ? <span>{current.sizes[0]}</span> :
+       <select className="rounded border border-line bg-surface px-2 py-1" aria-label="图片比例" value={size} disabled={disabled} onChange={e=>setSize(e.target.value)}>
+         {current.sizes.map(s=><option key={s}>{s}</option>)}
+       </select>}
+   </label>:null}
+   <Button className="mt-3" size="sm" disabled={disabled||!canQuote} onClick={()=>canQuote&&confirm({...current.choice,...(current.sizes.length?{size:current.sizes.length===1?current.sizes[0]:size}:{})})}>继续获取费用</Button>
+ </section>;
 }

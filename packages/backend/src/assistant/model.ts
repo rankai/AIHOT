@@ -8,6 +8,8 @@ import { receiptOptions, requireExecution, type Execution } from "../providers/o
 import { requireCreditUser } from "../users/credits-core.ts";
 import { outbound, modelCredential, type AssistantModelSnapshot } from "./config.ts";
 import { conflict } from "./store.ts";
+import { z } from "zod";
+import { DraftArgumentsError } from "./tool-arguments.ts";
 export interface RequestSnapshot {
   model: AssistantModelSnapshot;
   system: string;
@@ -107,12 +109,22 @@ export async function generateStep(
     new Set(result.toolCalls.map((c) => c.toolCallId)).size !== result.toolCalls.length
   )
     throw new Error("Invalid tool call identities or count");
-  if (result.toolCalls.some((c) => "invalid" in c && c.invalid)) throw new Error("Model tool arguments are invalid");
+  const invalidIds = new Set(result.toolCalls.filter((c) => "invalid" in c && c.invalid).map((c) => c.toolCallId));
   return {
     receiptId,
     text: result.text,
-    calls: result.toolCalls.map((c) => ({ upstreamId: c.toolCallId, name: c.toolName, input: c.input })),
-    messages: result.response.messages,
+    calls: result.toolCalls.map((c) => ({ upstreamId: c.toolCallId, name: c.toolName, input: c.input,
+      ...(invalidIds.has(c.toolCallId) ? { argumentError: new DraftArgumentsError(new z.ZodError([
+        { code: "custom", path: [Object.hasOwn(snapshot.tools, c.toolName) ? "input" : "toolName"], message: "Invalid tool call" },
+      ]), "工具调用没有执行。仅使用本步骤公开的工具名与合法JSON参数修正调用；沿用已完成检索，不重新付费检索。").result } : {}),
+    })),
+    // The SDK supplies its own tool-error for invalid JSON/unknown names. Our tools
+    // step persists one neutral correction result, paired with the same call id.
+    messages: result.response.messages.flatMap<ModelMessage>((m) => {
+      if (m.role !== "tool") return [m];
+      const content = m.content.filter((part) => !(part.type === "tool-result" && invalidIds.has(part.toolCallId)));
+      return content.length ? [{ ...m, content }] : [];
+    }),
   };
 }
 

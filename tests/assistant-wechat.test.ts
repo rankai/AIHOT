@@ -69,7 +69,8 @@ test("analysis preserves the persisted excerpt when query metadata crosses the t
  assert(persisted.results[0]!.text.length<withoutMetadata.results[0]!.text.length);
  const tx=(async()=>articles.map(row=>({...row,call_id:callId,input:{...parameters},call_result:persisted}))) as any;
  const ids=persisted.results.slice(0,2).map(r=>`search:${r.id}`),p={sampleIds:ids,observation:"接口没有给出互动数据，不能据此比较热度"};
- const result=await analyzeWechatResearch(tx,{id:randomUUID()},randomUUID(),{activationId,topic:"职场",samples:ids.map(sourceId=>({sourceId,relevance:"可见摘要与主题相关"})),titlePattern:p,openingPattern:p,structurePattern:p,languagePattern:p,interactionPattern:p,keywordPattern:p,applicationPlan:"使用场景结构",limitations:[]});
+ const result=await analyzeWechatResearch(tx,{id:randomUUID()},randomUUID(),{activationId,topic:"职场",samples:[ids[0]!,ids[0]!].map(sourceId=>({sourceId,relevance:"可见摘要与主题相关"})),titlePattern:p,openingPattern:p,structurePattern:p,languagePattern:p,interactionPattern:p,keywordPattern:{sampleIds:["search:999999"],observation:"无依据的结论"},applicationPlan:"使用场景结构",limitations:[]});
+ assert.deepEqual(result.samples.map(sample=>sample.sourceId),ids);assert.deepEqual(result.patterns.keyword.sampleIds,[]);assert.notEqual(result.patterns.keyword.observation,"无依据的结论");
  for(const sample of result.samples){const shown=persisted.results.find(r=>`search:${r.id}`===sample.sourceId)!;assert.equal(sample.text,shown.text);assert.equal(sample.textTruncated,shown.textTruncated);}
 });
 test("wechat v1 accepted authorization recovery plus current single-task research delivery",async t=>{
@@ -86,7 +87,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   const loaded=messages.find((m:any)=>m.entry);
   if(!loaded)return completion("load_skill",{skillId:"wechat-write",moduleId:"write"});
   if(mode==="reuse") return completion("save_draft",{activationId:loaded.activationId,kind:"text-draft",artifactId:reuse.artifactId,baseVersion:reuse.version,
-   content:{...draft(reuse.sources.map((s:any)=>s.id)),intent:"rewrite",titles:[],tags:[]},researchApplication:{analysisCallId:reuse.sources[0].research.analysisCallId,explanation:"复用选定研究稿的事实与场景结构"}});
+   content:{...draft(reuse.sources.map((s:any)=>s.id)),intent:"rewrite",titles:[],tags:[]},researchApplication:{analysisCallId:reuse.sources.find((s:any)=>s.research).research.analysisCallId,explanation:"复用选定研究稿的事实与场景结构"}});
   const searches=messages.filter((m:any)=>m.results),search=searches.at(-1);
   if(mode==="normal" && invalidSearch<2) return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,...(invalidSearch++===0?{keyword:"a,b,c,d,e,f"}:{startDate:"2026-02-30"})});
   if(mode==="maximum" && searches.length===1) return completion("search_wechat_articles",{activationId:loaded.activationId,...parameters,keyword:"补充成长"});
@@ -94,7 +95,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   const ids=search.results.map((r:any)=>`search:${r.id}`),analysis=messages.find((m:any)=>m.analysisCallId);
   if(!analysis){const p={sampleIds:ids,observation:mode==="maximum"?"标题先说明适用场景，摘要用具体问题引出行动，再交代观察和记录方法。接口没有给出互动数据，不能据此比较热度。".repeat(4):"接口没有给出互动数据，不能据此比较热度"};return completion("analyze_wechat_research",{activationId:loaded.activationId,topic:"职场成长",samples:ids.map((sourceId:string)=>({sourceId,relevance:"样本讨论职场成长与行动方法"})),titlePattern:p,openingPattern:p,structurePattern:p,languagePattern:p,interactionPattern:p,keywordPattern:p,applicationPlan:"以实际场景切入并说明行动方法",limitations:[]});}
   const activationId=invalidDraft?"not-a-uuid":loaded.activationId;invalidDraft=false;
-  return completion("save_draft",{activationId,kind:"text-draft",baseVersion:0,content:draft(ids),researchApplication:{analysisCallId:analysis.analysisCallId,explanation:"以场景开头，并把行动方法用于本文核心论点"}});
+  return completion("save_draft",{activationId,kind:"text-draft",baseVersion:0,content:draft(mode==="normal"?["current-message","search:999999999"]:ids),...(mode==="normal"?{}:{researchApplication:{analysisCallId:analysis.analysisCallId,explanation:"以场景开头，并把行动方法用于本文核心论点"}})});
  });
  const beforePolicy=(await sql`SELECT value FROM settings WHERE key='assistant.skills.wechat-write'`)[0];
  const beforeBudget=await sql`SELECT * FROM budgets WHERE service IN ('assistant.text','redfox.query')`;
@@ -131,7 +132,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   const [activation]=await sql`SELECT id FROM assistant_activations WHERE turn_id=${turn.turnId}`;
   assert.equal(await sql.begin(tx=>autoApproveSearch(tx,{...frozen,snapshot:{...frozen!.snapshot,autoAuthorizationId:randomUUID()}},{name:"search_wechat_articles"} as any,{} as any)),false);
   assert(!(await sql.begin(tx=>activeTools(tx,frozen!))).tools.save_draft);
-  await assert.rejects(sql.begin(tx=>localCall(tx,frozen!,{request_snapshot:{tools:{save_draft:{}}}},{name:"save_draft",input:{activationId:activation!.id,kind:"text-draft",baseVersion:0,content:draft(["current-message"]),researchApplication:{analysisCallId:randomUUID(),explanation:"伪造分析"}}})),/真实检索/);
+  await assert.rejects(sql.begin(tx=>localCall(tx,frozen!,{request_snapshot:{tools:{save_draft:{}}}},{name:"save_draft",input:{activationId:activation!.id,kind:"text-draft",baseVersion:0,content:draft(["current-message"]),researchApplication:{analysisCallId:randomUUID(),explanation:"伪造分析"}}})),(e:any)=>e.result?.error==="invalid_tool_arguments");
   await updateAssistantSkill("wechat-write",{acceptingNew:false,expectedRevision:1,reason:"Fixture stop new admission"},"test");
   await assert.rejects(currentQuoteTurn(user.id,session.sessionId,raw));
   await decideCall(user.id,session.sessionId,call.callId,true,{proposalRevision:1},randomUUID());
@@ -158,7 +159,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
   for(let i=0;i<2;i++)await advance(turn.runId);
   snap=await sessionSnapshot(user.id,session.sessionId);
   assert.equal(snap.turn?.status,"completed");assert.equal(snap.artifacts.length,1);assert.equal(snap.artifacts[0]!.kind,"text-draft");
-  assert.match(snap.artifacts[0]!.content.body,/公众号爆款规律来源/);assert.equal(hits,1);
+  assert.match(snap.artifacts[0]!.content.body,/公众号爆款规律来源/);assert.equal(hits,1);assert(!snap.artifacts[0]!.content.sources.includes("search:999999999"));
   assert.equal(requests[0].url,"/story/api/gzh/search/hotArticleNew");assert.equal(requests[0].method,"POST");assert.equal(requests[0].headers["x-api-key"],"synthetic-key");assert.equal(requests[0].headers.redfox_api_key,undefined);assert.equal(requests[0].body.source,WECHAT_HOT_SOURCE);
   const charges=await sql`SELECT amount,state FROM member_credit_charges WHERE root_run_id IN (${turn.runId},${child!.child_run_id})`;assert.deepEqual(charges.map(r=>r.amount).sort(),[3,7]);assert(charges.every(r=>r.state==="settled"));
   const [receipt]=await sql`SELECT model,attempts FROM receipts WHERE id=(SELECT receipt_id FROM operation_results WHERE run_id=${child!.child_run_id} LIMIT 1)`;assert.equal(receipt!.model,operationId);assert.equal(receipt!.attempts,1);
@@ -175,7 +176,7 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
    for(let i=0;i<4;i++)await advance(next.runId);
    const saved=await sessionSnapshot(user.id,session.sessionId);
    assert.equal(saved.turn?.status,"completed");assert.equal(saved.artifacts[0]!.version,2);assert.equal(saved.artifacts[0]!.content.intent,"rewrite");
-   assert.equal(saved.artifacts[0]!.sources[0]!.research!.analysisCallId,reuse.sources[0].research.analysisCallId);assert.equal(hits,1);
+   assert.equal(saved.artifacts[0]!.sources.find(s=>s.research)!.research!.analysisCallId,reuse.sources.find((s:any)=>s.research).research.analysisCallId);assert.equal(hits,1);
   });
   await t.test("two maximum queries plus admitted material fit actual frozen model requests",async()=>{
    mode="maximum";

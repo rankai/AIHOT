@@ -129,7 +129,7 @@ export function registerUserAssistant(app: FastifyInstance) {
     "/api/assistant/sessions/:id/artifacts/:artifactId/versions",
     userHandler(async (req, _reply, u) => {
       const p = params(req.params);
-      return artifactVersions(u.user.id, p.id, p.artifactId!);
+      return artifactVersions(u.user.id, p.id, p.artifactId!, req.query);
     }),
   );
   app.post(

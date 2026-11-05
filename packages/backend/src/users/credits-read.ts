@@ -24,9 +24,12 @@ export async function getCreditPage(userId: number, raw: unknown = {}): Promise<
 
 interface ChargeView extends ChargeRow { username: string; display_name: string; run_status: string; recovery_run_id: number | null; run_wait_reason: string | null }
 function chargeDto(row: ChargeView): CreditCharge {
+  // Old task pauses used stop wording. Correct the read projection without rewriting ledger history.
+  const reviewReason = row.pricing_snapshot.task && row.run_status === "needs_review" && row.review_reason === "已停止后续执行，费用核对中"
+    ? "任务已暂停，费用核对中" : row.review_reason ?? row.run_wait_reason;
   return { id: row.id, userId: row.user_id, username: row.username, displayName: row.display_name, runId: row.root_run_id, recoveryRunId: row.recovery_run_id,
     kind: row.pricing_snapshot.kind, provider: row.pricing_snapshot.provider, model: row.pricing_snapshot.model, tier: row.pricing_snapshot.tier,
-    amount: row.amount, consumed: row.consumed, released: row.released, state: row.state, reviewReason: row.review_reason ?? row.run_wait_reason,
+    amount: row.amount, consumed: row.consumed, released: row.released, state: row.state, reviewReason,
     runStatus: row.run_status, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() };
 }
 

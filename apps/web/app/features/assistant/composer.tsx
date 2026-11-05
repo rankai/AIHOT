@@ -94,16 +94,13 @@ export function AssistantComposer({
             onClick={stopping ? onStop : undefined}
             aria-label={stopping ? "停止当前任务" : answerMode ? "提交回答并继续" : "发送需求"}
           >
-            <span>{stopping ? "处理中" : answerMode ? "回答" : "发送"}</span>
+            <span>{stopping ? "停止" : answerMode ? "回答" : "发送"}</span>
             {stopping ? <span aria-hidden="true">■</span> : <IconArrowUp size={17} />}
           </button>
         </div>
         <div className="mt-2">
           <p className="text-[11px] leading-relaxed text-ink-4">
-            {hint ??
-              (answerMode
-                ? "补充回答沿用这次请求，不会另取创作报价。"
-                : "发送后先确认积分 · Shift+Enter 换行")}
+            {hint ?? (answerMode ? "补充回答沿用这次请求，不会另取创作报价。" : <span className="assistant-keyboard-hint">Shift+Enter 换行</span>)}
             <span className="ml-2">
               {text.length}/{maxLength}
             </span>

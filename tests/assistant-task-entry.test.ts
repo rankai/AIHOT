@@ -25,22 +25,31 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
  const services=["assistant.quote-preparation","assistant.text","assistant.vision","redfox.query","redfox.image","redfox.poll"],restore=await allowTestBudgetScope(services,"member");
  const model=`cover-plan-${tag()}`,oldPrivate=config.allowPrivateNetworkFetch;config.allowPrivateNetworkFetch=true;
  let app:Awaited<ReturnType<typeof buildApp>>|undefined;
- let next="plans-only",queries=0,visions=0,submits=0;
+ let next="plans-only",queries=0,visions=0,submits=0,unreadable=false,emptyCovers=false;
  let savedSession:any,savedPlan:any,otherPlan:any,lastImageInput:any;
  const png=await sharp({create:{width:900,height:1200,channels:3,background:"orange"}}).png().toBuffer();
  const server=http.createServer((req,res)=>{let body="";req.on("data",c=>body+=c);req.on("end",()=>{
   if(req.url!.startsWith("/cover/")||req.url==="/output.png"){res.writeHead(200,{"content-type":"image/png"});res.end(png);return;}
   let data:any;
-  if(req.url!.startsWith("/story/api/cozeSkill/getXhsCozeSkillData")){queries++;data={lowPowderExplosiveArticle:[{photoId:'note-1',title:'春日通勤穿搭',desc:'春日穿搭记录',authorName:'合成作者',fans:0,coverUrl:`${process.env.REDFOX_TEST_BASE_URL}/cover/${queries}/1`,useLikeCount:1,publicTime:'2026-11-02'}],likeTheTop500:[],singleDayIncrements:[],sevenDaysOfIncrements:[]};}
+  if(req.url!.startsWith("/story/api/cozeSkill/getXhsCozeSkillData")){queries++;data={lowPowderExplosiveArticle:emptyCovers?[]:[{photoId:'note-1',title:'春日通勤穿搭',desc:'春日穿搭记录',authorName:'合成作者',fans:0,coverUrl:`${process.env.REDFOX_TEST_BASE_URL}/cover/${queries}/1`,useLikeCount:1,publicTime:'2026-11-02'}],likeTheTop500:[],singleDayIncrements:[],sevenDaysOfIncrements:[]};}
   else if(req.url!.endsWith("gptImage2Submit")){submits++;const input=JSON.parse(body);lastImageInput=input;data={taskId:`image-${submits}`};}
   else {const input=JSON.parse(body);data={taskId:input.taskId,status:"completed",imageUrls:[`${process.env.REDFOX_TEST_BASE_URL}/output.png`]};}
   res.writeHead(200,{"content-type":"application/json"});res.end(JSON.stringify({code:2000,data}));
  });});await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
+ const recognitionCases=new Map<string,{hint:string;result:Record<string,unknown>|null}>();
+ let recognitionCalls=0;
  let preparations=0,writeDraft=false;
  const modelStub=await stub(async (_hit,req)=>{
   const request=JSON.parse(req.body),content=request.messages[0]?.content;
   if(request.response_format?.type==='json_object'&&typeof content==='string'&&content.startsWith('只识别')){
-   preparations++;const input=JSON.parse(request.messages[1].content);assert.match(input.message,/春日通勤穿搭/);if(input.message.includes('模拟报价暂不可用')){
+   const recognitionInput=JSON.parse(request.messages[1].content),recognition=recognitionCases.get(recognitionInput.message);
+   if(recognition){
+    recognitionCalls++;assert(recognitionInput.actionHint.length>0,'chosen quick action is passed to the existing recognition request');
+    const hintedModule=recognition.hint==='xiaohongshu-rewrite'?'M2':'M4';
+    assert(recognitionInput.actionHint.every((hint:any)=>hint.skillId==='xiaohongshu-creator'&&hint.moduleId===hintedModule),'recognition receives only the chosen quick action module');
+    return {choices:[{message:{content:JSON.stringify(recognition.result??{clarify:true})}}],usage:{prompt_tokens:100,completion_tokens:30,total_tokens:130}};
+   }
+   preparations++;const input=recognitionInput;assert.match(input.message,/春日通勤穿搭/);if(input.message.includes('模拟报价暂不可用')){
     await sql`UPDATE budgets SET per_minute=0 WHERE service='redfox.image'`;
     return {choices:[{message:{content:JSON.stringify({skillId:'xiaohongshu-creator',moduleId:'M4',delivery:'image',size:'3:4'})}}],usage:{prompt_tokens:90,completion_tokens:30,total_tokens:120}};
    }
@@ -50,11 +59,11 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
   }
   if(Array.isArray(content)&&content.some((c:any)=>c.type==="image_url")){
    visions++;const ids=content.filter((c:any)=>c.type==="text"&&c.text.startsWith("sourceId: ")).map((c:any)=>c.text.slice(10));
-   return {choices:[{finish_reason:"stop",message:{content:JSON.stringify({observations:ids.map((sourceId:string)=>({sourceId,status:"observed",text:"",subject:"暖橙色画面",colors:"橙色",layout:"纯色背景",uncertainties:["没有可读文字"]}))})}}],usage:{prompt_tokens:100,completion_tokens:100,total_tokens:200}};
+   return {choices:[{finish_reason:"stop",message:{content:JSON.stringify({observations:ids.map((sourceId:string)=>({sourceId,status:unreadable?"unreadable":"observed",text:"",subject:unreadable?"":"暖橙色画面",colors:"橙色",layout:"纯色背景",uncertainties:["没有可读文字"]}))})}}],usage:{prompt_tokens:100,completion_tokens:100,total_tokens:200}};
   }
   if(request.tools?.length===1&&request.tools[0].function.name==='generate_image'){
    const image=JSON.parse(request.messages[1].content);assert.equal(image.prompt,scheme(2,[]).prompt);
-   assert(!JSON.stringify(request).includes('coverUrl'));return completion('generate_image',image);
+   assert(!JSON.stringify(request).includes('coverUrl'));return completion('generate_image',{...image,planReference:undefined});
   }
   const messages=request.messages.filter((m:any)=>m.role==="tool").map((m:any)=>JSON.parse(m.content)),loaded=messages.find((m:any)=>m.entry);
   if(!loaded){const c=JSON.parse(request.messages[0].content.slice(request.messages[0].content.indexOf("{"))).candidates[0];return completion("load_skill",{skillId:c.skillId,moduleId:c.moduleId});}
@@ -66,7 +75,7 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
   const query=messages.find((m:any)=>m.metadata?.operationId===XHS_COVER_OPERATION),vision=messages.find((m:any)=>m.reportId),plan=messages.find((m:any)=>m.kind==="xhs-cover-plan");
   if(!query)return completion("search_xhs_covers",{activationId:loaded.activationId,keyword:"生活,观察",startDate:JSON.parse(request.messages[0].content.slice(request.messages[0].content.indexOf("{"))).researchClock?.earliestDate??"2026-10-04"});
   if(!vision)return completion("analyze_xhs_covers",{activationId:loaded.activationId,samples:query.results.slice(0,20).map((r:any)=>({sourceId:r.sourceId,reason:"与主题有关"}))});
-  if(!plan)return completion("save_xhs_cover_plan",{activationId:loaded.activationId,baseVersion:0,title:"生活观察封面",summary:"依据实际可见封面整理色调与留白；样本中没有可读文字，标题为本次创意设计。",schemes:[1,2,3].map(i=>scheme(i,vision.observations.filter((o:any)=>o.status==="observed").map((o:any)=>o.sourceId))),next});
+  if(!plan)return completion("save_xhs_cover_plan",{activationId:loaded.activationId,baseVersion:0,title:"生活观察封面",summary:"依据实际可见封面整理色调与留白；样本中没有可读文字，标题为本次创意设计。",schemes:[1,2,3].map(i=>({...scheme(i,vision.observations.filter((o:any)=>o.status==="observed").map((o:any)=>o.sourceId)),...(i===1?{sourceIds:undefined,schemeId:undefined,layout:undefined,palette:undefined}:i===3?{sourceIds:["cover:unrelated"]}:{})})),next:next==="plans-only"?"choose":"plans-only"});
   return completion("generate_image",{activationId:loaded.activationId,title:"模型原错误标题",prompt:"模型原错误提示词",size:"1:1",planReference:{artifactId:plan.artifactId,version:plan.version,schemeId:"scheme-2"}});
  });
  const advance=async(id:number)=>{await sql`UPDATE operation_runs SET next_attempt_at=now()-interval '1 second' WHERE id=${id} AND next_attempt_at IS NOT NULL`;const [r]=await sql`SELECT step_version,job_id FROM operation_runs WHERE id=${id}`;await executeOperationStep(id,r!.step_version,r!.job_id??randomUUID());};
@@ -101,7 +110,8 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
     assert.notEqual(done.turn.status,'needs_review',JSON.stringify(done.turn.calls));
     const child=done.turn.calls.find((c:any)=>c.state==='running');const [childRun]=child?await sql`SELECT status FROM operation_runs WHERE id=${child.childRunId}`:[];await advance(childRun?.status==='active'||childRun?.status==='waiting'?child.childRunId:run.runId);
    }
-   assert.equal(done.turn.status,'completed');const plan=done.artifacts.find((a:any)=>a.kind==='xhs-cover-plan');assert.equal(plan.content.coverPlan.schemes.length,3);assert.equal(plan.content.coverPlan.evidence.observedCount,1);
+   assert.equal(done.turn.status,'completed');const plan=done.artifacts.find((a:any)=>a.kind==='xhs-cover-plan');assert.equal(plan.content.coverPlan.schemes.length,3);assert.equal(plan.content.coverPlan.evidence.observedCount,1);assert.deepEqual(plan.content.coverPlan.schemes.map((s:any)=>s.sourceIds.length),[0,1,0]);assert.equal(new Set(plan.content.coverPlan.schemes.map((s:any)=>s.schemeId)).size,3);
+   assert.equal(plan.content.coverPlan.schemes[0].layout,"");assert.equal(plan.content.coverPlan.schemes[0].palette,"");
    assert(!done.turn.calls.some((c:any)=>c.name==='generate_image'));
    otherPlan=savedPlan;savedSession=done;savedPlan=plan;
    const charges=await sql`SELECT * FROM member_credit_charges WHERE root_run_id=${run.runId}`;assert.equal(charges.length,1);assert.equal(charges[0]!.consumed,21);assert.equal(charges[0]!.released,0);
@@ -157,6 +167,25 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
    }
   }
   assert.equal(submits,1);
+  for(const shortage of ["unreadable","empty"]) await t.test(`${shortage} cover ends the task and charges only the delivered query`,async()=>{
+   const initialRequest={message:"研究春日通勤穿搭封面，再生成一张图片",skillSelection:{skillId:"xiaohongshu-creator"},taskChoice:{skillId:"xiaohongshu-creator",moduleId:"M4",delivery:"image",size:"3:4"}};
+   const create=await app!.inject({method:"POST",url:"/api/assistant/sessions",headers:{...headers,"idempotency-key":randomUUID()},payload:{assistantId:"creative",initialRequest}});
+   assert.equal(create.statusCode,201,create.body);const initial=create.json(),q=initial.initialRequest.quote;
+   const submit=await app!.inject({method:"POST",url:`/api/assistant/sessions/${initial.sessionId}/turns`,headers:{...headers,"idempotency-key":randomUUID()},payload:{...initial.initialRequest.input,quoteId:q.quoteId}});
+   assert.equal(submit.statusCode,202,submit.body);const run=submit.json(),before={queries,visions,submits};unreadable=shortage==="unreadable";emptyCovers=shortage==="empty";
+   try{
+    for(let n=0;n<32;n++){
+     const done=await sessionSnapshot(user.id,initial.sessionId);if(["failed","completed"].includes(done.turn!.status))break;
+     assert.notEqual(done.turn!.status,"needs_review");assert(!done.turn!.question);
+     const call=done.turn!.calls.find(c=>c.state==="running"),[child]=call?await sql`SELECT status FROM operation_runs WHERE id=${call.childRunId!}`:[];
+     await advance(child?.status==="active"||child?.status==="waiting"?call!.childRunId!:run.runId);
+    }
+    const done=await sessionSnapshot(user.id,initial.sessionId);assert.equal(done.turn!.status,"failed");assert.equal(done.artifacts.length,0);
+    assert.deepEqual([queries-before.queries,visions-before.visions,submits-before.submits],[1,shortage==="empty"?0:1,0]);
+    if(shortage==="empty")assert(!done.turn!.calls.some(c=>c.name==="analyze_xhs_covers"));
+    const [charge]=await sql`SELECT amount,consumed,released FROM member_credit_charges WHERE root_run_id=${run.runId}`;assert.deepEqual([charge!.amount,charge!.consumed,charge!.released],[34,3,31]);
+   }finally{unreadable=false;emptyCovers=false;}
+  });
   // A realistic historical three-scheme plan alone exceeds the old 4k admission remainder.
   // Keep its original evidence and publish a synthetic later version, never overwrite v1.
   const expanded=structuredClone(savedPlan.content);
@@ -265,6 +294,33 @@ test("synthetic HTTP manual-skill and automatic entry both quote once and delive
    const [charge]=await sql`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${target.runId}`;
    assert.equal(charge!.state,'settled');assert.equal(charge!.consumed,writeDraft?7:20);assert.equal(charge!.released,0);
   }
+  await t.test('quick-action intent reaches recognition without freezing stale scope; cover clarification and HTTP replay remain free of task side effects',async()=>{
+   await sql`UPDATE budgets SET per_minute=1000,per_hour=10000,per_day=100000 WHERE service IN ('assistant.vision','redfox.query')`;
+   await setPrice('query','redfox','3X8FGEEM',3);
+   const cover={skillId:'xiaohongshu-creator',moduleId:'M4'};
+   const cases=[
+    {hint:'xiaohongshu-rewrite',message:'今天通勤穿了一件白色衬衫，搭配深蓝色长裤，轻便又舒服。',result:{skillId:cover.skillId,moduleId:'M2',delivery:'writing'}},
+    {hint:'xiaohongshu-rewrite',message:'改为研究小红书通勤穿搭热点，写一篇新笔记，不改写原文。',result:{skillId:cover.skillId,moduleId:'M1',delivery:'writing'}},
+    {hint:'xiaohongshu-cover',message:'请研究通勤穿搭封面，只给我三套设计方案，不生成图片。',result:{...cover,delivery:'plans-only'}},
+    {hint:'xiaohongshu-cover',message:'请研究小红书「通勤穿搭」热门封面，给我三套封面设计方案；我选定其中一套后，请继续生成一张3:4、1K封面图。',result:{...cover,delivery:'image',size:'3:4'}},
+    {hint:'xiaohongshu-cover',message:'通勤穿搭封面',result:null},
+   ];
+   for(const [i,fixture] of cases.entries()){
+    recognitionCases.set(fixture.message,fixture);
+    const member=await createSiteUser({username:`ux_intent_${i}_${tag()}`,displayName:'Intent fixture',password:'synthetic-password'},'test');
+    await grantCredits(member.id,{amount:1000,reason:'Intent fixture'},'test',randomUUID());
+    const auth=await loginSiteUser({username:member.username,password:'synthetic-password'}),requestHeaders={cookie:`aihot_user=${auth.token}`,'x-csrf-token':auth.principal.csrf,'idempotency-key':randomUUID()};
+    const request={assistantId:'xiaohongshu',initialRequest:{message:fixture.message,skillSelection:{skillId:cover.skillId},taskHint:{actionId:fixture.hint}}};
+    const before=recognitionCalls;
+    const response=await app!.inject({method:'POST',url:'/api/assistant/sessions',headers:requestHeaders,payload:request});assert.equal(response.statusCode,201,response.body);
+    const created=response.json();assert.equal(recognitionCalls,before+1);
+    if(fixture.result){assert(created.initialRequest.quote,`case ${i}: expected quote for recognized scope`);assert.deepEqual(JSON.parse(created.initialRequest.quote.task.scope),fixture.result);assert.equal(created.initialRequest.quote.task.items.some((item:any)=>item.key==='generate_image@1'),fixture.result.delivery==='image');}
+    else assert.equal(created.initialRequest.quote,null,'a cover hint alone cannot authorize the image scope');
+    const replay=await app!.inject({method:'POST',url:'/api/assistant/sessions',headers:requestHeaders,payload:request});assert.equal(replay.statusCode,201,replay.body);assert.equal(replay.json().sessionId,created.sessionId);assert.equal(recognitionCalls,before+1,'replaying accepted create does not identify again');
+    const [wallet]=await sql`SELECT reserved FROM member_credit_accounts WHERE user_id=${member.id}`;assert.equal(Number(wallet!.reserved),0);
+    const [runs]=await sql`SELECT count(*)::int n FROM operation_runs WHERE actor=${`user:${member.id}`}`;assert.equal(runs!.n,0,'recognition and quote never start paid task execution');
+   }
+  });
   const [costs]=await sql`SELECT count(*)::int n FROM receipt_attempts WHERE service='assistant.quote-preparation' AND owner_user_id=${user.id}`;assert.equal(costs!.n,3);
   t.diagnostic('Routing and vendors are synthetic local fixtures: proves HTTP scope, execution and accounting, not real-model semantic recognition.');
  } finally {

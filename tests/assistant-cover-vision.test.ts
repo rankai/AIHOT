@@ -73,6 +73,7 @@ test("cover vision executes real frozen bytes and settles only a validated repor
   modelHits++;const body=JSON.parse(text);actual.push(body);if(mode==="unknown"){req.socket.destroy();return;}
   const content=body.messages[0].content,ids=content.filter((c:any)=>c.type==="text"&&c.text.startsWith("sourceId: ")).map((c:any)=>c.text.slice(10));
   const observations=ids.map((sourceId:string)=>({sourceId,status:mode==="unreadable"?"unreadable":"observed",text:"",subject:mode==="empty"?"":"橙色矩形",colors:mode==="empty"?"":"橙色",layout:mode==="empty"?"":"纯色画面",...(mode==="missing-uncertainties"?{}:{uncertainties:["无可读文字"]})}));
+  if(mode==="mixed-result") observations.splice(1,2,observations[1],observations[1],{...observations[0],sourceId:"not-in-this-batch"});
   res.writeHead(200,{"content-type":"application/json"});res.end(JSON.stringify({choices:[{finish_reason:mode==="length"?"length":"stop",message:{content:mode==="invalid"?"not JSON":JSON.stringify({observations})}}],...(mode==="no-usage"?{}:{usage:{prompt_tokens:100,completion_tokens:50,total_tokens:150}})}));
  });});await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
  const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
@@ -143,13 +144,16 @@ test("cover vision executes real frozen bytes and settles only a validated repor
    const [counter]=await sql`SELECT child_calls FROM assistant_turns WHERE id=${f.turnId}`;assert.equal(counter!.child_calls,4);
    await sql`UPDATE operation_runs SET status='completed' WHERE id=${f.parent.id}`;
   });
-  for(const failure of ["invalid","unknown","empty","length","unreadable"])await t.test(`${failure} response cannot settle or reissue`,async()=>{
+  for(const failure of ["invalid","unknown","empty","length","unreadable"])await t.test(`${failure} response cannot deliver a report or reissue`,async()=>{
    mode=failure;const f=await fixture(1);await step(f.run.id);await step(f.run.id);
-   const [failed]=await sql`SELECT * FROM operation_runs WHERE id=${f.run.id}`;assert.equal(failed!.status,"needs_review");const before=modelHits;
-   await sql.begin(tx=>resumeRun(tx,{runId:f.run.id,stepVersion:failed!.step_version,generation:failed!.generation}));await step(f.run.id);assert.equal(modelHits,before);
-   const [charge]=await sql`SELECT c.state,c.consumed FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id=${f.run.id}`;assert.notEqual(charge!.state,"settled");assert.equal(charge!.consumed,0);
-   const reports=await sql`SELECT id FROM operation_results WHERE run_id=${f.run.id} AND kind='assistant_vision_report'`;assert.equal(reports.length,0);
-   const [receipt]=await sql`SELECT attempts FROM receipts WHERE id=${failed!.current_receipt_id}`;assert.equal(receipt!.attempts,1);
+   const [failed]=await sql`SELECT * FROM operation_runs WHERE id=${f.run.id}`;const unknown=failure==="unknown";
+   assert.equal(failed!.status,unknown?"needs_review":"failed");const before=modelHits;
+   if(unknown)await sql.begin(tx=>resumeRun(tx,{runId:f.run.id,stepVersion:failed!.step_version,generation:failed!.generation}));
+   await step(f.run.id);assert.equal(modelHits,before);
+   const [charge]=await sql`SELECT c.state,c.consumed,c.released FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id=${f.run.id}`;assert.equal(charge!.consumed,0);
+   if(!unknown)assert.equal(charge!.released,11);else assert.equal(charge!.released,0);
+   const reports=await sql`SELECT id FROM operation_results WHERE run_id=${f.run.id} AND kind='assistant_vision_report' AND data->>'complete'='true'`;assert.equal(reports.length,0);
+   const [receipt]=await sql`SELECT attempts FROM receipts WHERE id IN (SELECT current_receipt_id FROM operation_runs WHERE id=${f.run.id} UNION SELECT receipt_id FROM operation_results WHERE run_id=${f.run.id}) AND purpose='assistant.coverVision'`;assert.equal(receipt!.attempts,1);
    await sql`UPDATE operation_runs SET status='stopped' WHERE id=${f.parent.id}`;
   });
   mode="normal";
@@ -166,11 +170,17 @@ test("cover vision executes real frozen bytes and settles only a validated repor
   });
   await t.test("zero downloadable images do not settle; partial observations report the actual denominator",async()=>{
    mode="download";const zero=await fixture(1),before=modelHits;await step(zero.run.id);assert.equal(modelHits,before);
-   assert.equal((await sql`SELECT status FROM operation_runs WHERE id=${zero.run.id}`)[0]!.status,"needs_review");
+   assert.equal((await sql`SELECT status FROM operation_runs WHERE id=${zero.run.id}`)[0]!.status,"failed");
    mode="partial";const partial=await fixture(2);await step(partial.run.id);await step(partial.run.id);
    const [report]=await sql`SELECT data FROM operation_results WHERE run_id=${partial.run.id} AND kind='assistant_vision_report'`;
    assert.equal(report!.data.selectedCount,2);assert.equal(report!.data.observedCount,1);assert.equal(report!.data.failed.length,1);
    const [charge]=await sql`SELECT c.state,c.consumed FROM member_credit_charges c JOIN member_credit_run_links l ON l.charge_id=c.id WHERE l.run_id=${partial.run.id}`;assert.equal(charge!.state,"settled");assert.equal(charge!.consumed,11);
+  });
+  await t.test("a missing or duplicate reply does not hide a usable image or trigger another call",async()=>{
+   mode="mixed-result";const mixed=await fixture(3),before=modelHits;await step(mixed.run.id);await step(mixed.run.id);
+   const [r]=await sql`SELECT data FROM operation_results WHERE run_id=${mixed.run.id} AND kind='assistant_vision_report'`;
+   assert.equal(modelHits,before+1);assert.equal(r!.data.observedCount,1);
+   assert.deepEqual(r!.data.observations.map((o:any)=>[o.sourceId,o.status]),[["sample-0","observed"],["sample-1","unreadable"],["sample-2","unreadable"]]);
   });
   mode="normal";
   await t.test("missing exact costs, member price or vision budget prevents downloads and model calls",async()=>{

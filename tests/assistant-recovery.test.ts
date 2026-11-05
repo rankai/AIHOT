@@ -46,7 +46,22 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
   const supplier = await stub((_hit, req) => {
     const body = JSON.parse(req.body);
     if (mode === "malformed") return { choices: [] };
-    if (mode === "text-only") return { id: "text-only", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "这是一条尚未交付稿件的文字回复。" }, finish_reason: "stop" }] };
+    if (mode === "text-only" || mode === "search-text-only" && body.messages.some((m: any) => m.role === "tool" && m.content.includes('"limited"'))) return { id: "text-only", created: 1, model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "这是一条尚未交付稿件的文字回复。" }, finish_reason: "stop" }] };
+    if (mode.startsWith("invalid-tool-")) {
+      if (body.messages.some((m: any) => m.role === "tool" && m.content.includes("invalid_tool_arguments"))) return completion("ask_question", { text: "参数已纠正，请补充创作材料" });
+      if (mode === "invalid-tool-json") {
+        const result = completion("ask_question", {}); result.choices[0]!.message.tool_calls[0]!.function.arguments = "{"; return result;
+      }
+      if (mode === "invalid-tool-mixed") {
+        const result = completion("unpublished_paid_search", { keyword: "不得外发" });
+        result.choices[0]!.message.tool_calls.push({ id: "call_valid", type: "function", function: { name: "ask_question", arguments: JSON.stringify({ text: "有效问题" }) } });
+        return result;
+      }
+      if (mode === "invalid-tool-load") return completion("load_skill", { skillId: "general-writing" });
+      if (mode === "invalid-tool-reference") return completion("read_skill_reference", { activationId: "bad-id", resourceId: "rules" });
+      if (mode === "invalid-tool-question") return completion("ask_question", { text: 42 });
+      return completion("unpublished_paid_search", { keyword: "不得外发" });
+    }
     if (mode === "question") return completion("ask_question", { text: "请补充材料" });
     const rewrite = mode.startsWith("m2-");
     const xhs = mode.startsWith("search") || rewrite;
@@ -226,26 +241,63 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
       const x = await setup(), before = supplier.hits();
       await advance(x.runId);
       const first = await sessionSnapshot(x.user.id, x.sessionId);
-      assert.equal(first.turn!.status, "needs_review");
+      assert.equal(first.turn!.status, "failed");
       const countText = (s: typeof first) => s.messages.filter((m) => m.role === "assistant" && m.text).length;
-      assert.equal(countText(first), 1);
-      // A recovery wakeup reaching an already committed decision must not append the response again.
-      await sql`UPDATE operation_runs SET status='active' WHERE id=${x.runId}`;
+      assert.equal(countText(first), 2);
+      assert.equal(first.artifacts.length, 0);assert.match(first.messages.map(m=>m.text).join("\n"), /文字回复。/);
+      const [released]=await sql`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${x.runId}`;
+      assert.deepEqual(released, {amount:7,consumed:0,released:7,state:"released"});
+      // Duplicate queue delivery cannot append text or issue another provider request.
       await advance(x.runId);
       const again = await sessionSnapshot(x.user.id, x.sessionId);
-      assert.equal(countText(again), 1);
+      assert.equal(countText(again), 2);
       assert.equal(supplier.hits(), before + 1);
-      await controlTurn(x.user.id, x.sessionId, x.turnId, "stop", { generation: again.turn!.generation });
       const stopped = await sessionSnapshot(x.user.id, x.sessionId);
       assert.equal(stopped.turn!.canResume, false);
-      await assert.rejects(controlTurn(x.user.id, x.sessionId, x.turnId, "resume", { generation: stopped.turn!.generation }), /交付|继续/);
+      await assert.rejects(controlTurn(x.user.id, x.sessionId, x.turnId, "resume", { generation: stopped.turn!.generation }), /交付|继续|状态|结算|恢复/);
       const [run] = await sql`SELECT step_version,generation FROM operation_runs WHERE id=${x.runId}`;
-      await assert.rejects(controlOperation(x.runId, "resume", { stepVersion: run.step_version, generation: run.generation, reason: "核对文字回复" }, "admin:91001"), /交付|继续/);
+      await assert.rejects(controlOperation(x.runId, "resume", { stepVersion: run.step_version, generation: run.generation, reason: "核对文字回复" }, "admin:91001"), /交付|继续|状态|结算|恢复/);
       const [facts] = await sql`SELECT
         (SELECT count(*)::int FROM operation_results WHERE run_id=${x.runId}) results,
         (SELECT count(*)::int FROM assistant_tool_calls WHERE turn_id=${x.turnId}) calls,
         (SELECT count(*)::int FROM member_credit_charges WHERE root_run_id=${x.runId}) charges`;
       assert.deepEqual(facts, { results: 1, calls: 0, charges: 1 });
+    });
+    await t.test("invalid JSON, unpublished and mixed calls receive one safe correction; local argument errors also remain correctable", async () => {
+      for (const failure of ["json", "unknown", "mixed", "load", "reference", "question"]) {
+        mode = `invalid-tool-${failure}`;
+        const x = await setup(), before = supplier.hits(), beforeSearch = redfox.hits();
+        if (failure === "json") {
+          await sql.unsafe("CREATE FUNCTION assistant_test_bad_call_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.decision IS NOT NULL THEN RAISE EXCEPTION 'synthetic invalid-call commit interruption'; END IF; RETURN NEW; END $$");
+          await sql.unsafe("CREATE TRIGGER assistant_test_bad_call_commit BEFORE UPDATE ON assistant_model_steps FOR EACH ROW EXECUTE FUNCTION assistant_test_bad_call_commit()");
+          try { await advance(x.runId); } finally {
+            await sql.unsafe("DROP TRIGGER assistant_test_bad_call_commit ON assistant_model_steps");await sql.unsafe("DROP FUNCTION assistant_test_bad_call_commit()");
+          }
+          const [paused] = await sql`SELECT * FROM operation_runs WHERE id=${x.runId}`;
+          const [receipt] = await sql`SELECT status FROM receipts WHERE id=${paused.current_receipt_id}`;assert.equal(receipt.status,"received");
+          assert.equal((await sql`SELECT count(*)::int n FROM assistant_tool_calls WHERE turn_id=${x.turnId}`)[0]!.n,0);
+          await controlOperation(x.runId,"resume",{stepVersion:paused.step_version,generation:paused.generation,reason:"复用已收到的无效参数响应"},"admin:91001");
+        }
+        await advance(x.runId);await advance(x.runId);
+        const [failed] = await sql`SELECT * FROM assistant_tool_calls WHERE turn_id=${x.turnId} AND state='failed'`;
+        assert(failed, failure);assert.equal(failed.result.error,"invalid_tool_arguments");assert.equal(failed.child_run_id,null);assert.equal(failed.quote,null);
+        assert.equal(supplier.hits(),before+1,"replaying a received response never dispatches it again");
+        if(failure!=="mixed"){await advance(x.runId);await advance(x.runId);}
+        const done=await sessionSnapshot(x.user.id,x.sessionId);assert.equal(done.turn!.phase,"waiting_question",failure);assert.equal(done.artifacts.length,0);
+        assert.equal(redfox.hits(),beforeSearch);assert.equal(done.turn!.calls.length,0,"invalid unpublished calls never create paid proposals");
+        const [corrections]=await sql`SELECT count(*)::int n FROM assistant_messages WHERE turn_id=${x.turnId} AND role='tool' AND model_message::text LIKE '%invalid_tool_arguments%'`;
+        assert.equal(corrections.n,1,"SDK tool-error is replaced by exactly one neutral correction result");
+        assert(!JSON.stringify(done).includes("InvalidToolInputError"));
+        await controlTurn(x.user.id,x.sessionId,x.turnId,"stop",{generation:done.turn!.generation});
+      }
+    });
+    await t.test("text-only response after a delivered query ends without a draft and settles only that query", async () => {
+      const x = await approvedSearch();mode="search-text-only";const before=redfox.hits();
+      await advance(x.call.child_run_id);for(let i=0;i<4;i++)await advance(x.runId);
+      const done=await sessionSnapshot(x.user.id,x.sessionId);assert.equal(done.turn!.status,"failed");assert.equal(done.artifacts.length,0);
+      assert.equal(redfox.hits(),before+1);const supplierAfter=supplier.hits();await advance(x.runId);assert.equal(supplier.hits(),supplierAfter);
+      const charges=await sql`SELECT root_run_id,consumed,released,state FROM member_credit_charges WHERE root_run_id IN (${x.runId},${x.call.child_run_id}) ORDER BY root_run_id`;
+      assert.deepEqual(charges.map(c=>[c.consumed,c.released,c.state]),[[0,7,"released"],[3,0,"settled"]]);
     });
     await t.test("account disablement after authentication rejects a new answer but permits accepted answer replay", async () => {
       mode = "question";
@@ -407,8 +459,12 @@ test("assistant receipts, request limits, approvals and stop retain financial bo
       const x = await setup();
       for (let i = 0; i < 4; i++) await advance(x.runId);
       assert.equal((await sessionSnapshot(x.user.id, x.sessionId)).artifacts.length, 0);
-      const [c] = await sql`SELECT state FROM member_credit_charges WHERE root_run_id=${x.runId}`;
-      assert.equal(c.state, "review");
+      const [c] = await sql`SELECT state,consumed,released FROM member_credit_charges WHERE root_run_id=${x.runId}`;
+      assert.equal(c.state, "reserved", "invalid source arguments remain correctable without consuming or releasing the reservation");
+      assert.deepEqual([c.consumed,c.released],[0,0]);
+      const [invalid]=await sql`SELECT state,result FROM assistant_tool_calls WHERE turn_id=${x.turnId} AND name='save_draft'`;
+      assert.equal(invalid.state,"failed");assert.equal(invalid.result.error,"invalid_tool_arguments");
+      assert.equal((await sql`SELECT count(*)::int n FROM assistant_tool_calls WHERE turn_id=${x.turnId} AND child_run_id IS NOT NULL`)[0]!.n,0);
     });
     await t.test(
       "child quote is independent, duplicate approval is atomic, real child result resumes parent",

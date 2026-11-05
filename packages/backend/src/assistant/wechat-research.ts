@@ -4,11 +4,13 @@ import type { Tx } from "../db.ts";
 import { contextTokens } from "./context.ts";
 import { conflict } from "./store.ts";
 import { ResearchApplication } from "./xhs-research.ts";
+import { DraftArgumentsError } from "./tool-arguments.ts";
+import { researchCitations, selectResearchSamples } from "./research-sources.ts";
 const text = z.string().trim().min(1).max(2000);
-const sourceId = z.string().regex(/^search:\d+$/);
-const pattern = z.object({ sampleIds: z.array(sourceId).min(1).max(10), observation: text }).strict();
+const sourceId = z.string().max(200);
+const pattern = z.object({ sampleIds: z.array(sourceId).max(10), observation: text }).strict();
 export const WechatAnalysis = z.object({ activationId: z.string().uuid(), topic: text,
-  samples: z.array(z.object({ sourceId, relevance: text }).strict()).min(1).max(10),
+  samples: z.array(z.object({ sourceId, relevance: text.default("未单独说明与主题的关联") }).strict()).max(10),
   titlePattern: pattern, openingPattern: pattern, structurePattern: pattern, languagePattern: pattern,
   interactionPattern: pattern, keywordPattern: pattern, applicationPlan: text, limitations: z.array(text).max(20),
 }).strict();
@@ -41,22 +43,40 @@ export async function analyzeWechatResearch(tx: Tx, turn: Record<string, any>, c
     JOIN assistant_tool_calls c ON c.child_run_id=z.run_id JOIN operation_runs r ON r.id=z.run_id
     WHERE c.turn_id=${turn.id} AND c.name='search_wechat_articles' AND c.state='completed' AND r.status='completed'
       AND c.input->>'activationId'=${input.activationId} AND z.kind='wechat_hot_article' ORDER BY z.id`;
-  const samples = input.samples.map(sample => {
-    const row = rows.find(row => `search:${row.id}` === sample.sourceId);
-    if (!row || !(row.data.text?.trim() || row.data.title !== "未提供标题")) throw conflict("分析必须来自本激活本回合真实检索的可用公众号样本");
-    // Use the exact persisted tool projection seen by the model, including historical shapes.
-    const shown = row.call_result?.results?.find((result: any) => String(result.id) === String(row.id));
-    if (!shown) throw conflict("分析样本不在已交付的检索结果中");
-    return { ...row.data, text: shown.text ?? "", textTruncated: Boolean(shown.textTruncated), sourceId: sample.sourceId, relevance: sample.relevance, searchCallId: row.call_id,
+  // Preserve the exact summaries actually delivered to the model, including legacy payloads.
+  const shown = new Map<string, any>(rows.flatMap((row) => {
+    const article = row.call_result?.results?.find((result: any) => String(result.id) === String(row.id));
+    return article && (article.text?.trim() || article.title && article.title !== "未提供标题") ? [[`search:${row.id}`, article] as const] : [];
+  }));
+  const fields = { title: "titlePattern", opening: "openingPattern", structure: "structurePattern",
+    language: "languagePattern", interaction: "interactionPattern", keyword: "keywordPattern" } as const;
+  const explicit = new Map(input.samples.map((sample) => [sample.sourceId, sample.relevance]));
+  const references = [...new Set([...explicit.keys(), ...Object.values(fields).flatMap((field) => input[field].sampleIds)])];
+  const selection = selectResearchSamples(references, new Map([...shown].map(([id, article]) => [id, article.url ?? null])));
+  if (!selection.sampleIds.length) throw new DraftArgumentsError(new z.ZodError([
+    { code: "custom", path: ["samples"], message: "没有可用公众号研究依据" },
+  ]), "所列引用没有可用的公众号标题或摘要。只使用本激活已完成查询交付的真实样本；若材料不足，请ask_question说明并暂停，不保存研究稿，不新增检索。", { validSampleIds: [...shown.keys()] });
+  const samples = selection.sampleIds.map((sourceId) => {
+    const row = rows.find((row) => `search:${row.id}` === sourceId)!;
+    const article = shown.get(sourceId)!;
+    return { ...row.data, text: article.text ?? "", textTruncated: Boolean(article.textTruncated), textMeaning: "summary", sourceId,
+      relevance: explicit.get(sourceId) ?? "仅在规律引用中列出，未单独说明与主题的关联", searchCallId: row.call_id,
       startDate: row.input.startDate, endDate: row.input.endDate, keyword: row.input.keyword };
   });
-  const ids = new Set(samples.map(s => s.sourceId));
-  if (ids.size !== samples.length) throw conflict("分析样本不得重复");
-  const patterns = { title: input.titlePattern, opening: input.openingPattern, structure: input.structurePattern,
-    language: input.languagePattern, interaction: input.interactionPattern, keyword: input.keywordPattern };
-  for (const value of Object.values(patterns)) if (value.sampleIds.some(id => !ids.has(id))) throw conflict("规律必须引用本次分析的实际样本");
+  const patterns = Object.fromEntries(Object.entries(fields).map(([key, field]) => {
+    const sampleIds = selection.normalize(input[field].sampleIds);
+    const observation = !sampleIds.length ? "本维度没有可用研究依据，无法确认规律。" :
+      ["opening", "structure"].includes(key) ? "仅有标题和摘要，未读取全文，无法确认全文开头、段落或结尾结构。" :
+      key === "interaction" && sampleIds.every(id => {
+        const sample = samples.find(sample => sample.sourceId === id)!;
+        return [sample.clicksCount,sample.watchCount,sample.likeCount,sample.commentsCount,sample.totalScore].every(value => value == null);
+      }) ? "互动数据未返回，无法确认互动规律或比较排名。" :
+      `${key === "title" ? "基于可见标题：" : "仅基于可见标题和摘要："}${input[field].observation}`;
+    return [key, { sampleIds, observation }];
+  }));
   return { analysisCallId: callId, activationId: input.activationId, topic: input.topic, samples, patterns,
     applicationPlan: input.applicationPlan, limitations: [...new Set(["仅查询标题和摘要，未读取全文；全文开头、段落和结尾现有样本不足以判断", ...input.limitations,
+      ...(references.length > samples.length ? ["研究按可用依据去重；无依据或不属于本激活有效范围的引用未纳入"] : []),
       ...(samples.length < 10 ? [`实际分析${samples.length}条样本`] : []),
       ...(samples.some(s => s.textTruncated) ? ["部分摘要截断"] : []),
       ...(samples.some(s => s.missing?.length || [s.clicksCount,s.watchCount,s.likeCount,s.commentsCount].some(v => v == null)) ? ["部分来源字段未提供，互动缺失为未知"] : []),
@@ -76,14 +96,12 @@ export async function verifyWechatDelivery(tx: Tx, turn: Record<string, any>, ac
     if (version?.source_snapshot.some((s: AssistantSource) => s.research?.analysisCallId === analysis.id)) inherited = true;
   }
   if (!same && !inherited) throw conflict("研究不属于本激活或精确选定旧稿的已验证研究");
-  const ids = new Set(analysis.result.samples.map((s: any) => s.sourceId));
-  const cited = sources.filter(s => content.sources.includes(s.id) && ids.has(s.id));
-  if (cited.length < Math.min(2,ids.size)) throw conflict("公众号稿件需要引用实际分析样本");
+  const citation = researchCitations(analysis.result.samples, content.sources, sources, analysis.id, application.explanation);
   const labels: Record<string,string> = { title:"标题", opening:"开头", structure:"结构", language:"语言", interaction:"互动", keyword:"关键词" };
   const patternText = Object.entries(analysis.result.patterns).map(([key,value]:[string,any]) => `${labels[key]}：${value.observation}`).join("\n");
-  const references = analysis.result.samples.filter((s:any) => cited.some(c => c.id===s.sourceId)).map((s:any) => `- ${s.title}；${s.url ?? "原文链接未提供"}；作者：${s.authorName ?? "未知"}；阅读：${s.clicksCount ?? "未知"}；在看：${s.watchCount ?? "未知"}；点赞：${s.likeCount ?? "未知"}；评论：${s.commentsCount ?? "未知"}`).join("\n");
+  const references = citation.cited.slice(0,2).map((s:any) => `- ${s.title}；${s.url ?? "原文链接未提供"}；作者：${s.authorName ?? "未知"}；阅读：${s.clicksCount ?? "未知"}；在看：${s.watchCount ?? "未知"}；点赞：${s.likeCount ?? "未知"}；评论：${s.commentsCount ?? "未知"}`).join("\n");
   const marker = "\n\n### 公众号爆款规律来源（已验证研究）";
   const scope = `${analysis.result.samples.length}条实际样本；${analysis.result.limitations.join("；")}`.slice(0,1000);
-  return { content: { ...content, body: content.body.split(marker)[0] + marker + `\n${patternText}\n本稿应用：${application.explanation}\n研究范围：${scope}\n${references}`, partial:true, scope },
-    sources: sources.map(s => cited.some(c => c.id===s.id) ? { ...s, research:{ analysisCallId:analysis.id, application:{explanation:application.explanation} } } : s) };
+  return { content: { ...content, sources: citation.sourceIds, body: content.body.split(marker)[0] + marker + `\n${patternText}\n本稿应用：${application.explanation}\n研究范围：${scope}\n以下为本次标题与摘要研究参考，不代表已核实原文或正文中的事实。\n${references}`, partial:true, scope },
+    sources: citation.sources };
 }

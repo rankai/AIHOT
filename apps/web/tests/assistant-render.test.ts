@@ -32,9 +32,11 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
         .pathname,
       composer: new URL("../app/features/assistant/composer.tsx", import.meta.url).pathname,
       quoteCard: new URL("../app/features/assistant/quote-dialog.tsx", import.meta.url).pathname,
+      messageQueue: new URL("../app/features/assistant/message-queue.tsx", import.meta.url).pathname,
       composerControls: new URL("../app/features/assistant/composer-controls.tsx", import.meta.url).pathname,
       fees: new URL("../app/features/assistant/fee-dialog.tsx", import.meta.url).pathname,
       materials: new URL("../app/features/assistant/materials.tsx", import.meta.url).pathname,
+      coverPlan: new URL("../app/features/assistant/cover-plan.tsx", import.meta.url).pathname,
     },
     plugins: [
       {
@@ -72,9 +74,11 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const { ConversationNavigation } = await import(pathToFileURL(join(directory, "directory.mjs")).href);
     const { AssistantComposer } = await import(pathToFileURL(join(directory, "composer.mjs")).href);
     const { TurnQuoteDialog } = await import(pathToFileURL(join(directory, "quoteCard.mjs")).href);
-    const { AssistantComposerControls } = await import(pathToFileURL(join(directory, "composerControls.mjs")).href);
+    const { AssistantMessageQueue } = await import(pathToFileURL(join(directory, "messageQueue.mjs")).href);
+    const { AssistantComposerControls, TaskClarification } = await import(pathToFileURL(join(directory, "composerControls.mjs")).href);
     const { AssistantFeeDialog } = await import(pathToFileURL(join(directory, "fees.mjs")).href);
     const { AssistantAttachmentCards } = await import(pathToFileURL(join(directory, "materials.mjs")).href);
+    const { CoverPlanBody } = await import(pathToFileURL(join(directory, "coverPlan.mjs")).href);
     const me: AccountMe = {
       csrf: "render-user-token",
       user: {
@@ -258,7 +262,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     });
     assert(entry.includes("发送需求"));
     assert(entry.includes("选择技能，当前自动选择技能"));
-    assert(entry.includes("执行前确认费用"));
+    assert(entry.includes("当前方式：每次任务确认"));
     assert(!entry.includes("额度内自动"));
     assert(!entry.includes("确认本次交付内容"), "normal entry does not show task clarification controls");
     assert(entry.includes('multiple=""'));
@@ -278,11 +282,11 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(!answerComposer.includes("下一轮文件卡"));
     const runningEmpty = renderToStaticMarkup(createElement(AssistantComposer, { text: "", running: true, onStop() {}, onChange() {}, onSend() {}, disabled: true, busy: true, stopBusy: false, maxLength: 30000 }));
     assert.equal((runningEmpty.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
-    assert(runningEmpty.includes("<span>处理中</span>"));
+    assert(runningEmpty.includes("<span>停止</span>"));
     assert(!runningEmpty.includes(">停止当前任务</button>"));
     const emptyAnswer = renderToStaticMarkup(createElement(AssistantComposer, { text: "", running: true, answerMode: true, onStop() {}, onChange() {}, onSend() {}, disabled: true, busy: true, stopBusy: false, maxLength: 10000 }));
     assert.equal((emptyAnswer.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
-    assert(emptyAnswer.includes("<span>处理中</span>"));
+    assert(emptyAnswer.includes("<span>停止</span>"));
     assert(!emptyAnswer.includes("提交回答并继续"));
     assert(!runningEmpty.match(/<button[^>]*disabled[^>]*aria-label="停止当前任务"/), "slow enqueue cannot disable the independent stop action");
     const runningDraft = renderToStaticMarkup(createElement(AssistantComposer, { text: "下一条", running: true, onStop() {}, onChange() {}, onSend() {}, disabled: false, busy: false, maxLength: 30000 }));
@@ -295,17 +299,38 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       { actionId: "xiaohongshu-write", skillId: "xiaohongshu-creator", skillName: "小红书创作", label: "笔记创作", available: false, reason: "暂不可用" },
       { actionId: "xiaohongshu-rewrite", skillId: "xiaohongshu-creator", skillName: "小红书创作", label: "改写", available: true, reason: null },
     ] };
-    const grouped = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: groupedProfile, selection: { skillId: "xiaohongshu-creator" }, onSelection() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities, configureFees() {} }));
+    const grouped = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: groupedProfile, selection: { skillId: "xiaohongshu-creator" }, onSelection() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities }));
     assert.equal((grouped.match(/role="menuitemradio"[^>]*>小红书创作<\/button>/g) ?? []).length, 1);
     assert(!grouped.includes('value="xiaohongshu-rewrite"'));
     assert.match(grouped, /role="menuitemradio" aria-checked="true">小红书创作<\/button>/);
     assert(!grouped.includes("<select"));
     assert.equal((grouped.match(/aria-haspopup="menu" aria-expanded="false"/g) ?? []).length, 2);
-    const legacy = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: groupedProfile, selection: { actionId: "xiaohongshu-rewrite" }, onSelection() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities, configureFees() {} }));
+    const hinted = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: groupedProfile, selection: { skillId: "xiaohongshu-creator" }, taskHint: {actionId:"xiaohongshu-rewrite"}, onSelection() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities }));
+    assert(hinted.includes("小红书创作 · 改写"));
+    assert(hinted.includes('aria-haspopup="dialog"'));
+    assert(!hinted.includes("发送后先确认积分"));
+    const clarificationProfile = {...groupedProfile,taskOptions:[
+      {actionId:"xiaohongshu-write",choice:{skillId:"xiaohongshu-creator",moduleId:"M1",delivery:"writing"},label:"写笔记",sizes:[]},
+      {actionId:"xiaohongshu-rewrite",choice:{skillId:"xiaohongshu-creator",moduleId:"M2",delivery:"writing"},label:"改写",sizes:[]},
+      ...["plans-only","image"].map(delivery=>({actionId:"xiaohongshu-cover",choice:{skillId:"xiaohongshu-creator",moduleId:"M4",delivery},label:delivery==="image"?"方案及封面图":"三套方案",sizes:delivery==="image"?["3:4"]:[]}))
+    ]};
+    const clarification = renderToStaticMarkup(createElement(TaskClarification, {profile:clarificationProfile,selection:{skillId:"xiaohongshu-creator"},taskHint:{actionId:"xiaohongshu-cover"},disabled:false,confirm(){}}));
+    const queueProps = { profile: clarificationProfile, pending: false, approve(){}, cancel(){}, resume(){}, requote(){} };
+    const queuedEntry = { id: "queued-cover", position: 1, message: "春季穿搭封面", state: "pending", quote: null, error: null, turnId: null, commandKey: "queue-key", taskSelectionRequired: true, skillSelection: { skillId: "xiaohongshu-creator" } };
+    const queuedClarification = renderToStaticMarkup(createElement(AssistantMessageQueue, { ...queueProps, queue: { paused: false, entries: [{ ...queuedEntry, taskHint: { actionId: "xiaohongshu-cover" } }] } }));
+    assert(queuedClarification.includes("只要三套封面方案，还是选一套后生成图片？"));
+    assert.equal((queuedClarification.match(/type="radio"/g)??[]).length,2);
+    assert(!queuedClarification.includes("写笔记") && !queuedClarification.includes("改写"));
+    const legacyQueue = renderToStaticMarkup(createElement(AssistantMessageQueue, { ...queueProps, queue: { paused: false, entries: [queuedEntry] } }));
+    assert.equal((legacyQueue.match(/type="radio"/g)??[]).length,4, "older queued items without an action still offer their original choices");
+    assert(clarification.includes("只要三套封面方案，还是选一套后生成图片？"));
+    assert(!clarification.includes("写笔记"));
+    assert.equal((clarification.match(/type="radio"/g)??[]).length,2);
+    const legacy = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: groupedProfile, selection: { actionId: "xiaohongshu-rewrite" }, onSelection() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities }));
     assert(legacy.includes("本次：改写")); assert.match(legacy, /role="menuitemradio" aria-checked="true" disabled="">小红书创作 · 本次：改写/);
     const removedSelection = renderToStaticMarkup(createElement(AssistantComposerControls, {
       profile: { ...options.assistants[0], actions: [] }, selection: { actionId: "xiaohongshu-write" }, onSelection() {}, disabled: false,
-      addFiles() {}, capabilities: options.inputCapabilities, configureFees() {},
+      addFiles() {}, capabilities: options.inputCapabilities,
     }));
     assert.match(removedSelection, /role="menuitemradio" aria-checked="true" disabled="">原技能不可用/);
     assert(removedSelection.includes("原技能不可用，请重新选择"));
@@ -313,21 +338,20 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     for (const actionId of ["image-generator", "claude-image-generation"]) {
       const hiddenSelection = renderToStaticMarkup(createElement(AssistantComposerControls, {
         profile: options.assistants[0], selection: { actionId }, onSelection() {}, disabled: false,
-        addFiles() {}, capabilities: options.inputCapabilities, configureFees() {},
+        addFiles() {}, capabilities: options.inputCapabilities,
       }));
       assert.match(hiddenSelection, /role="menuitemradio" aria-checked="true" disabled="">原技能不可用/);
       assert(!hiddenSelection.includes(`value="${actionId}"`));
       assert(!hiddenSelection.includes('role="menuitemradio" aria-checked="true">图片生成'), "old selections are never replaced automatically");
     }
-    for (const remaining of [0, 800, 2147483647]) {
+    {
       const controls = renderToStaticMarkup(createElement(AssistantComposerControls, {
         profile: options.assistants[0], selection: null, onSelection() {}, disabled: false, addFiles() {},
-        capabilities: options.inputCapabilities, configureFees() {},
-        feeAuthorization: { enabled: true, remaining },
+        capabilities: options.inputCapabilities,
       }));
       assert(!controls.includes("assistant-fee-remaining"), "legacy session allowance does not authorize a new task");
-      assert(controls.includes("执行前确认费用"));
-      assert.equal((controls.match(/class="assistant-composer-menu"/g) ?? []).length, 2);
+      assert(controls.includes("当前方式：每次任务确认"));
+      assert.equal((controls.match(/class="assistant-composer-menu"/g) ?? []).length, 3);
       assert(controls.includes('role="menuitemradio" aria-checked="false">公众号创作'), "the real WeChat skill is a menu choice");
       assert(!controls.includes("图片创作 · 帮我完善描述"));
       assert(controls.includes("图片生成"));
@@ -338,7 +362,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     }
     const imageOnlyControls = renderToStaticMarkup(createElement(AssistantComposerControls, {
       profile: options.assistants[0], selection: null, onSelection() {}, disabled: false, addFiles() {},
-      capabilities: options.inputCapabilities, configureFees() {},
+      capabilities: options.inputCapabilities,
       artifacts: [{
         ...session.artifacts[0],
         artifactId: "image-only",
@@ -395,6 +419,13 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(turnQuote.includes(">取消</button>"));
     const taskQuote=render(TurnQuoteDialog,{quote:{...quote,task:{label:'三套方案',scope:'plans-only',items:[{key:'creation',label:'方案创作',units:1,amount:7}]}},message:'私有需求',pending:false,error:null,close(){},confirm(){}});
     assert(taskQuote.includes('预计最多'));assert(taskQuote.includes('按实际执行结算'));assert(!taskQuote.includes('另行报价'));
+    const expiredQuote=render(TurnQuoteDialog,{quote:{...quote,amount:200,available:20,affordable:false,expiresAt:"2020-01-01T00:00:00Z"},message:"私有需求",pending:false,error:null,close(){},confirm(){},requote(){}});
+    assert(expiredQuote.includes("报价已过期，刷新后查看最新费用和余额"));
+    assert(expiredQuote.includes("报价时余额：20"));
+    assert(!expiredQuote.includes("还差")&&!expiredQuote.includes("查看积分"));
+    assert(expiredQuote.includes("重新获取报价"));
+    const insufficient=render(TurnQuoteDialog,{quote:{...quote,amount:200,available:20,affordable:false},message:"私有需求",pending:false,error:null,close(){},confirm(){}});
+    assert(insufficient.includes("还差 180"));
     assert(cards.includes("重试"));
     assert(cards.includes("移除附件 长文件名.md"));
     assert(!cards.includes("private text"), "private preview stays closed until selected");
@@ -480,7 +511,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(question.includes("需要保留哪些事实？"));
     assert(!question.includes("提交回答并继续"), "an empty answer uses the same composer stop control");
     assert.equal((question.match(/aria-label="停止当前任务"/g) ?? []).length, 1);
-    assert(question.includes("<span>处理中</span>"));
+    assert(question.includes("<span>停止</span>"));
     assert(!question.includes(">停止当前任务</button>"), "no separate stop button appears outside the composer");
     assert.equal(
       (question.match(/id="assistant-composer-input"/g) ?? []).length,
@@ -492,7 +523,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const coverArtifact: AssistantArtifact = {
       ...session.artifacts[0]!, artifactId: "cover-plan", version: 3, kind: "xhs-cover-plan",
       content: { ...session.artifacts[0]!.content, title: "封面研究方案", body: "基于真实图片的三种设计方向", titles: [], tags: [], sources: [], scope: "实际观察1/3张封面", coverPlan: {
-        summary: "基于真实图片的三种设计方向",
+        summary: "历史原稿：候选80，去重后194；基于真实图片的三种设计方向",
         schemes: ["大字标题", "留白主体", "分栏对比"].map((name, index) => ({ schemeId: index === 0 ? "keep-plans" : `scheme-${index}`, name, layout: `布局说明${index}`, palette: `配色说明${index}`, prompt: `完整提示词${index}\n请保留文字与主体关系`, aspectRatio: "3:4", sourceIds: ["cover-source"] })),
         evidence: { queryRunId: 1, visionRunId: 2, reportId: 3, candidateCount: 8, selectedCount: 3, downloadedCount: 2, analyzedCount: 2, observedCount: 1, keyword: "AI工具", startDate: "2026-10-01", scope: "样本不足，仅限本次可观察图片", failed: [{ sourceId: "failed-cover", status: "download_failed" }], unreadable: [{ sourceId: "unreadable-cover", uncertainties: ["标题模糊"] }], samples: [{
           sourceId: "cover-source", resultId: 4, title: "真实封面来源", url: "https://example.com/cover-note", coverUrl: "https://supplier.example/private-image", authorName: null, userId: null, publicTime: null, fans: null, collectedCount: null, useShareCount: null, useCommentCount: null, useLikeCount: null, interactiveCount: null, sha256: "sample-sha", fileKey: "covers/sample key", observation: { sourceId: "cover-source", status: "observed", text: "可见大字标题", subject: "工具界面", colors: "黑白蓝", layout: "上文下图", uncertainties: ["小字无法辨认"] },
@@ -507,10 +538,28 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
         imageAvailable: true, imageUnavailableReason: null, feeNotice: "选择本身不代表批准费用，单张图片另行确认报价。",
       } },
     };
+    const sparseCover = structuredClone(coverArtifact);
+    for (const scheme of sparseCover.content.coverPlan!.schemes) { scheme.layout = ""; scheme.palette = ""; }
+    const sparseCoverHtml = renderToStaticMarkup(createElement(CoverPlanBody, { artifact: sparseCover }));
+    const designsHtml = sparseCoverHtml.slice(0, sparseCoverHtml.indexOf("查看研究依据"));
+    assert(!designsHtml.includes(">布局</dt>"));assert(!designsHtml.includes(">配色</dt>"));
+    assert(designsHtml.includes("完整提示词0"));assert(designsHtml.includes("方案 3"));
+    assert.equal(coverArtifact.content.coverPlan!.schemes[0]!.layout, "布局说明0", "rendering absent optional fields does not mutate saved plans");
     const coverHtml = render(AssistantConversation, { data: { me, options, session: { ...session, artifacts: [coverArtifact], turn: coverQuestion } } });
     assert(coverHtml.includes('aria-label="封面方案：封面研究方案"'));
     assert(coverHtml.includes("小红书封面方案"));
-    assert(coverHtml.includes("已分析 2 张 / 已选择 3 张"));
+    assert(coverHtml.includes("参考了 1 张可读封面。部分选定样本未能读取"));
+    assert(coverHtml.includes("纳入候选 8 张 · 选定 3 张 · 已下载 2 张 · 已分析 2 张 · 可读 1 张"));
+    assert(coverHtml.indexOf('aria-label="封面方案 3：') < coverHtml.indexOf("查看研究依据"));
+    assert.match(coverHtml, /<details[^>]*><summary[^>]*>查看研究依据<\/summary>/);
+    assert.equal((coverHtml.match(/历史原稿：候选80，去重后194/g) ?? []).length, 1);
+    assert(coverHtml.indexOf("查看原稿摘要") > coverHtml.indexOf("查看研究依据"));
+    assert(!coverHtml.slice(0, coverHtml.indexOf("查看研究依据")).includes("候选80"));
+    const choicesHtml = coverHtml.slice(coverHtml.indexOf('class="assistant-cover-choices"'), coverHtml.indexOf('</fieldset>'));
+    for (let index = 0; index < 3; index++) {
+      assert(choicesHtml.includes(`布局说明${index}`));
+      assert(choicesHtml.includes(`配色说明${index}`));
+    }
     assert(coverHtml.includes("样本不足，仅限本次可观察图片"));
     assert(coverHtml.includes("选择封面方案"));
     for (let index = 0; index < 3; index++) {
@@ -520,13 +569,13 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     }
     assert.equal((coverHtml.match(/aria-label="封面方案 [123]：/g) ?? []).length, 3);
     assert.equal((coverHtml.match(/class="assistant-cover-choice"/g) ?? []).length, 4);
-    assert(coverHtml.includes("只保留方案"));
+    assert(coverHtml.includes("只保存方案"));
     assert.equal((coverHtml.match(/<input type="radio"/g) ?? []).length, 4);
     const coverChoiceValues = [...coverHtml.matchAll(/<input type="radio"[^>]*value="([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(coverChoiceValues, ["scheme:keep-plans", "scheme:scheme-1", "scheme:scheme-2", "keep-plans"]);
     assert(!coverHtml.match(/<input type="radio"[^>]*checked=""/), "cover choices start unselected");
-    assert.match(coverHtml, /<button[^>]*disabled=""[^>]*>继续<\/button>/);
-    assert(coverHtml.includes("选择一个方案，或保留全部方案。"));
+    assert.match(coverHtml, /<button[^>]*disabled=""[^>]*>按这套生成<\/button>/);
+    assert(coverHtml.includes("选一个封面方案"));
     assert.equal((coverHtml.match(/选好后查看生成费用。/g) ?? []).length, 1);
     assert(!coverHtml.includes(coverQuestion.question.coverPlan.feeNotice));
     const taskCredits={amount:34,consumed:0,released:0,state:"reserved" as const};
@@ -631,7 +680,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     ]) {
       const blockedChoice = render(CurrentTask, { ...taskProps, session: { ...session, turn: coverQuestion }, ...overrides });
       assert.equal((blockedChoice.match(/<input type="radio"[^>]*disabled=""/g) ?? []).length, 4);
-      assert.match(blockedChoice, /<button[^>]*disabled=""[^>]*>继续<\/button>/);
+      assert.match(blockedChoice, /<button[^>]*disabled=""[^>]*>按这套生成<\/button>/);
       assert.match(blockedChoice, /<button(?![^>]*\sdisabled=)[^>]*>查看方案 · 版本 3<\/button>/);
     }
     function renderTask(turn: NonNullable<AssistantSession["turn"]>, artifacts = session.artifacts, readError: string | null = null) {
@@ -639,7 +688,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     }
     const executingTurn = { ...session.turn!, phase: "executing" as const, status: "active", calls: [] };
     const executing = renderTask(executingTurn);
-    assert(executing.includes('class="assistant-execution" open=""'));
+    assert(!executing.includes('class="assistant-execution" open=""'), "execution detail starts collapsed while live status stays visible");
     assert(executing.includes("已收到这次请求"));
     assert(executing.includes("正在处理你的创作需求"));
     assert(executing.includes("assistant-activity-dot"));
@@ -653,7 +702,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       assert(!result.includes('class="assistant-execution" open=""'));
       assert(!result.includes("assistant-activity-dot"));
       assert(!result.includes("稿件已保存"));
-      assert.equal(result.includes("查看会话作品"), !!artifacts.length);
+      assert(!result.includes("查看会话作品"), "delivery links belong to their persisted message slot");
     }
     // Existing artifacts have no relationship to this turn in the public snapshot.
     const oldArtifacts = session.artifacts.map((artifact) => ({ ...artifact, artifactId: "old-draft" }));
@@ -668,7 +717,7 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const running = { ...session.turn!.calls[0]!, state: "running" };
     const interrupted = renderTask({ ...executingTurn, phase: "waiting_child", calls: [running] }, session.artifacts, "读取失败");
     assert(interrupted.includes('data-status-known="false"'));
-    assert(interrupted.includes("状态待确认 · 上次已知：正在等待外部服务返回"));
+    assert(interrupted.includes("连接暂时中断，状态待确认"));
     assert(interrupted.includes("上次已知：已批准，处理中"));
     assert(!interrupted.includes("assistant-activity-dot"));
     const awaitingAnswer = renderTask({ ...executingTurn, phase: "waiting_question", status: "waiting", question: { questionId: "question", text: "还需哪些材料？" } });
@@ -694,7 +743,8 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
       projected.activities[3]!,
     ] });
     const correctingSummary = correcting.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0] ?? "";
-    assert(correctingSummary.includes("正在调用创作接口"));
+    assert(correctingSummary.includes("正在处理"));
+    assert(!correctingSummary.includes("调用创作接口"));
     assert(correctingSummary.includes("assistant-activity-dot"));
     assert(correcting.includes("保存稿件 · 失败"), "the earlier failure remains in the execution history");
     const generated = renderTask({ ...completedTurn, activities: [
@@ -717,6 +767,82 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     const savedImageSummary = savedCoverImage.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0] ?? "";
     assert(savedImageSummary.includes("图片已保存"));
     assert(!savedImageSummary.includes("封面方案已保存"));
+    const deliveredImage: AssistantArtifact = { ...session.artifacts[0]!, artifactId: "delivered-image", version: 1, kind: "image", content: { ...session.artifacts[0]!.content, title: "本次封面图片", fileKey: "generated/current.png", planReference: { artifactId: coverArtifact.artifactId, version: 3, schemeId: "scheme-1" } } };
+    const imageResultCall = { ...session.turn!.calls[0]!, callId: "delivered-call", name: "generate_image", state: "completed", result: { artifactId: deliveredImage.artifactId, version: 1, kind: "image" } };
+    const deliveredTurn = { ...completedTurn, calls: [imageResultCall] };
+    const resultHtml = render(AssistantConversation, { data: { me, options, session: { ...session, artifacts: [coverArtifact, deliveredImage], turn: deliveredTurn } } });
+    assert.equal((resultHtml.match(/data-delivery-artifact-id="delivered-image"/g) ?? []).length, 1);
+    assert(resultHtml.includes('data-delivery-version="1"'));
+    assert(resultHtml.includes('aria-label="下载图片：本次封面图片 · 第 1 版"'));
+    assert(!resultHtml.includes("查看会话作品"));
+    assert(resultHtml.includes("生成的封面 · 本次封面图片"));
+    assert(resultHtml.includes("三套设计方案 · 封面研究方案"));
+    assert.match(resultHtml, /<div hidden=""><article[^>]*aria-label="封面方案：封面研究方案"/);
+    assert.match(resultHtml, /<option value="delivered-image" selected="">/);
+    assert(resultHtml.includes('href="/api/tools/assets/generated%2Fcurrent.png/content" download="本次封面图片 · 第 1 版"'));
+    assert(resultHtml.includes("历史版本"));
+    const genericImage = { ...deliveredImage, content: { ...deliveredImage.content, planReference: undefined } };
+    const genericResult = render(AssistantConversation, { data: { me, options, session: { ...session, artifacts: [genericImage], turn: deliveredTurn, messages: session.messages.filter((message) => message.role === "user") } } });
+    assert(genericResult.includes("图片已生成。"));
+    assert(!genericResult.includes("封面已生成"));
+    for (const result of [null, { artifactId: "missing", version: 1, kind: "image" }, { artifactId: deliveredImage.artifactId, version: 2, kind: "image" }]) {
+      assert(!renderTask({ ...deliveredTurn, calls: [{ ...imageResultCall, result }] }, [coverArtifact, deliveredImage]).includes("· 查看图片"));
+    }
+
+    const coverMessages = [
+      { id: "cover-request", seq: 1, eventSeq: 10, role: "user" as const, turnId: "turn", text: "这次做三套封面" },
+      { id: "cover-question", seq: 2, eventSeq: 40, role: "assistant" as const, turnId: "turn", text: "三套已保存，请选一个方向" },
+      { id: "cover-answer", seq: 3, eventSeq: 60, role: "user" as const, turnId: "turn", text: "我选择第二套方案" },
+    ];
+    const planDelivery = { turnId: "turn", artifactId: coverArtifact.artifactId, version: 3, kind: "xhs-cover-plan" as const, title: coverArtifact.content.title, eventSeq: 30 };
+    const imageDelivery = { turnId: "turn", artifactId: deliveredImage.artifactId, version: 1, kind: "image" as const, title: deliveredImage.content.title, eventSeq: 90 };
+    const plansBeforeChoice = render(AssistantConversation, { data: { me, options, session: { ...session, artifacts: [coverArtifact], messages: coverMessages.slice(0, 2), deliveries: [planDelivery], turn: coverQuestion } } });
+    const coversAfterChoice = render(AssistantConversation, { data: { me, options, session: { ...session, artifacts: [coverArtifact, deliveredImage], messages: coverMessages, deliveries: [planDelivery, imageDelivery], turn: deliveredTurn } } });
+    const planMarker = `data-delivery-artifact-id="${coverArtifact.artifactId}"`;
+    const imageMarker = `data-delivery-artifact-id="${deliveredImage.artifactId}"`;
+    const savedCoverMessages = coversAfterChoice.slice(coversAfterChoice.indexOf('aria-label="已保存的对话"'));
+    assert(savedCoverMessages.includes(planMarker) && savedCoverMessages.includes(imageMarker));
+    assert(plansBeforeChoice.indexOf(planMarker) < plansBeforeChoice.indexOf("三套已保存，请选一个方向"));
+    assert(savedCoverMessages.indexOf(planMarker) < savedCoverMessages.indexOf("三套已保存，请选一个方向"));
+    assert(savedCoverMessages.indexOf("三套已保存，请选一个方向") < savedCoverMessages.indexOf("我选择第二套方案"));
+    assert(savedCoverMessages.indexOf("我选择第二套方案") < savedCoverMessages.indexOf(imageMarker));
+    assert.equal((coversAfterChoice.match(/data-delivery-artifact-id="cover-plan"/g) ?? []).length, 1);
+    assert.equal((coversAfterChoice.match(/data-delivery-artifact-id="delivered-image"/g) ?? []).length, 1);
+
+    const writingDeliveries = [
+      { turnId: "old-turn", artifactId: "draft", version: 1, kind: "xhs-note" as const, title: "第一版标题" },
+      { turnId: "turn", artifactId: "draft", version: 2, kind: "xhs-note" as const, title: "真实稿件" },
+    ];
+    const deliveredWriting = { ...session, deliveries: writingDeliveries, turn: { ...completedTurn, credits: { amount: 200, consumed: 200, released: 0, state: "settled" as const } }, messages: [
+      { id: "old-user", seq: 1, role: "user" as const, text: "第一次需求", turnId: "old-turn" },
+      { id: "old-response", seq: 2, role: "assistant" as const, text: "第一版原话已保留", turnId: "old-turn" },
+      ...session.messages.map((message) => ({ ...message, seq: message.seq + 2 })),
+    ] };
+    const writingHtml = render(AssistantConversation, { data: { me, options, session: deliveredWriting } });
+    assert.equal((writingHtml.match(/data-delivery-artifact-id="draft"/g) ?? []).length, 2);
+    assert(writingHtml.includes('data-delivery-version="1"') && writingHtml.includes('data-delivery-version="2"'));
+    assert(writingHtml.indexOf('data-delivery-version="1"') < writingHtml.lastIndexOf("用户已提交材料"));
+    assert(!writingHtml.includes("作品已更新") && !writingHtml.includes("查看会话作品"));
+    assert(!writingHtml.includes("已保存第 2 版。"), "an existing assistant reply is not repeated");
+    assert(writingHtml.includes("本次用了 200 积分。"));
+    assert(!writingHtml.includes("已释放") && !writingHtml.includes("另有 0 积分"));
+    assert.equal((writingHtml.match(/aria-label="复制需求"/g) ?? []).length, 2);
+    assert.equal((writingHtml.match(/aria-label="复制回复"/g) ?? []).length, 2);
+    const withoutReply = render(AssistantConversation, { data: { me, options, session: { ...deliveredWriting, messages: session.messages.filter((message) => message.role === "user"), deliveries: [writingDeliveries[1]] } } });
+    assert(withoutReply.includes("已保存第 2 版。"));
+    const refund = renderTask({ ...completedTurn, credits: { amount: 580, consumed: 200, released: 380, state: "settled" } });
+    assert(refund.includes("本次用了 200 积分，另有 380 积分已退回可用余额。"));
+    const unfinal = renderTask({ ...completedTurn, phase: "needs_review", status: "needs_review", credits: { amount: 580, consumed: 0, released: 0, state: "review" } });
+    assert(unfinal.includes("580 积分暂时保留，尚未扣除"));
+    assert.equal(unfinal.match(/580/g)?.length, 1);
+    assert(!unfinal.includes("本次用了") && !unfinal.includes("退回可用余额"));
+    const noFile = render(AssistantConversation, { data: { me, options, session: { ...session, deliveries: [{ turnId: "turn", artifactId: genericImage.artifactId, version: 1, kind: "image", title: "无文件" }], artifacts: [{ ...genericImage, content: { ...genericImage.content, fileKey: "" } }], turn: completedTurn } } });
+    assert(!noFile.includes(" download="), "an image without a saved file has no download action");
+    const stoppedWithRunningHistory = renderTask({ ...projected, phase: "stopped", status: "stopped" });
+    assert(!stoppedWithRunningHistory.includes("assistant-activity-dot"));
+    const questionWithRunningHistory = renderTask({ ...projected, phase: "waiting_question", status: "waiting", question: { questionId: "wait", text: "请补充主题" } });
+    assert(!questionWithRunningHistory.includes("assistant-activity-dot"));
+
     const modelActivity: AssistantActivity = { id: "model:single", kind: "model_request", state: "completed" };
     const toolActivity = (kind: AssistantActivity["kind"], index = 0): AssistantActivity => ({
       id: `call:${kind}:${index}`, kind, state: "preparing",

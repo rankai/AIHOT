@@ -11,7 +11,7 @@ import { stopBoss } from "@aihot/backend/jobs/queue";
 import { createSiteUser } from "@aihot/backend/users/accounts";
 import { grantCredits,saveToolPrice } from "@aihot/backend/users/credits";
 import { createSession,sessionSnapshot,snapshotInput,editArtifact } from "@aihot/backend/assistant/sessions";
-import { decideCall } from "@aihot/backend/assistant/tools";
+import { decideCall, prepareCall } from "@aihot/backend/assistant/tools";
 import { skillAdmission } from "@aihot/backend/assistant/skill-policy";
 import { answerTurn } from "@aihot/backend/assistant/controls";
 import { executeOperationStep } from "@aihot/backend/providers/operations/execute";
@@ -94,6 +94,9 @@ test("formal v4 cover workflow reads the full rules, researches real images, sav
   await answerTurn(user.id,x.sessionId,x.turnId,{questionId:question.questionId,expectedRevision:waiting.revision,answer:"选择方案2",choice});
   const after=await sessionSnapshot(user.id,x.sessionId);await answerTurn(user.id,x.sessionId,x.turnId,{questionId:question.questionId,expectedRevision:after.revision,answer:"再次选择方案2",choice});
   await assert.rejects(answerTurn(user.id,x.sessionId,x.turnId,{questionId:question.questionId,expectedRevision:after.revision,answer:"另选方案",choice:{...choice,schemeId:"scheme-1"}}),/不同答案/);
+  const [frozen]=await sql`SELECT * FROM assistant_turns WHERE id=${x.turnId}`,[activation]=await sql`SELECT id FROM assistant_activations WHERE turn_id=${x.turnId}`;
+  await assert.rejects(prepareCall(frozen!,{name:"generate_image",input:{activationId:activation!.id,title:"封面",prompt:"模型误指方案",planReference:{artifactId:artifact.artifactId,version:artifact.version,schemeId:"scheme-1"}}}),(e:any)=>e.result?.error==="invalid_tool_arguments");
+  assert.equal(submits,0);
   const imageCall=await approve(x,"generate_image");assert.equal(imageCall.imageParameters!.prompt,scheme(2,[]).prompt);assert.equal(imageCall.imageParameters!.size,"3:4");
   const done=await reach(x);assert.equal(done.turn!.status,"completed");const imageArtifact=done.artifacts.find(a=>a.kind==="image")!;assert.equal(imageArtifact.content.prompt,scheme(2,[]).prompt);assert.deepEqual(imageArtifact.content.planReference,{artifactId:artifact.artifactId,version:1,schemeId:"scheme-2"});assert(imageArtifact.content.fileKey);
   assert.equal(submits,1);assert.equal(queries,1);assert.equal(visions,1);assert.equal(imageRequests[0].size,"3:4");assert.equal(imageRequests[0].resolution,"1k");assert.equal(imageRequests[0].n,1);assert.deepEqual(imageRequests[0].referenceImages,[]);assert.equal(imageRequests[0].prompt,scheme(2,[]).prompt);

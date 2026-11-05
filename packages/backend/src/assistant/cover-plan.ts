@@ -50,7 +50,7 @@ export function coverPlanInputProjection(row:Record<string,any>){
  if(!evidence||!Number.isSafeInteger(evidence.observedCount)||evidence.observedCount<1||!Array.isArray(evidence.samples)
    ||evidence.samples.length!==evidence.observedCount||!Array.isArray(plan.schemes)||plan.schemes.length!==3
    ||evidence.samples.some(s=>!s.sourceId||!s.sha256||!s.fileKey||s.observation?.status!=="observed"||s.observation.sourceId!==s.sourceId)
-   ||plan.schemes.some(s=>!s.sourceIds?.length||s.sourceIds.some(id=>!evidence.samples.some(sample=>sample.sourceId===id))))throw conflict("选定方案没有有效冻结研究");
+   ||plan.schemes.some(s=>!Array.isArray(s.sourceIds)||s.sourceIds.some(id=>!evidence.samples.some(sample=>sample.sourceId===id))))throw conflict("选定方案没有有效冻结研究");
  return {...row,source_snapshot:[],content:{title:row.content.title,body:row.content.body,coverPlan:{summary:plan.summary,schemes:plan.schemes,researchScope:{selectedCount:plan.evidence.selectedCount,observedCount:plan.evidence.observedCount,keyword:plan.evidence.keyword,startDate:plan.evidence.startDate}}}};
 }
 async function frozenEvidence(tx:Tx,turn:Record<string,any>,activationId:string,input:z.infer<typeof SaveCoverPlan>):Promise<AssistantCoverPlan["evidence"]>{
@@ -79,12 +79,23 @@ async function frozenEvidence(tx:Tx,turn:Record<string,any>,activationId:string,
 }
 export async function persistCoverPlan(tx:Tx,turn:Record<string,any>,activationId:string,input:z.infer<typeof SaveCoverPlan>){
  const evidence=await frozenEvidence(tx,turn,activationId,input),allowed=new Set(evidence.samples.map(s=>s.sourceId));
- if(input.schemes.some(s=>s.sourceIds.some(id=>!allowed.has(id))))throw conflict("方案只能引用实际成功观察的封面来源");
+ const used=new Set<string>(),reserved=new Set(input.schemes.flatMap(s=>s.schemeId&&/^[a-zA-Z0-9_-]{1,40}$/.test(s.schemeId)?[s.schemeId]:[]));
+ const schemes:AssistantCoverPlan["schemes"]=input.schemes.map((scheme,index)=>{
+  let schemeId=scheme.schemeId;
+  if(!schemeId||!/^[a-zA-Z0-9_-]{1,40}$/.test(schemeId)||used.has(schemeId)){
+   schemeId=`scheme-${index+1}`;for(let suffix=2;used.has(schemeId)||reserved.has(schemeId);suffix++)schemeId=`scheme-${index+1}-${suffix}`;
+  }
+  used.add(schemeId);
+  // Empty per-design citations mean only the overall research is a reference; do not
+  // invent a claim that a particular observed image inspired this design.
+  return {...scheme,schemeId,aspectRatio:"3:4",sourceIds:[...new Set(scheme.sourceIds)].filter(id=>allowed.has(id))};
+ });
+ const next=turn.snapshot.taskScope?.delivery==="plans-only"?"plans-only":turn.snapshot.taskScope?.delivery==="image"?"choose":input.next==="plans-only"?"plans-only":"choose";
  await tx`SELECT id FROM assistant_sessions WHERE id=${turn.session_id} FOR UPDATE`;
  const artifactId=input.artifactId??randomUUID();
  const [latest]=await tx`SELECT version,kind FROM assistant_artifact_versions WHERE session_id=${turn.session_id} AND artifact_id=${artifactId} ORDER BY version DESC LIMIT 1`;
  if((latest?.version??0)!==input.baseVersion||input.artifactId&&!latest||latest&&latest.kind!=="xhs-cover-plan")throw conflict("封面方案版本已变化，请刷新");
- const coverPlan:AssistantCoverPlan={summary:input.summary,schemes:input.schemes,evidence},version=input.baseVersion+1;
+ const coverPlan:AssistantCoverPlan={summary:input.summary,schemes,evidence},version=input.baseVersion+1;
  const sources=evidence.samples.map(s=>({id:`search:${s.resultId}`,kind:"research",label:s.title??s.sourceId,url:s.url}));
  const content={title:input.title,body:input.summary,intent:"draft",titles:[],tags:[],sources:sources.map(s=>s.id),partial:evidence.observedCount<evidence.selectedCount,scope:`实际观察${evidence.observedCount}/${evidence.selectedCount}张封面`,coverPlan};
  await tx`INSERT INTO assistant_artifact_versions(session_id,artifact_id,version,base_version,kind,turn_id,activation_id,content,source_snapshot)
@@ -92,7 +103,7 @@ export async function persistCoverPlan(tx:Tx,turn:Record<string,any>,activationI
  await tx`UPDATE assistant_turns SET snapshot=snapshot-'coverChoice' WHERE id=${turn.id}`;
  await event(tx,turn.session_id,"artifact",artifactId);
  const image=await coverPlanImageAvailability(tx,turn,activationId);
- return {artifactId,version,kind:"xhs-cover-plan",next:input.next,choice:{artifactId,version,schemes:input.schemes.map(s=>({schemeId:s.schemeId,name:s.name})),imageAvailable:image.available,imageUnavailableReason:image.reason,feeNotice:turn.snapshot.taskScope?"图片已包含在本次授权上限内；选择后继续制作，不再确认费用":"选择方案不付款；生成单张3:4图片将另行报价并确认"}};
+ return {artifactId,version,kind:"xhs-cover-plan",next,choice:{artifactId,version,schemes:schemes.map(s=>({schemeId:s.schemeId,name:s.name})),imageAvailable:image.available,imageUnavailableReason:image.reason,feeNotice:turn.snapshot.taskScope?"图片已包含在本次授权上限内；选择后继续制作，不再确认费用":"选择方案不付款；生成单张3:4图片将另行报价并确认"}};
 }
 export async function resolveCoverImage(tx:Tx,turn:Record<string,any>,raw:unknown){
  const reference=CoverPlanReference.parse(raw),chosen=turn.snapshot.coverChoice;

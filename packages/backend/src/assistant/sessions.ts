@@ -8,6 +8,7 @@ import { readAssistantAttachment } from "./attachments.ts";
 import { lockAssetInputs } from "../operations/assets.ts";
 import { assertSessionReceiptsReviewed, checkAuto, linkAuto, readFeeAuthorization } from "./fees.ts";
 import { readActivities } from "./activities.ts";
+import { ArtifactVersionQuery, projectArtifactDeliveries, type ArtifactDeliveryRow } from "./delivery-projection.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { sql, type Tx } from "../db.ts";
@@ -51,7 +52,7 @@ export async function assistantOptions(userId: number, raw:unknown={}): Promise<
       welcome: p.welcome,
       available: profileActions(p.id).some(a => availability(a).available),
       reason: profileActions(p.id).some(a => availability(a).available) ? null : profileActions(p.id).map(a => availability(a).reason).find(Boolean) ?? "暂无可用技能",
-      taskOptions: bindings.filter(b=>b.version===currentSkillVersions[b.skillId]).flatMap(b=>b.modules.filter(m=>m.profiles.includes(p.id)&&availability({actionId:m.actionId,skillId:b.skillId} as never).available).flatMap(m=>(m.tasks??[]).map(task=>({choice:{skillId:b.skillId,moduleId:m.moduleId,delivery:task.delivery},label:`${b.name} · ${task.label}`,sizes:task.delivery==='image'?(m.deliveryContract==='xhs-cover-delivery@1'?['3:4']:[...Size.options]):[]})))),
+      taskOptions: bindings.filter(b=>b.version===currentSkillVersions[b.skillId]).flatMap(b=>b.modules.filter(m=>m.profiles.includes(p.id)&&availability({actionId:m.actionId,skillId:b.skillId} as never).available).flatMap(m=>(m.tasks??[]).map(task=>({actionId:m.actionId,choice:{skillId:b.skillId,moduleId:m.moduleId,delivery:task.delivery},label:`${b.name} · ${task.label}`,sizes:task.delivery==='image'?(m.deliveryContract==='xhs-cover-delivery@1'?['3:4']:[...Size.options]):[]})))),
       actions: [
         ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, skillId: a.skillId, skillName: skillNames[a.skillId]!, label: a.label, ...availability(a) })),
       ],
@@ -318,9 +319,22 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     const s = await ownedSession(tx, userId, id);
     const inputs = await tx`SELECT id,text,source FROM assistant_session_inputs WHERE session_id=${id}`;
     const messages =
-      await tx`SELECT id,seq,role,text,turn_id FROM assistant_messages WHERE session_id=${id} ORDER BY seq`;
+      await tx`SELECT m.id,m.seq,m.role,m.text,m.turn_id,e.event_seq FROM assistant_messages m
+        LEFT JOIN (SELECT entity_id,CASE WHEN count(*)=1 THEN min(seq) END AS event_seq
+          FROM assistant_events WHERE session_id=${id} AND type='message' GROUP BY entity_id) e ON e.entity_id=m.id::text
+        WHERE m.session_id=${id} ORDER BY m.seq`;
     const artifacts =
       await tx`SELECT DISTINCT ON (artifact_id) * FROM assistant_artifact_versions WHERE session_id=${id} ORDER BY artifact_id,version DESC`;
+    const deliveries = await tx<ArtifactDeliveryRow[]>`WITH versions AS (
+        SELECT *,count(*) OVER (PARTITION BY artifact_id)::int AS version_count
+        FROM assistant_artifact_versions WHERE session_id=${id}
+      ), artifact_events AS (
+        SELECT entity_id,count(*)::int AS event_count,min(seq) AS event_seq
+        FROM assistant_events WHERE session_id=${id} AND type='artifact' GROUP BY entity_id
+      )
+      SELECT a.turn_id,a.artifact_id,a.version,a.kind,a.content->>'title' AS title,a.version_count,e.event_count,e.event_seq
+      FROM versions a LEFT JOIN artifact_events e ON e.entity_id=a.artifact_id::text WHERE a.turn_id IS NOT NULL
+      ORDER BY a.created_at,a.artifact_id,a.version`;
     const [turn] = s.active_turn_id
       ? await tx`SELECT t.id,t.snapshot,t.parent_operation_run_id,t.phase,t.pending_question,r.status,r.generation,r.step_key,r.step_version FROM assistant_turns t JOIN operation_runs r ON r.id=t.parent_operation_run_id WHERE t.id=${s.active_turn_id}`
       : [];
@@ -343,7 +357,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     const activitySnapshot = turn ? await readActivities(tx, turn as Parameters<typeof readActivities>[1]) : null;
     const queued = await tx`SELECT id,position,input,state,quote,error,prepared_input,submitted_turn_id,command_key FROM (SELECT * FROM assistant_message_queue WHERE session_id=${id} AND (state IN ('pending','quoted') OR id IN (SELECT id FROM assistant_message_queue WHERE session_id=${id} ORDER BY position DESC LIMIT 50))) q ORDER BY position`;
     return {
-      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, taskSelectionRequired: q.prepared_input?.taskSelectionRequired === true, skillSelection:q.input.skillSelection??null, state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
+      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, taskSelectionRequired: q.prepared_input?.taskSelectionRequired === true, skillSelection:q.input.skillSelection??null, ...(q.input.taskHint ? { taskHint: { actionId: q.input.taskHint.actionId } } : {}), state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
       sessionId: s.id,
       initialRequest: !s.active_turn_id && !messages.length ? s.initial_request : null,
       feeAuthorization: await readFeeAuthorization(tx,id),
@@ -357,6 +371,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
       messages: messages.map((m) => ({
         id: m.id,
         seq: m.seq,
+        ...(Number.isSafeInteger(m.event_seq) && m.event_seq > 0 ? { eventSeq: m.event_seq } : {}),
         role: m.role,
         text: m.text,
         turnId: m.turn_id,
@@ -369,12 +384,13 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
         content: a.content,
         sources: a.source_snapshot,
       })),
+      deliveries: projectArtifactDeliveries(deliveries),
       turn: turn
         ? {
             credits: (await tx`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${turn.parent_operation_run_id} AND pricing_snapshot ? 'task'`)[0] ?? null,
             turnId: turn.id,
             runId: turn.parent_operation_run_id,
-            phase: ["stopped", "needs_review", "completed"].includes(turn.status) ? turn.status : turn.phase,
+            phase: ["stopped", "needs_review", "completed", "failed"].includes(turn.status) ? turn.status : turn.phase,
             status: turn.status,
             generation: turn.generation,
             question: turn.pending_question,
@@ -492,12 +508,14 @@ export async function editArtifact(userId: number, id: string, artifactId: strin
   });
 }
 
-export async function artifactVersions(userId: number, id: string, artifactId: string) {
+export async function artifactVersions(userId: number, id: string, artifactId: string, raw: unknown = {}) {
   await ownedSession(sql, userId, id);
   z.string().uuid().parse(artifactId);
+  const { version } = ArtifactVersionQuery.parse(raw);
   return {
-    versions: (
-      await sql`SELECT * FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${artifactId} ORDER BY version DESC LIMIT 100`
+    versions: (version === undefined
+      ? await sql`SELECT * FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${artifactId} ORDER BY version DESC LIMIT 100`
+      : await sql`SELECT * FROM assistant_artifact_versions WHERE session_id=${id} AND artifact_id=${artifactId} AND version=${version}`
     ).map((a) => ({
       artifactId: a.artifact_id,
       version: a.version,
