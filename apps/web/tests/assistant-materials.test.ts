@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { attachmentBatchIssue, attachmentInputIds, attachmentIssue, attachmentSelectionCount, attachmentsReady, patchAttachment, type DraftAttachment } from "../app/features/assistant/materials-data.ts";
-import { makeTurnInput } from "../app/features/assistant/data.ts";
+import { makeTurnInput, type PendingTurn } from "../app/features/assistant/data.ts";
 import { emptyDraft, freezeTurn, rejectedDraft } from "../app/features/assistant/drafts.ts";
 
 const capabilities = { fileTypes: [".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152 };
@@ -35,7 +35,7 @@ test("explicit removal stays empty and frozen skill, files, versions and fee aut
   const attachment: DraftAttachment = { id: "file", name: "facts.md", state: "ready", inputId: "material", assetKey: "private-file" };
   const draft = { ...emptyDraft(), text: "修改旧稿", actionId: "xiaohongshu-rewrite", attachments: [attachment], references: [{ artifactId: "draft", version: 2, title: "旧稿" }] };
   const input = makeTurnInput(draft.text, 5, draft.actionId, draft.references, attachmentInputIds(draft.attachments), "consent-v1");
-  const attempt = { commandKey: "attempt", input, quoteId: "quote", attachments: [{ ...attachment }], hasUnknownResult: false, rejectionCode: "quote_expired" };
+  const attempt: PendingTurn = { commandKey: "attempt", input, quoteId: "quote", attachments: [{ ...attachment }], hasUnknownResult: false, rejectionCode: "quote_expired" };
   const frozen = freezeTurn(draft, attempt);
   assert.equal(frozen.actionId, "xiaohongshu-rewrite", "session preference survives submission");
   assert.deepEqual(makeTurnInput("另一篇", 6, null), { message: "另一篇", expectedRevision: 6, skillSelection: null, inputIds: [], artifactVersions: [] });
