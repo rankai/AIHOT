@@ -36,8 +36,8 @@ export function CurrentTask({
   const turn = session.turn;
   const command = useToolCommand(csrf, `assistant:session:${session.sessionId}`);
   const question = turn?.phase === "waiting_question" ? turn.question : null;
-  const currentActivity = turn?.activities?.find((item) => !["completed", "rejected", "failed", "stopped"].includes(item.state));
-  const working = !readError && (turn?.activities ? currentActivity?.state === "running" : true) && !!turn && ["executing", "waiting_child"].includes(turn.phase);
+  const currentActivity = turn?.activities?.find((item) => item.state === "running");
+  const working = !readError && !!turn && ["executing", "waiting_child"].includes(turn.phase);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     setExpanded(false);
@@ -52,7 +52,7 @@ export function CurrentTask({
     if (!working) return;
     const timer = setTimeout(() => setLongWait(true), 15000);
     return () => clearTimeout(timer);
-  }, [turn?.turnId, turn?.phase, working]);
+  }, [turn?.turnId, working]);
   if (!turn) return null;
   const deliveries = artifactDeliveries(session).filter((item) => item.turnId === turn.turnId);
   // A projected empty result is authoritative. Older snapshots may still prove
@@ -83,21 +83,18 @@ export function CurrentTask({
     });
     await refresh();
   }
-  const phaseSummary = ["stopped", "needs_review", "completed", "failed", "waiting_question", "waiting_approval"].includes(turn.phase);
   const phaseState = readError || ["needs_review", "failed"].includes(turn.phase) ? "attention" :
     turn.phase === "stopped" ? "stopped" : turn.phase === "completed" ? "done" :
-    ["waiting_question", "waiting_approval"].includes(turn.phase) ? "waiting" :
-    currentActivity ? activityIcon(currentActivity.state) : working ? "active" : "waiting";
+    working ? "active" : "waiting";
   const businessLabels: Partial<Record<NonNullable<typeof currentActivity>["kind"], string>> = {
     search_xhs_notes: "正在查找参考笔记", search_xhs_covers: "正在查找参考封面",
     search_wechat_articles: "正在查找参考文章", analyze_xhs_covers: "正在分析参考封面",
     analyze_xhs_research: "正在整理参考笔记", analyze_wechat_research: "正在分析参考文章",
     generate_image: "正在生成图片", save_draft: "正在保存稿件", save_xhs_cover_plan: "正在保存封面方案",
   };
-  const statusLabel = readError ? reading ? "正在读取上次请求" : "连接暂时中断，状态待确认" :
-    question ? question.coverPlan ? "等你选封面方案" : question.text :
-    !phaseSummary && working ? businessLabels[currentActivity?.kind ?? "model_request"] ?? "正在处理" :
-    !phaseSummary ? "正在处理" : summaryLabel;
+  const statusLabel = readError ? reading ? "正在重新连接，已保留上次内容" : "连接暂时中断，已保留上次内容" :
+    question ? question.coverPlan ? "等你选封面方案" : "需要你补充" :
+    working ? businessLabels[currentActivity?.kind ?? "model_request"] ?? "正在处理" : summaryLabel;
   const needsAction = (call: (typeof turn.calls)[number]) =>
     (call.state === "proposed" && turn.phase === "waiting_approval" && turn.status === "waiting") ||
     call.state === "needs_review" ||
@@ -143,9 +140,9 @@ export function CurrentTask({
                 : activityLabel(activity, turn.activities);
               return (
                 <li className="assistant-execution-step" key={activity.id}>
-                  <ExecutionIcon state={readError && activity.state !== "completed" ? "attention" : activity.state === "running" && !working ? turn.phase === "stopped" ? "stopped" : turn.phase === "needs_review" ? "attention" : "waiting" : activityIcon(activity.state)} />
+                  <ExecutionIcon state={readError && activity.state !== "completed" ? "attention" : activity.state === "running" && !working ? turn.phase === "stopped" ? "stopped" : ["needs_review", "failed"].includes(turn.phase) ? "attention" : "waiting" : activityIcon(activity.state)} />
                   <div className="min-w-0 flex-1">
-                    <p>{readError && activity.state !== "completed" ? "上次已知：" : ""}{label}</p>
+                    <p>{readError && activity.state !== "completed" ? "上次已知：" : activity.state === "running" && !working ? "上次记录：" : ""}{label}</p>
                     {call && !needsAction(call) && (
                       <SearchCallCard call={call} session={session} csrf={csrf} refresh={refresh} statusUnknown={!!readError} activityState={activity.state} />
                     )}
@@ -193,9 +190,9 @@ export function CurrentTask({
           </ul>
         </div>
       </details>
-      {working && longWait && canQueue && (
-        <p className="text-[12px] leading-relaxed text-ink-4" aria-live="off">
-          还在处理中，可以继续输入下一条需求。
+      {working && longWait && (
+        <p className="text-[12px] leading-relaxed text-ink-4" role="status" aria-live="polite">
+          还在处理中，无需重新发送。{canQueue && "可以继续输入下一条需求。"}
         </p>
       )}
       <div className="assistant-task-controls">

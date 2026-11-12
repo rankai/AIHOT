@@ -15,8 +15,26 @@ import {
   rejectedQueueDraft,
   rejectedCreateDraft,
   type AssistantDraft,
+  hasUnsavedAssistantContent,
 } from "../app/features/assistant/drafts.ts";
 import type { PendingTurn } from "../app/features/assistant/data.ts";
+
+test("a saved quote alone permits account navigation while new content and unresolved work stay protected", () => {
+  const input = { message: "已保存需求", expectedRevision: 1, skillSelection: null, inputIds: ["material"], artifactVersions: [{ artifactId: "draft", version: 2 }] };
+  const quote = { commandKey: "original", input, quote: { quoteId: "quote", amount: 200, available: 20, affordable: false, expiresAt: "2030-01-01T00:00:00Z", priceId: null, priceVersion: 1, recoveryOfRunId: null } };
+  const saved = { ...emptyDraft(), pendingQuote: quote, recoveryCount: 1 };
+  assert.equal(hasUnsavedAssistantContent(saved), false);
+  for (const edit of [
+    { text: "新草稿" }, { attachments: [{ id: "upload", name: "材料.md", state: "uploading" as const }] },
+    { references: [{ artifactId: "draft", version: 3, title: "新引用" }] }, { inputIds: ["other"] },
+    { answer: { questionId: "question", text: "补答" } },
+    { pendingTurn: { commandKey: "unknown", input, quoteId: "quote", hasUnknownResult: true } },
+    { pendingQueue: { kind: "approve" as const, key: "unknown-queue", entryId: "entry", quoteId: "quote", unknown: true } },
+    { recoveryCount: 2 }, { pendingLifecycle: "archive" as const },
+  ]) assert.equal(hasUnsavedAssistantContent({ ...saved, ...edit }), true);
+  assert.equal(saved.pendingQuote.commandKey, "original");
+  assert.deepEqual(saved.pendingQuote.input, input);
+});
 
 test("confirmed input, quote and artifact version remain frozen while the next draft changes", () => {
   const original: AssistantDraft = {
@@ -82,6 +100,8 @@ test("a rejected frozen submission restores its explicit references without merg
       artifactVersions: [{ artifactId: "draft", version: 2 }],
     },
     quoteId: "expired-quote",
+    hasUnknownResult: false,
+    rejectionCode: "quote_expired",
   };
   const frozen = freezeTurn(emptyDraft(), attempt);
   const restored = rejectedDraft(frozen, () => "旧稿件");
@@ -113,7 +133,7 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
     for(const later of [400,403,409,429]) {
       const current=failedTurn(unknown,unknown.pendingTurn!,later);
       assert.equal(current,unknown);
-      assert.equal(canRejectTurn(current.pendingTurn,later),false);
+      assert.equal(canRejectTurn(current.pendingTurn),false);
       assert.equal(rejectedDraft(current,()=>"unused"),current,"cannot restore an unknown automatic attempt into a new manual quote");
     }
     const next={...unknown,text:"下一轮独立草稿"};
@@ -122,8 +142,9 @@ test("unknown submit remains frozen after a later 4xx and only successful replay
     assert.equal(settled.pendingTurn,undefined);
     assert.equal(settled.text,"下一轮独立草稿");
   }
-  const confirmedRejection=failedTurn(freezeTurn(emptyDraft(),attempt),attempt,409);
-  assert.equal(canRejectTurn(confirmedRejection.pendingTurn,409),true);
+  assert.equal(canRejectTurn(failedTurn(freezeTurn(emptyDraft(),attempt),attempt,409).pendingTurn),false,"HTTP status alone cannot prove a business rejection");
+  const confirmedRejection=freezeTurn(emptyDraft(),{...attempt,hasUnknownResult:false,rejectionCode:"insufficient_credits"});
+  assert.equal(canRejectTurn(confirmedRejection.pendingTurn),true);
   assert.equal(rejectedDraft(confirmedRejection,()=>"").text,attempt.input.message);
   const other={...attempt,commandKey:"different",quoteId:"different"};
   const draft={...emptyDraft(),pendingTurn:other};
@@ -156,8 +177,8 @@ test("cancelled quotes and rejected create, queue and turn restore the explicit 
   const input: PendingTurn["input"] = { message: "春季穿搭封面", expectedRevision: 4, skillSelection: { skillId: "xiaohongshu-creator" },
     taskHint: { actionId: "xiaohongshu-cover" }, taskChoice: { skillId: "xiaohongshu-creator", moduleId: "M4", delivery: "plans-only" },
     inputIds: ["material"], artifactVersions: [{ artifactId: "plan", version: 2 }] };
-  const turn: PendingTurn = { commandKey: "turn", input, quoteId: "old-quote" };
-  const queue = { kind: "enqueue" as const, key: "queue", input };
+  const turn: PendingTurn = { commandKey: "turn", input, quoteId: "old-quote", hasUnknownResult: false, rejectionCode: "quote_changed" };
+  const queue = { kind: "enqueue" as const, key: "queue", input, unknown: false, rejectionCode: "conflict" as const };
   const creation = { creationKey: "create", text: input.message, actionId: null, skillSelection: input.skillSelection, taskHint: input.taskHint, taskChoice: input.taskChoice };
   const frozen = emptyDraft();
   const restore = [
@@ -186,9 +207,9 @@ test("cancelled quotes and rejected create, queue and turn restore the explicit 
       assert.deepEqual(retained.inputIds, next.inputIds);
     }
   }
-  const unknownTurn = { ...frozen, pendingTurn: { ...turn, hasUnknownResult: true } };
+  const unknownTurn = { ...frozen, pendingTurn: { ...turn, hasUnknownResult: true, rejectionCode: undefined } };
   assert.equal(rejectedDraft(unknownTurn, () => ""), unknownTurn);
-  const unknownQueue = { ...frozen, pendingQueue: { ...queue, unknown: true } };
+  const unknownQueue = { ...frozen, pendingQueue: { ...queue, unknown: true, rejectionCode: undefined } };
   assert.equal(rejectedQueueDraft(unknownQueue), unknownQueue);
   const unknownCreate = { ...frozen, pendingCreate: { ...creation, unknown: true } };
   assert.equal(rejectedCreateDraft(unknownCreate), unknownCreate);

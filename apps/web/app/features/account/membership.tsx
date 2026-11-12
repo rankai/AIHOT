@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import type { MembershipPage, MemberPriceCatalog } from '@aihot/contracts/membership';
 import { Button, Input, Select, Textarea } from '../admin/ui';
 import { useAdminAction } from '../admin/action';
@@ -22,7 +23,7 @@ function PaymentHistory({page,admin=false}: {page: MembershipPage; admin?: boole
 }
 export function AccountMembership() {
  const {page,error,refresh} = useMembership('/api/account/membership');
- return <section className="card mb-5 p-5 sm:p-6"><div className="flex justify-between gap-3"><h2 className="font-semibold">月费会员</h2><Button size="sm" onClick={() => void refresh()}>刷新会员</Button></div><AccountNotice error message={error}/>{page && <><MembershipStatus page={page}/><div className="grid gap-3 md:grid-cols-3">{page.plans.map(plan => <div key={plan.id} className="rounded-control border border-line p-4"><h3 className="font-semibold">{plan.name}</h3><p className="my-2 text-2xl">¥{plan.amountFen/100}<span className="text-xs text-ink-3"> / 月</span></p><p>{plan.credits.toLocaleString()} 积分 / 期</p><p className="mt-3 text-xs text-ink-3">联系管理员办理线下付款，确认到账后开通。</p></div>)}</div><p className="mt-4 text-[12.5px] leading-relaxed text-ink-3">每次确认收款延长一个日历月，月末日期自动截断。有效期内仅续原套餐，到期后可换档。已发积分不清零，到期仍可使用；不会自动扣费或续费。</p><PaymentHistory page={page}/></>}</section>;
+ return <section className="card mb-5 p-5 sm:p-6"><div className="flex justify-between gap-3"><h2 className="font-semibold">月费会员</h2><Button size="sm" onClick={() => void refresh()}>刷新会员</Button></div><p className="mt-3 text-[12.5px] leading-relaxed text-ink-3">联系管理员办理，确认到账后积分可用。<Link to="/feedback" target="_blank" rel="noopener noreferrer" className="ml-1 text-accent underline">联系管理员（新页面）</Link>，提交反馈后可回到此页继续。</p><AccountNotice error message={error}/>{page && <><MembershipStatus page={page}/><div className="grid gap-3 md:grid-cols-3">{page.plans.map(plan => <div key={plan.id} className="rounded-control border border-line p-4"><h3 className="font-semibold">{plan.name}</h3><p className="my-2 text-2xl">¥{plan.amountFen/100}<span className="text-xs text-ink-3"> / 月</span></p><p>{plan.credits.toLocaleString()} 积分 / 期</p><p className="mt-3 text-xs text-ink-3">联系管理员办理线下付款，确认到账后开通。</p></div>)}</div><p className="mt-4 text-[12.5px] leading-relaxed text-ink-3">每次确认收款延长一个日历月，月末日期自动截断。有效期内仅续原套餐，到期后可换档。已发积分不清零，到期仍可使用；不会自动扣费或续费。</p><PaymentHistory page={page}/></>}</section>;
 }
 export function AdminMembership({userId,onChanged}: {userId:number;onChanged:()=>Promise<void>}) {
  const {page,error,refresh} = useMembership(`/api/admin/users/${userId}/membership`);

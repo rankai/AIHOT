@@ -20,6 +20,7 @@ export interface SessionPage {
   sessions: SessionRow[];
 }
 export interface TurnInput {
+  confirmationMode?: import("@aihot/contracts/assistant").AssistantConfirmationMode;
   message: string;
   expectedRevision: number;
   skillSelection: AssistantSkillSelection | null;
@@ -33,6 +34,7 @@ export interface PendingTurn {
   commandKey: string;
   /** Once a response is lost, later rejection cannot disprove the original commit. */
   hasUnknownResult?: boolean;
+  rejectionCode?: import("./recovery-store").SubmissionRejection;
   input: TurnInput;
   quoteId: string;
   attachments?: import("./materials-data").DraftAttachment[];

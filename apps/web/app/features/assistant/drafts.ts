@@ -9,6 +9,7 @@ export interface ArtifactReference {
   title: string;
 }
 export interface AssistantDraft {
+  submissionError?: string;
   text: string;
   actionId: string | null;
   skillSelection?: AssistantSkillSelection | null;
@@ -22,7 +23,7 @@ export interface AssistantDraft {
   pendingQueue?: QueueAttempt;
   pendingQuote?: SavedQuote;
   recoveryCount?: number;
-  pendingCreate?: { creationKey?: string; text: string; actionId: string | null; skillSelection?: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice; attachments?: DraftAttachment[]; configureFees?: boolean; unknown?: boolean; rejected?: boolean };
+  pendingCreate?: { confirmationMode?: import("@aihot/contracts/assistant").AssistantConfirmationMode; creationKey?: string; text: string; actionId: string | null; skillSelection?: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: import("@aihot/contracts/assistant").AssistantTaskChoice; attachments?: DraftAttachment[]; configureFees?: boolean; unknown?: boolean; rejected?: boolean };
   configureFees?: boolean;
   pendingLifecycle?: "archive" | "delete";
 }
@@ -32,7 +33,7 @@ export function draftSelection(draft: { skillSelection?: AssistantSkillSelection
   return draft.skillSelection !== undefined ? draft.skillSelection : draft.actionId ? { actionId: draft.actionId } : null;
 }
 export function editDraftText(draft: AssistantDraft, text: string): AssistantDraft {
-  return { ...draft, text, taskChoice: undefined };
+  return { ...draft, text, taskChoice: undefined, submissionError: undefined };
 }
 export function chooseDraftAction(draft: AssistantDraft, action: AssistantAction | null): AssistantDraft {
   return { ...draft, actionId: null, taskChoice: undefined, skillSelection: action ? { skillId: action.skillId } : null,
@@ -58,6 +59,11 @@ export function readDraft(key: string): AssistantDraft {
 export function hasComposerDraft(draft: AssistantDraft): boolean {
   return !!(draft.text.trim() || draft.attachments?.length || draft.references?.length || draft.inputIds?.length);
 }
+/** A persisted quote alone is safe to leave; unresolved attempts and new input still need protection. */
+export function hasUnsavedAssistantContent(draft: AssistantDraft): boolean {
+  return hasComposerDraft(draft) || !!draft.answer?.text || !!draft.pendingTurn || !!draft.pendingQueue || !!draft.pendingCreate ||
+    !!draft.pendingLifecycle || (draft.recoveryCount ?? 0) > (draft.pendingQuote ? 1 : 0);
+}
 /** Return the original input and its explicit scope together, without replacing a newer draft. */
 export function restoreDraftInput(draft: AssistantDraft, input: TurnInput, title: (id: string) => string, attachments: DraftAttachment[] = []): AssistantDraft {
   if (hasComposerDraft(draft)) return draft;
@@ -75,7 +81,7 @@ export function rejectedCreateDraft(draft: AssistantDraft): AssistantDraft {
 }
 export function rejectedQueueDraft(draft: AssistantDraft): AssistantDraft {
   const attempt = draft.pendingQueue;
-  if (!attempt || attempt.unknown) return draft;
+  if (!attempt || !attempt.rejectionCode) return draft;
   const restored = attempt.kind === "enqueue" ? restoreDraftInput(draft, attempt.input, () => "已选稿件") : draft;
   return { ...restored, pendingQueue: undefined };
 }
@@ -109,8 +115,8 @@ export function failedTurn(draft: AssistantDraft, attempt: PendingTurn, status: 
   if (draft.pendingTurn?.commandKey !== attempt.commandKey || attempt.hasUnknownResult || (status !== null && status < 500)) return draft;
   return { ...draft, pendingTurn: { ...attempt, hasUnknownResult: true } };
 }
-export function canRejectTurn(attempt: PendingTurn | undefined, status: number | null): boolean {
-  return !!attempt && !attempt.hasUnknownResult && status !== null && status >= 400 && status < 500;
+export function canRejectTurn(attempt: PendingTurn | undefined): attempt is PendingTurn {
+  return !!attempt?.rejectionCode && attempt.hasUnknownResult === false;
 }
 
 /** Definite rejection can return to editing; a newer draft must stay independent. */
@@ -118,7 +124,7 @@ export function rejectedDraft(
   draft: AssistantDraft,
   title: (id: string) => string,
 ): AssistantDraft {
-  if (!draft.pendingTurn || draft.pendingTurn.hasUnknownResult) return draft;
+  if (!canRejectTurn(draft.pendingTurn)) return draft;
   return { ...restoreDraftInput(draft, draft.pendingTurn.input, title, draft.pendingTurn.attachments), pendingTurn: undefined };
 }
 

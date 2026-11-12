@@ -2,9 +2,9 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from "react-dom";
 
 /** Private to the composer: the caller owns the single open menu. */
-export function ComposerMenu({ open, setOpen, disabled, label, className, trigger, children, onOpen, informational = false }: {
+export function ComposerMenu({ open, setOpen, disabled, label, title = label, className, trigger, children, onOpen, informational = false }: {
   open: boolean; setOpen: (open: boolean) => void; disabled: boolean; label: string;
-  className: string; trigger: ReactNode; children: ReactNode; onOpen?: () => void; informational?: boolean;
+  className: string; trigger: ReactNode; children: ReactNode; onOpen?: () => void; informational?: boolean; title?: string;
 }) {
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
@@ -102,7 +102,7 @@ export function ComposerMenu({ open, setOpen, disabled, label, className, trigge
       if (next !== null) { event.preventDefault(); rows[next]?.focus(); }
     }}>{children}</div>;
   return <div className={className}>
-    <button type="button" ref={button} disabled={disabled} aria-label={label} title={label}
+    <button type="button" ref={button} disabled={disabled} aria-label={label} title={title}
       aria-haspopup={informational ? "dialog" : "menu"} aria-expanded={open} aria-controls={id}
       onClick={() => { if (!open) { last.current = false; onOpen?.(); } setOpen(!open); }}
       onKeyDown={(event) => {

@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
-import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { Link, useLoaderData, useLocation, type LoaderFunctionArgs } from "react-router";
 import type { AccountMe } from "@aihot/contracts/account";
 import { SITE } from "@aihot/industry/site";
 import { Button, buttonClass } from "../components/ui/Controls";
 import { accountGet } from "../lib/account.server";
 import { AccountField, AccountNotice } from "../features/account/fields";
 import { accountErrorMessage, accountRequest } from "../features/account/client";
-import { ACCOUNT_HEADERS } from "../features/account/data";
+import { ACCOUNT_HEADERS, safeAssistantReturn } from "../features/account/data";
 import { AccountCredits } from "../features/account/credits";
 import { usePrivateAccount } from "../features/account/use-private-account";
 
@@ -21,6 +21,8 @@ export default function Account() {
 }
 
 function AccountContent({ initial }: { initial: AccountMe }) {
+  const location = useLocation();
+  const assistantReturn = safeAssistantReturn(new URLSearchParams(location.search).get("assistantReturn"));
   const [me, setMe] = useState(initial);
   const [displayName, setDisplayName] = useState(initial.user.displayName);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -47,7 +49,13 @@ function AccountContent({ initial }: { initial: AccountMe }) {
       </div>
       {notice?.scope === "logout" && <div className="mt-4"><AccountNotice error={notice.error} message={notice.message} /></div>}
     </section>
-    <div className="mb-5"><AccountCredits csrf={me.csrf} /></div>
+    <div id="account-credits" className="mb-5 scroll-mt-5">
+      {assistantReturn && <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-control bg-accent-soft p-4">
+        <p className="text-[13px] text-ink-2">办理后返回原创作，读取余额并明确继续；返回本身不会开始任务。</p>
+        <Link to={assistantReturn} className={buttonClass("primary")}>返回这次创作</Link>
+      </div>}
+      <AccountCredits csrf={me.csrf} />
+    </div>
     <div className="grid gap-5 sm:grid-cols-2">
       <form className="card space-y-5 p-5 sm:p-6" onSubmit={event => { event.preventDefault(); void command("profile", async () => {
         const result = await accountRequest<AccountMe>("PATCH", "/api/account/profile", { displayName: displayName.trim() }, me.csrf);

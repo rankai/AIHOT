@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readRecoveries, saveRecovery, clearRecovery, subscribeRecovery, beginRecoveryAttempt, updateRecoveryFailure, recoveryWriteVersion, replaceRecoveryQuote, type Recovery } from "../app/features/assistant/recovery-store.ts";
-import { readDraft, rememberDraft, emptyDraft, hasComposerDraft } from "../app/features/assistant/drafts.ts";
+import { readRecoveries, saveRecovery, clearRecovery, subscribeRecovery, beginRecoveryAttempt, updateRecoveryFailure, recoveryWriteVersion, replaceRecoveryQuote, restoreRejectedQuote, quoteNeedsRefresh, type Recovery } from "../app/features/assistant/recovery-store.ts";
+import { readDraft, rememberDraft, emptyDraft, hasComposerDraft, canRejectTurn } from "../app/features/assistant/drafts.ts";
 const input = { message: "原需求", expectedRevision: 2, inputIds: ["uploaded"], artifactVersions: [{ artifactId: "draft", version: 1 }], skillSelection: null };
 const quote = { quoteId: "quote", amount: 7, expiresAt: "2099-01-01T00:00:00Z", priceVersion: 1, priceId: null, available: 70, affordable: true, recoveryOfRunId: null };
 test("independent command records survive refresh, interleaved tabs, ordinary edits and exact-key completion", async () => {
@@ -79,12 +79,58 @@ test("independent command records survive refresh, interleaved tabs, ordinary ed
       assert(unknown.kind === "turn" ? unknown.value.hasUnknownResult : unknown.kind === "queue" && unknown.value.unknown);
       clearRecovery(failedScope, fresh);
       const firstDefinite = beginRecoveryAttempt(failedScope, fresh);
-      assert.equal(updateRecoveryFailure(failedScope, fresh, firstDefinite, 403), true);
+      assert.equal(typeof updateRecoveryFailure(failedScope, fresh, firstDefinite, 409, "insufficient_credits"), "string");
       const known = readRecoveries(failedScope)[0]!;
       assert.equal(known.kind === "turn" ? known.value.hasUnknownResult : known.kind === "queue" && known.value.unknown, false, "first unchanged request can record an explicit rejection");
       assert.deepEqual("input" in known.value ? known.value.input : undefined, "input" in fresh.value ? fresh.value.input : undefined, "failure updates retain the frozen input");
     }
     const quoteScope = "late-quote", next = { ...q.value, commandKey: "next-quote", quote: { ...quote, quoteId: "q2" } };
+    const firstTurn = { kind: "turn" as const, value: { commandKey: "first-auto", input: { ...input, confirmationMode: "automatic" as const }, quoteId: quote.quoteId } };
+    const savedFirst = { commandKey: firstTurn.value.commandKey, input: firstTurn.value.input, quote };
+    const startedFirst = beginRecoveryAttempt("first-auto", firstTurn);
+    assert.throws(() => beginRecoveryAttempt("first-auto", { ...firstTurn, value: { ...firstTurn.value, quoteId: "changed-quote" } }), /原提交内容已变化/);
+    const rejectedVersion = updateRecoveryFailure("first-auto", firstTurn, startedFirst, 409, "price_changed");
+    assert.equal(typeof rejectedVersion, "string");
+    const rejected = tab.readRecoveries("first-auto")[0];
+    assert(canRejectTurn(rejected.value), "a reload retains explicit business rejection without an in-memory HTTP error");
+    assert.equal(rejected.value.rejectionCode, "price_changed");
+    assert(restoreRejectedQuote("first-auto", firstTurn.value, rejectedVersion as string, savedFirst));
+    const invalidQuote = tab.readRecoveries("first-auto")[0];
+    assert.equal(invalidQuote.kind, "quote");
+    assert(quoteNeedsRefresh(invalidQuote.value.rejectionCode), "the invalid quote stays disabled after reload");
+    const invalidVersion = recoveryWriteVersion("first-auto", invalidQuote);
+    assert(replaceRecoveryQuote("first-auto", invalidQuote.value, invalidVersion, { ...savedFirst, commandKey: "fresh", quote: { ...quote, quoteId: "fresh" } }));
+    assert.equal(tab.readRecoveries("first-auto")[0].value.rejectionCode, undefined, "only a successful new quote clears the old rejection");
+    const firstStale = beginRecoveryAttempt("first-race", firstTurn);
+    const beforeBalance = updateRecoveryFailure("first-race", firstTurn, firstStale, 409, "insufficient_credits") as string;
+    const anotherTab = tab.beginRecoveryAttempt("first-race", firstTurn);
+    assert.equal(restoreRejectedQuote("first-race", firstTurn.value, beforeBalance, savedFirst), false, "a balance await cannot convert another tab's current attempt");
+    assert.equal(updateRecoveryFailure("first-race", firstTurn, firstStale, 409, "insufficient_credits"), false);
+    tab.updateRecoveryFailure("first-race", firstTurn, anotherTab, null);
+    const unknownRetry = beginRecoveryAttempt("first-race", firstTurn);
+    const lateRejection = updateRecoveryFailure("first-race", firstTurn, unknownRetry, 409, "insufficient_credits") as string;
+    assert(unknownRetry.wasUnknown);
+    assert.equal(restoreRejectedQuote("first-race", firstTurn.value, lateRejection, savedFirst), false);
+    assert.equal(readRecoveries("first-race")[0]!.kind, "turn");
+    assert.equal(canRejectTurn(readDraft("first-race").pendingTurn), false);
+    for (const flag of [undefined, false]) {
+      saveRecovery("legacy-turn", { ...firstTurn, value: { ...firstTurn.value, hasUnknownResult: flag } });
+      assert.equal(canRejectTurn(readDraft("legacy-turn").pendingTurn), false);
+      const legacyStarted = beginRecoveryAttempt("legacy-turn", firstTurn);
+      assert(legacyStarted.wasUnknown, "old false/missing flags are not persisted rejection evidence");
+      updateRecoveryFailure("legacy-turn", firstTurn, legacyStarted, 403, "forbidden");
+      assert.equal(canRejectTurn(readDraft("legacy-turn").pendingTurn), false);
+    }
+    const proxyStarted = beginRecoveryAttempt("proxy-turn", firstTurn);
+    updateRecoveryFailure("proxy-turn", firstTurn, proxyStarted, 429, null);
+    assert.equal(canRejectTurn(readDraft("proxy-turn").pendingTurn), false, "a bare proxy 4xx is uncertain");
+    const quotaStarted = beginRecoveryAttempt("save-failure", firstTurn);
+    const quotaRejected = updateRecoveryFailure("save-failure", firstTurn, quotaStarted, 409, "quote_expired") as string;
+    const normalSet = storage.setItem;
+    storage.setItem = () => { throw new Error("synthetic storage full"); };
+    assert.throws(() => restoreRejectedQuote("save-failure", firstTurn.value, quotaRejected, savedFirst), /storage full/);
+    storage.setItem = normalSet;
+    assert.equal(readRecoveries("save-failure")[0]!.kind, "turn", "a failed quote save leaves its original submission intact");
     saveRecovery(quoteScope, q);
     const quoteVersion = recoveryWriteVersion(quoteScope, q);
     tab.clearRecovery(quoteScope, q);
@@ -99,6 +145,12 @@ test("independent command records survive refresh, interleaved tabs, ordinary ed
     assert.equal(readRecoveries(quoteScope).length, 1);
     for (let i = 0; i < 30; i++) saveRecovery("bounded", { kind: "queue", value: { kind: "approve", key: `k${i}`, entryId: "entry", quoteId: "quote" } });
     assert.throws(() => saveRecovery("bounded", { kind: "queue", value: { kind: "approve", key: "overflow", entryId: "entry", quoteId: "quote" } }));
+    const automatic = { ...input, confirmationMode: "automatic" as const };
+    saveRecovery("automatic-turn", { kind: "turn", value: { commandKey: "auto-command", quoteId: quote.quoteId, input: automatic } });
+    const automaticRecord = readRecoveries("automatic-turn")[0]!;
+    assert.equal(automaticRecord.kind, "turn");
+    if (automaticRecord.kind === "turn") assert.deepEqual(automaticRecord.value.input, automatic);
+    assert.throws(() => saveRecovery("invalid-mode", { kind: "turn", value: { commandKey: "bad-mode", quoteId: quote.quoteId, input: { ...input, confirmationMode: "anything" } } } as unknown as Recovery));
     assert.throws(() => saveRecovery(scope, { kind: "quote", value: { ...q.value, input: { ...input, secret: "forbidden" } } } as Recovery));
   } finally {
     if (oldWindow) Object.defineProperty(globalThis, "window", oldWindow); else Reflect.deleteProperty(globalThis, "window");

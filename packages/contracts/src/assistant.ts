@@ -166,12 +166,14 @@ export interface AssistantTurn {
 }
 export interface AssistantQueuedMessage {
   taskSelectionRequired?: boolean; skillSelection?: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null;
+  confirmationMode?: AssistantConfirmationMode;
   id: string; position: number; message: string; state: "pending" | "quoted" | "submitted" | "cancelled";
   quote: AssistantTurnQuote | null; error: string | null; turnId: string | null; commandKey: string;
 }
+export type AssistantConfirmationMode = "automatic" | "manual";
 export interface AssistantInitialRequest {
   commandKey: string;
-  input: { message: string; expectedRevision: number; skillSelection: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: AssistantTaskChoice; inputIds: string[]; artifactVersions: { artifactId: string; version: number }[] };
+  input: { message: string; expectedRevision: number; confirmationMode?: AssistantConfirmationMode; skillSelection: AssistantSkillSelection | null; taskHint?: AssistantTaskHint | null; taskChoice?: AssistantTaskChoice; inputIds: string[]; artifactVersions: { artifactId: string; version: number }[] };
   quote: AssistantTurnQuote | null;
   /** The session exists; correct this saved request before requesting a quote. */
   clarification?: { code: "assistant_research_date_required"; message: string };

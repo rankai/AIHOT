@@ -1,7 +1,12 @@
 import type { AssistantTurnQuote } from "@aihot/contracts/assistant";
 import type { PendingTurn, TurnInput } from "./data";
-export type QueueAttempt = { key: string; kind: "enqueue"; input: TurnInput; unknown?: boolean } | { key: string; kind: "approve"; entryId: string; quoteId: string; unknown?: boolean };
-export type SavedQuote = { commandKey: string; input: TurnInput; quote: AssistantTurnQuote };
+const rejectionCodes = ["insufficient_credits", "quote_changed", "price_changed", "quote_expired", "auto_confirmation_required", "assistant_task_selection_required", "conflict", "forbidden", "invalid_request", "not_found", "skill_unavailable", "quote_required", "quote_used", "assistant_request_unresolved"] as const;
+export type SubmissionRejection = typeof rejectionCodes[number];
+export const isSubmissionRejection = (value: unknown): value is SubmissionRejection => rejectionCodes.includes(value as SubmissionRejection);
+const rejectionCode = isSubmissionRejection;
+export const quoteNeedsRefresh = (code?: SubmissionRejection) => code !== undefined;
+export type QueueAttempt = ({ key: string; kind: "enqueue"; input: TurnInput; unknown?: boolean } | { key: string; kind: "approve"; entryId: string; quoteId: string; unknown?: boolean }) & { rejectionCode?: SubmissionRejection };
+export type SavedQuote = { commandKey: string; input: TurnInput; quote: AssistantTurnQuote; rejectionCode?: SubmissionRejection; balanceUnavailable?: boolean };
 export type Recovery = { kind: "turn"; value: PendingTurn } | { kind: "queue"; value: QueueAttempt } | { kind: "quote"; value: SavedQuote };
 type Row = Recovery & { savedAt: number; writeVersion?: string };
 const cache = new Map<string, { raw: string; row: Row }>();
@@ -12,7 +17,7 @@ const string = (v: unknown, max = 200) => typeof v === "string" && v.length > 0 
 const object = (v: any) => v && typeof v === "object" && !Array.isArray(v);
 const keys = (v: any, allowed: string[]) => object(v) && Object.keys(v).every(k => allowed.includes(k));
 function input(v: any): boolean {
-  return keys(v, ["message", "expectedRevision", "skillSelection", "inputIds", "artifactVersions", "autoAuthorizationId", "taskHint", "taskChoice"]) && string(v.message, 30000) && Number.isInteger(v.expectedRevision) && v.expectedRevision >= 0 &&
+  return keys(v, ["message", "expectedRevision", "skillSelection", "inputIds", "artifactVersions", "autoAuthorizationId", "taskHint", "taskChoice", "confirmationMode"]) && (v.confirmationMode === undefined || ["automatic", "manual"].includes(v.confirmationMode)) && string(v.message, 30000) && Number.isInteger(v.expectedRevision) && v.expectedRevision >= 0 &&
     (v.skillSelection === null || keys(v.skillSelection, ["actionId"]) && string(v.skillSelection.actionId) || keys(v.skillSelection, ["skillId"]) && string(v.skillSelection.skillId)) &&
     (v.taskChoice === undefined || keys(v.taskChoice,["skillId","moduleId","delivery","size"]) && string(v.taskChoice.skillId) && string(v.taskChoice.moduleId) && ["writing","plans-only","image"].includes(v.taskChoice.delivery) && (v.taskChoice.size===undefined || string(v.taskChoice.size))) &&
     (v.taskHint === undefined || v.taskHint === null || keys(v.taskHint, ["actionId"]) && string(v.taskHint.actionId)) &&
@@ -23,10 +28,10 @@ function input(v: any): boolean {
 function valid(row: any): row is Row {
   if (!keys(row, ["kind", "value", "savedAt", "writeVersion"]) || !Number.isFinite(row.savedAt) || row.writeVersion !== undefined && !string(row.writeVersion)) return false;
   const v = row.value;
-  if (row.kind === "turn") return keys(v, ["commandKey", "input", "quoteId", "hasUnknownResult"]) && string(v.commandKey) && input(v.input) && string(v.quoteId) && (v.hasUnknownResult === undefined || typeof v.hasUnknownResult === "boolean");
-  if (row.kind === "queue") return keys(v, ["key", "kind", "input", "entryId", "quoteId", "unknown"]) && string(v.key) && (v.unknown === undefined || typeof v.unknown === "boolean") && (v.kind === "enqueue" ? input(v.input) && v.entryId === undefined && v.quoteId === undefined : v.kind === "approve" && string(v.entryId) && string(v.quoteId) && v.input === undefined);
+  if (row.kind === "turn") return keys(v, ["commandKey", "input", "quoteId", "hasUnknownResult", "rejectionCode"]) && string(v.commandKey) && input(v.input) && string(v.quoteId) && (v.hasUnknownResult === undefined || typeof v.hasUnknownResult === "boolean") && (v.rejectionCode === undefined || rejectionCode(v.rejectionCode) && v.hasUnknownResult === false);
+  if (row.kind === "queue") return keys(v, ["key", "kind", "input", "entryId", "quoteId", "unknown", "rejectionCode"]) && string(v.key) && (v.unknown === undefined || typeof v.unknown === "boolean") && (v.rejectionCode === undefined || rejectionCode(v.rejectionCode) && v.unknown === false) && (v.kind === "enqueue" ? input(v.input) && v.entryId === undefined && v.quoteId === undefined : v.kind === "approve" && string(v.entryId) && string(v.quoteId) && v.input === undefined);
   const q = v?.quote;
-  return row.kind === "quote" && keys(v, ["commandKey", "input", "quote"]) && string(v.commandKey) && input(v.input) && keys(q, ["quoteId", "amount", "expiresAt", "priceVersion", "priceId", "available", "affordable", "recoveryOfRunId", "additionalFeeKinds", "task"]) && string(q.quoteId) && typeof q.affordable === "boolean" && string(q.expiresAt) && Number.isFinite(Date.parse(q.expiresAt)) && [q.amount, q.available, q.priceVersion].every(n => Number.isInteger(n) && n >= 0) && (q.priceId === null || string(q.priceId)) && (q.recoveryOfRunId === null || Number.isInteger(q.recoveryOfRunId)) &&
+  return row.kind === "quote" && keys(v, ["commandKey", "input", "quote", "rejectionCode", "balanceUnavailable"]) && (v.balanceUnavailable === undefined || typeof v.balanceUnavailable === "boolean") && (v.rejectionCode === undefined || rejectionCode(v.rejectionCode)) && string(v.commandKey) && input(v.input) && keys(q, ["quoteId", "amount", "expiresAt", "priceVersion", "priceId", "available", "affordable", "recoveryOfRunId", "additionalFeeKinds", "task"]) && string(q.quoteId) && typeof q.affordable === "boolean" && string(q.expiresAt) && Number.isFinite(Date.parse(q.expiresAt)) && [q.amount, q.available, q.priceVersion].every(n => Number.isInteger(n) && n >= 0) && (q.priceId === null || string(q.priceId)) && (q.recoveryOfRunId === null || Number.isInteger(q.recoveryOfRunId)) &&
     (q.additionalFeeKinds === undefined || Array.isArray(q.additionalFeeKinds) && q.additionalFeeKinds.length <= 3 && new Set(q.additionalFeeKinds).size === q.additionalFeeKinds.length && q.additionalFeeKinds.every((kind: unknown) => kind === "search" || kind === "image" || kind === "vision"));
 }
 export function readRecoveries(scope: string): Row[] {
@@ -58,7 +63,7 @@ export function readRecoveries(scope: string): Row[] {
 function notify(scope: string) { subscribers.get(scope)?.forEach(fn => fn()); }
 export function saveRecovery(scope: string, record: Recovery) {
   const key = prefix(scope) + recoveryId(record);
-  const value = record.kind === "turn" ? { commandKey: record.value.commandKey, input: record.value.input, quoteId: record.value.quoteId, hasUnknownResult: record.value.hasUnknownResult } : record.value;
+  const value = record.kind === "turn" ? { commandKey: record.value.commandKey, input: record.value.input, quoteId: record.value.quoteId, hasUnknownResult: record.value.hasUnknownResult, ...(record.value.rejectionCode ? { rejectionCode: record.value.rejectionCode } : {}) } : record.value;
   const prior = readRecoveries(scope).find(row => recoveryId(row) === recoveryId(record));
   const row = { kind: record.kind, value, savedAt: prior?.savedAt ?? Date.now(), writeVersion: crypto.randomUUID() } as Row;
   if (!valid(row) || !prior && readRecoveries(scope).length >= 30) throw new Error("待核对记录已满或内容无效，请先核对原提交。");
@@ -82,16 +87,28 @@ export function subscribeRecovery(scope: string, callback: () => void) {
 /** Each async response may update only the record version that started its request. */
 export function beginRecoveryAttempt(scope: string, record: Exclude<Recovery, { kind: "quote" }>) {
   const current = readRecoveries(scope).find(row => recoveryId(row) === recoveryId(record));
+  if (current && current.kind !== "quote") {
+    const identity = (value: Exclude<Recovery, { kind: "quote" }>) => value.kind === "turn" ? [value.kind, value.value.quoteId, value.value.input] : value.value.kind === "enqueue" ? [value.kind, value.value.kind, value.value.input] : [value.kind, value.value.kind, value.value.entryId, value.value.quoteId];
+    if (JSON.stringify(identity(current)) !== JSON.stringify(identity(record))) throw new Error("原提交内容已变化，请刷新后继续原请求。");
+  }
   const frozen = current && current.kind !== "quote" ? current : record;
-  const wasUnknown = frozen.kind === "turn" ? !!frozen.value.hasUnknownResult : !!frozen.value.unknown;
-  const pending: Recovery = frozen.kind === "turn" ? { kind: "turn", value: { ...frozen.value, hasUnknownResult: true } } : { kind: "queue", value: { ...frozen.value, unknown: true } };
+  // A historical false/missing flag is not evidence that a request was rejected.
+  const wasUnknown = current ? !frozen.value.rejectionCode : frozen.kind === "turn" ? !!frozen.value.hasUnknownResult : !!frozen.value.unknown;
+  const pending: Recovery = frozen.kind === "turn" ? { kind: "turn", value: { ...frozen.value, hasUnknownResult: true, rejectionCode: undefined } } : { kind: "queue", value: { ...frozen.value, unknown: true, rejectionCode: undefined } };
   return { writeVersion: saveRecovery(scope, pending), wasUnknown };
 }
-export function updateRecoveryFailure(scope: string, record: Exclude<Recovery, { kind: "quote" }>, started: { writeVersion: string; wasUnknown: boolean }, status: number | null) {
+export function updateRecoveryFailure(scope: string, record: Exclude<Recovery, { kind: "quote" }>, started: { writeVersion: string; wasUnknown: boolean }, status: number | null, code?: string | null) {
   const current = readRecoveries(scope).find(row => recoveryId(row) === recoveryId(record));
   if (!current || current.kind === "quote" || current.writeVersion !== started.writeVersion) return false;
-  const unknown = started.wasUnknown || status === null || status >= 500;
-  saveRecovery(scope, current.kind === "turn" ? { kind: "turn", value: { ...current.value, hasUnknownResult: unknown } } : { kind: "queue", value: { ...current.value, unknown } });
+  const rejected = !started.wasUnknown && status !== null && status >= 400 && status < 500 && rejectionCode(code) ? code : undefined;
+  return saveRecovery(scope, current.kind === "turn" ? { kind: "turn", value: { ...current.value, hasUnknownResult: !rejected, rejectionCode: rejected } } : { kind: "queue", value: { ...current.value, unknown: !rejected, rejectionCode: rejected } });
+}
+/** Save the rejected quote before removing its submission, and recheck after any caller await. */
+export function restoreRejectedQuote(scope: string, attempt: PendingTurn, writeVersion: string, saved: SavedQuote) {
+  const current = readRecoveries(scope).find(row => row.kind === "turn" && row.value.commandKey === attempt.commandKey);
+  if (!current || current.kind !== "turn" || current.writeVersion !== writeVersion || !current.value.rejectionCode || current.value.hasUnknownResult !== false || current.value.quoteId !== saved.quote.quoteId || saved.commandKey !== attempt.commandKey || JSON.stringify(current.value.input) !== JSON.stringify(saved.input)) return false;
+  saveRecovery(scope, { kind: "quote", value: { ...saved, rejectionCode: current.value.rejectionCode } });
+  clearRecovery(scope, current);
   return true;
 }
 export function recoveryWriteVersion(scope: string, record: Recovery) {
