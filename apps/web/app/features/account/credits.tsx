@@ -66,7 +66,7 @@ export function CreditLedger({ entries, admin = false }: { entries: CreditEntry[
 }
 
 export function AccountCredits({ csrf }: { csrf: string }) {
-  return <><AccountMembership key={`membership:${csrf}`}/><AccountCreditPanel key={csrf} /></>;
+  return <><AccountCreditPanel key={csrf} /><AccountMembership key={`membership:${csrf}`}/></>;
 }
 
 function AccountCreditPanel() {
@@ -74,7 +74,7 @@ function AccountCreditPanel() {
   return <section className="card mb-5 p-5 sm:p-6">
     <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-[16px] font-semibold text-ink">我的积分</h2><Button size="sm" disabled={loading} onClick={() => void refresh()}>刷新</Button></div>
     {error && <AccountNotice error message={error} />}
-    {page ? <><CreditBalanceSummary page={page} /><p className="mb-4 mt-3 text-[12.5px] leading-relaxed text-ink-3">积分仅属于当前账号。会员共享服务调用容量，个人积分充足仍可能等待服务预算恢复。工具提交时占用积分，任务完成后结算。可通过上方月费套餐联系管理员办理线下付款补充积分。</p><CreditLedger entries={page.entries} />
+    {page ? <><CreditBalanceSummary page={page} /><p className="mb-4 mt-3 text-[12.5px] leading-relaxed text-ink-3">任务开始时预留积分，结束后按实际费用结算。需要补充积分可联系管理员办理。<Link to="/feedback" target="_blank" rel="noopener noreferrer" className="ml-1 text-accent underline">联系管理员（新页面）</Link></p><CreditLedger entries={page.entries} />
       {page.nextCursor && <div className="mt-4 text-center"><Button size="sm" disabled={loading} onClick={() => void loadMore()}>{loading ? "正在加载…" : "查看更早记录"}</Button></div>}</> : loading && <p role="status" className="text-[13px] text-ink-3">正在读取积分…</p>}
   </section>;
 }

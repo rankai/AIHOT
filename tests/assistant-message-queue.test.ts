@@ -1,7 +1,7 @@
 import { controlTurn, archiveSession } from "@aihot/backend/assistant/controls";
 import { feeSettings, setFeeAuthorization } from "@aihot/backend/assistant/fees";
 import { saveArtifact } from "@aihot/backend/assistant/store";
-import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag } from "./setup.ts";
+import { allowTestBudgetScope, assertConfiguredTestDatabase, stub, tag, gate } from "./setup.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -75,13 +75,133 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
     assert.equal(charges.length, 2); assert(charges.every(c => c.amount === 7 && c.state === "settled"));
     assert.equal(supplier.hits(), 4);
     let number = 0;
-    const fixture = async () => {
+    const fixture = async (credits = 200) => {
       const u = await createSiteUser({ username: `queue_case_${unique}_${++number}`, displayName: "Queue case", password: "synthetic-password" }, "test");
-      await grantCredits(u.id, { amount: 200, reason: "Synthetic queue case" }, "test", randomUUID());
+      if(credits)await grantCredits(u.id, { amount: credits, reason: "Synthetic queue case" }, "test", randomUUID());
       const { sessionId: id } = await createSession(u.id, { assistantId: "creative" }, randomUUID());
       return { u, id, input: { ...raw, expectedRevision: 1, message: "队列需求" } };
     };
     const chargeCount = async (id: number) => (await sql`SELECT count(*)::int n FROM member_credit_charges WHERE user_id=${id}`)[0]!.n;
+    await t.test("automatic task fees preserve the sent mode and reserve once; manual and insufficient entries never auto-start", async () => {
+      const automatic = await fixture(), key = randomUUID();
+      const input = { ...automatic.input, confirmationMode: "automatic" as const };
+      const queued = await enqueueMessage(automatic.u.id, automatic.id, input, key);
+      let state = await sessionSnapshot(automatic.u.id, automatic.id);
+      assert.equal(state.queue!.entries[0]!.state, "submitted");
+      assert.equal(state.queue!.entries[0]!.confirmationMode, "automatic");
+      assert.equal(state.turn!.credits!.amount, 7);
+      assert.equal((await enqueueMessage(automatic.u.id, automatic.id, input, key)).entryId, queued.entryId);
+      await Promise.all([advanceMessageQueue(automatic.u.id, automatic.id), recoverMessageQueues()]);
+      assert.equal(await chargeCount(automatic.u.id), 1);
+      const manual = await fixture();
+      await enqueueMessage(manual.u.id, manual.id, { ...manual.input, confirmationMode: "manual" }, randomUUID());
+      await recoverMessageQueues();
+      assert.equal((await sessionSnapshot(manual.u.id, manual.id)).queue!.entries[0]!.state, "quoted");
+      assert.equal(await chargeCount(manual.u.id), 0);
+      const empty = await fixture(0), calls = supplier.hits();
+      await enqueueMessage(empty.u.id, empty.id, { ...empty.input, confirmationMode: "automatic" }, randomUUID());
+      state = await sessionSnapshot(empty.u.id, empty.id);
+      assert.equal(state.turn, null);
+      assert.equal(state.queue!.entries[0]!.state, "quoted");
+      assert.match(state.queue!.entries[0]!.error!, /需要 7 积分，当前可用 0 积分，还差 7 积分/);
+      await recoverMessageQueues(); await advanceMessageQueue(empty.u.id, empty.id);
+      assert.equal(await chargeCount(empty.u.id), 0);
+      assert.equal(supplier.hits(), calls);
+    });
+    await t.test("explicit automatic reprice continues once; manual refresh and stopped queue stay explicit", async () => {
+      for (const mode of ["automatic", "manual"] as const) {
+        const x = await fixture(0);
+        const entry = await enqueueMessage(x.u.id, x.id, { ...x.input, confirmationMode: mode }, randomUUID());
+        await grantCredits(x.u.id, { amount: 100, reason: "Synthetic recovery top-up" }, "test", randomUUID());
+        await recoverMessageQueues();
+        await sessionSnapshot(x.u.id, x.id);
+        assert.equal(await chargeCount(x.u.id), 0, "credit reads and top-up never authorize a failed queue");
+        const refreshed = await refreshQueuedQuote(x.u.id, x.id, entry.entryId);
+        let state = await sessionSnapshot(x.u.id, x.id);
+        assert.equal(state.queue!.entries[0]!.error, null);
+        assert.equal(state.queue!.entries[0]!.state, mode === "automatic" ? "submitted" : "quoted");
+        assert.equal(await chargeCount(x.u.id), mode === "automatic" ? 1 : 0);
+        if (mode === "manual") await approveQueuedMessage(x.u.id, x.id, entry.entryId, { quoteId: refreshed.quote.quoteId });
+        state = await sessionSnapshot(x.u.id, x.id);
+        const run = state.turn!;
+        await approveQueuedMessage(x.u.id, x.id, entry.entryId, { quoteId: refreshed.quote.quoteId });
+        assert.equal(await chargeCount(x.u.id), 1);
+        await controlTurn(x.u.id, x.id, run.turnId, "stop", { generation: run.generation });
+      }
+      const paused = await fixture();
+      await sql`UPDATE assistant_sessions SET queue_paused=true WHERE id=${paused.id}`;
+      const entry = await enqueueMessage(paused.u.id, paused.id, { ...paused.input, confirmationMode: "automatic" }, randomUUID());
+      await assert.rejects(refreshQueuedQuote(paused.u.id, paused.id, entry.entryId), /不能报价/);
+      assert.equal(await chargeCount(paused.u.id), 0);
+      assert((await sessionSnapshot(paused.u.id, paused.id)).queue!.paused);
+    });
+    await t.test("two prepared quotes return in reverse order: first valid write wins without stale events", async () => {
+      const x = await fixture(), queued = await enqueueMessage(x.u.id, x.id, x.input, randomUUID());
+      const original = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!.quote!;
+      const barrier = holdTransactionOutcome(value => !!value?.quoteId && value.quoteId !== original.quoteId);
+      try {
+        const late = refreshQueuedQuote(x.u.id, x.id, queued.entryId);
+        await barrier.reached.promise;
+        const winner = await refreshQueuedQuote(x.u.id, x.id, queued.entryId);
+        const beforeLate = await sessionSnapshot(x.u.id, x.id);
+        barrier.release.open();
+        assert.equal((await late).quote.quoteId, winner.quote.quoteId, "late preparation reads back the accepted quote");
+        const afterLate = await sessionSnapshot(x.u.id, x.id);
+        assert.deepEqual(afterLate.queue, beforeLate.queue);
+        assert.equal(afterLate.eventSeq, beforeLate.eventSeq, "discarded preparations emit no queue event");
+        assert.equal(await chargeCount(x.u.id), 0);
+      } finally { barrier.release.open(); barrier.restore(); }
+    });
+    await t.test("late preparation cannot replace a different choice, revive cancellation or change a submitted entry", async () => {
+      for (const change of ["choice", "cancel", "submit"] as const) {
+        const x = await fixture(), queued = await enqueueMessage(x.u.id, x.id, x.input, randomUUID());
+        const initial = (await sessionSnapshot(x.u.id, x.id)).queue!.entries[0]!.quote!;
+        const barrier = holdTransactionOutcome(value => !!value?.quoteId && value.quoteId !== initial.quoteId);
+        try {
+          const late = refreshQueuedQuote(x.u.id, x.id, queued.entryId);
+          const rejected = assert.rejects(late, change === "choice" ? /选择已变化/ : /不能报价/);
+          await barrier.reached.promise;
+          if (change === "choice") await refreshQueuedQuote(x.u.id, x.id, queued.entryId, { taskChoice: { skillId: "general-writing", moduleId: "write", delivery: "writing" } });
+          if (change === "cancel") await cancelQueuedMessage(x.u.id, x.id, queued.entryId);
+          if (change === "submit") await approveQueuedMessage(x.u.id, x.id, queued.entryId, { quoteId: initial.quoteId });
+          const current = await sessionSnapshot(x.u.id, x.id);
+          barrier.release.open(); await rejected;
+          const after = await sessionSnapshot(x.u.id, x.id);
+          assert.deepEqual(after.queue, current.queue);
+          assert.equal(after.eventSeq, current.eventSeq);
+          assert.equal(await chargeCount(x.u.id), change === "submit" ? 1 : 0);
+          if (change === "choice") {
+            const [chosen] = await sql`SELECT prepared_input FROM assistant_message_queue WHERE id=${queued.entryId}`;
+            await refreshQueuedQuote(x.u.id, x.id, queued.entryId);
+            const [repriced] = await sql`SELECT prepared_input FROM assistant_message_queue WHERE id=${queued.entryId}`;
+            assert.deepEqual(repriced.prepared_input.taskChoice, chosen.prepared_input.taskChoice, "a later simple reprice retains the user's accepted choice");
+          }
+        } finally { barrier.release.open(); barrier.restore(); }
+      }
+    });
+    await t.test("Q1 submit rejection arriving after Q2 cannot overwrite its quote, error or event sequence", async () => {
+      const x = await fixture(0), barrier = holdTransactionOutcome(() => false, error => error?.code === "insufficient_credits");
+      const [price] = await sql`SELECT id,version FROM member_tool_prices WHERE kind='assistant-turn' AND model=${model}`;
+      try {
+        const old = enqueueMessage(x.u.id, x.id, { ...x.input, confirmationMode: "automatic" }, randomUUID());
+        await barrier.reached.promise;
+        const [entry] = await sql`SELECT id,quote FROM assistant_message_queue WHERE session_id=${x.id}`;
+        await saveToolPrice({ id: price.id, expectedVersion: price.version, kind: "assistant-turn", provider: "assistant", model, baseCredits: 9, enabled: true, reason: "Synthetic Q2 price" }, "test");
+        await refreshQueuedQuote(x.u.id, x.id, entry.id);
+        const newer = await sessionSnapshot(x.u.id, x.id), q2 = newer.queue!.entries[0]!;
+        assert.notEqual(q2.quote!.quoteId, entry.quote.quoteId);
+        assert.equal(q2.quote!.amount, 9); assert.match(q2.error!, /需要 9/);
+        barrier.release.open(); await old;
+        const after = await sessionSnapshot(x.u.id, x.id);
+        assert.deepEqual(after.queue, newer.queue);
+        assert.equal(after.eventSeq, newer.eventSeq, "stale Q1 failure publishes no false change event");
+        assert.equal(await chargeCount(x.u.id), 0);
+      } finally {
+        barrier.release.open(); barrier.restore();
+        const [current] = await sql`SELECT version FROM member_tool_prices WHERE id=${price.id}`;
+        await saveToolPrice({ id: price.id, expectedVersion: current.version, kind: "assistant-turn", provider: "assistant", model, baseCredits: 7, enabled: true, reason: "Restore synthetic Q2 price" }, "test");
+      }
+    });
     await t.test("HTTP enqueue after completion and cancelling quoted heads immediately advance once", async () => {
       const completed = await sessionSnapshot(user.id, sessionId), input = { ...raw, expectedRevision: completed.revision };
       const path = `/api/assistant/sessions/${sessionId}/queue`, key = randomUUID();
@@ -303,4 +423,21 @@ test("persisted queue HTTP → Worker → manual quote → approval → draft, w
 async function legacyQuoteTurn(userId:number,id:string,raw:unknown){
  const {snapshotInput}=await import('@aihot/backend/assistant/sessions');const {quoteTool}=await import('@aihot/backend/users/credits');
  const prepared=await snapshotInput(sql,userId,id,raw);return quoteTool(userId,prepared.intent);
+}
+
+/** Hold one completed transaction result outside its locks, at the real async boundary. */
+function holdTransactionOutcome(matches: (value: any) => boolean, fails: (error: any) => boolean = () => false) {
+  const reached = gate(), release = gate(), original = sql.begin.bind(sql);
+  let waiting = true;
+  sql.begin = (async (options: any, callback?: any) => {
+    try {
+      const value = callback ? await original(options, callback) : await original(options);
+      if (waiting && matches(value)) { waiting = false; reached.open(); await release.promise; }
+      return value;
+    } catch (error) {
+      if (waiting && fails(error)) { waiting = false; reached.open(); await release.promise; }
+      throw error;
+    }
+  }) as typeof sql.begin;
+  return { reached, release, restore: () => { sql.begin = original; } };
 }

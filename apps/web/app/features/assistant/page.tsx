@@ -1,5 +1,6 @@
 import { useAssistantOptions, unavailableSelection } from "./use-options";
-import { saveRecovery } from "./recovery-store";
+import { confirmationModeHint, useConfirmationMode } from "./fee-mode";
+import { beginRecoveryAttempt, clearRecovery, updateRecoveryFailure, restoreRejectedQuote, isSubmissionRejection, saveRecovery } from "./recovery-store";
 import type { AssistantInitialRequest } from "@aihot/contracts/assistant";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -86,6 +87,7 @@ function EntryContent({
   const { options, refresh: refreshOptions, error: optionsError } = useAssistantOptions(data.options);
   const profile = options.assistants.find((row) => row.id === assistantId);
   const identity = String(data.me.user.id);
+  const confirmation = useConfirmationMode(identity);
   const key = draftKey(identity, assistantId);
   const [draft, update, ready] = useAssistantDraft(
     key,
@@ -115,7 +117,7 @@ function EntryContent({
   }, []);
   async function send(configureFees = false) {
     if (
-      !ready ||
+      !ready || !confirmation.ready ||
       command.pending ||
       creating.current ||
       (!draft.pendingCreate && !configureFees && (!profile?.available || unavailableSelection(profile, draftSelection(draft)))) ||
@@ -132,6 +134,7 @@ function EntryContent({
       ...(draft.taskChoice ? {taskChoice:draft.taskChoice}:{}),
       attachments: draft.attachments,
       configureFees,
+      confirmationMode: confirmation.mode,
       unknown: false,
     }), creationKey: draft.pendingCreate?.creationKey ?? crypto.randomUUID() };
     if (!draft.pendingCreate) setSendingCreate(frozen.creationKey);
@@ -149,22 +152,46 @@ function EntryContent({
     const result = await command.run<{ sessionId: string; initialRequest: AssistantInitialRequest | null }>(
       "/api/assistant/sessions",
       { assistantId, title: Array.from(frozen.text.replace(/\s+/g, " ")).slice(0, 60).join("") || "新创作",
-        ...(!frozen.configureFees ? { initialRequest: { message: frozen.text, skillSelection: draftSelection(frozen), ...(frozen.taskHint !== undefined ? { taskHint: frozen.taskHint } : {}), ...(frozen.taskChoice ? {taskChoice:frozen.taskChoice}:{}), attachments: (frozen.attachments ?? []).map(row => ({ assetKey: row.assetKey })) } } : {}) },
+        ...(!frozen.configureFees ? { initialRequest: { message: frozen.text, skillSelection: draftSelection(frozen), ...(frozen.confirmationMode ? {confirmationMode:frozen.confirmationMode} : {}), ...(frozen.taskHint !== undefined ? { taskHint: frozen.taskHint } : {}), ...(frozen.taskChoice ? {taskChoice:frozen.taskChoice}:{}), attachments: (frozen.attachments ?? []).map(row => ({ assetKey: row.assetKey })) } } : {}) },
       "POST", undefined, frozen.creationKey,
     );
-    creating.current = false;
     if (!result) {
+      creating.current = false;
       const status = command.failure.current?.status;
       if (status && status >= 400 && status < 500 && !frozen.unknown) update(previous => rejectedCreateDraft({ ...previous, pendingCreate: frozen }));
       else update(previous => ({ ...previous, pendingCreate: { ...frozen, unknown: true } }));
       setSendingCreate(null);
       return;
     }
+    let submissionError: string | undefined;
     if (result.initialRequest?.quote) {
-      try { saveRecovery(draftKey(identity, result.sessionId), { kind: "quote", value: {...result.initialRequest,quote:result.initialRequest.quote} }); }
-      catch { /* The session retains an explicit recovery action if browser storage fails. */ }
+      const scope = draftKey(identity, result.sessionId), saved: import("./recovery-store").SavedQuote = { ...result.initialRequest, quote: result.initialRequest.quote };
+      try {
+        saveRecovery(scope, { kind: "quote", value: saved });
+        // Only this fresh Send authorizes automatic submission. Restored quotes stay explicit.
+        if (frozen.confirmationMode === "automatic" && saved.quote.task && saved.quote.affordable) {
+          const attempt = { commandKey: saved.commandKey, input: saved.input, quoteId: saved.quote.quoteId };
+          const record = { kind: "turn" as const, value: attempt };
+          const started = beginRecoveryAttempt(scope, record);
+          clearRecovery(scope, { kind: "quote", value: saved });
+          const submitted = await command.run(`/api/assistant/sessions/${result.sessionId}/turns`,
+            { ...attempt.input, quoteId: attempt.quoteId }, "POST", attempt.input, attempt.commandKey);
+          if (submitted) clearRecovery(scope, record);
+          else {
+            const status = command.failure.current?.status ?? null;
+            const failure = command.failure.current;
+            const writeVersion = updateRecoveryFailure(scope, record, started, status, failure?.code);
+            if (writeVersion && !started.wasUnknown && status !== null && status >= 400 && status < 500 && isSubmissionRejection(failure?.code)) {
+              submissionError = command.failure.current?.message;
+              restoreRejectedQuote(scope, attempt, writeVersion, saved);
+            }
+          }
+        }
+      } catch { submissionError = "暂时无法确认发送结果，请在原会话核对；需求已保留。"; }
     }
+    creating.current = false;
     rememberDraft(draftKey(identity, result.sessionId), {
+      submissionError,
       ...(frozen.configureFees || !result.initialRequest?.quote ? {...frozen,taskChoice:result.initialRequest?.input.taskChoice??frozen.taskChoice,attachments:[],inputIds:result.initialRequest?.input.inputIds??[]} : { text: "", actionId: null, attachments: [] }),
     });
     update((previous) =>
@@ -191,7 +218,7 @@ function EntryContent({
                   <p className="mb-2 text-[11px] font-medium text-ink-4">你</p>
                   <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] [overflow-wrap:anywhere]">{draft.pendingCreate.text}</p>
                 </div>
-                {sendingCreate === draft.pendingCreate.creationKey && <p role="status" className="mt-3 text-[13px] text-ink-3">正在准备本次费用…</p>}
+                {sendingCreate === draft.pendingCreate.creationKey && <p role="status" className="mt-3 text-[13px] text-ink-3">正在计算本次费用…</p>}
               </div> : <div className="assistant-welcome">
                 <RingMark className="assistant-welcome-mark size-9 text-accent" />
                 <h2 className="text-[28px] font-medium leading-tight text-ink">
@@ -203,7 +230,7 @@ function EntryContent({
                   {profile?.welcome ?? "此助手尚未开放。"}
                 </p>
                 <p className="mt-4 text-[12px] leading-relaxed text-ink-4">
-                  描述要写什么、给谁看，或粘贴材料。发送后确认任务费用上限，完成或停止后按实际交付结算。
+                  描述要写什么、给谁看，或粘贴材料。{confirmationModeHint(confirmation.mode)}。
                 </p>
                 {profile && (
                   <div className="mt-6">
@@ -239,7 +266,7 @@ function EntryContent({
               disabled={!ready || !profile?.available || unavailableSelection(profile, draftSelection(draft)) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
               busy={command.pending}
               maxLength={options.limits.inputCharacters}
-              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
+              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} confirmationMode={confirmation.mode} onConfirmationMode={confirmation.choose} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
               attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
               {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}

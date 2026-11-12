@@ -66,7 +66,7 @@ export async function reserveForRun(tx: Tx, command: { actor: string; runId: num
   }
   Credits.parse(quote.amount);
   const wallet = await lockCreditWallet(tx, userId);
-  if (wallet.available < quote.amount) throw new AccountError(409, "insufficient_credits", "可用积分不足，请联系管理员补充");
+  if (wallet.available < quote.amount) throw new AccountError(409, "insufficient_credits", `本次预计需要 ${quote.amount.toLocaleString()} 积分，当前可用 ${wallet.available.toLocaleString()} 积分，还差 ${(quote.amount-wallet.available).toLocaleString()} 积分。`);
   const chargeId = randomUUID();
   await tx`INSERT INTO member_credit_charges(id, user_id, root_run_id, quote_id, amount, pricing_snapshot)
     VALUES (${chargeId}, ${userId}, ${run.id}, ${quote.id}, ${quote.amount}, ${tx.json(quote.pricing_snapshot as never)})`;

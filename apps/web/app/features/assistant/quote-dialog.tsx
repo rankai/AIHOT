@@ -2,6 +2,14 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 import type { AssistantTurnQuote } from "@aihot/contracts/assistant";
 import { Button, ButtonLink } from "../admin/ui";
+import { assistantCreditsHref } from "../account/data";
+import { useQuoteBalance } from "./use-quote-balance";
+
+// Queue snapshots currently expose the server's error text rather than its error code.
+export const isInsufficientCreditsNotice = (message?: string | null) =>
+  !!message && /^本次预计需要 [\d,]+ 积分，当前可用 [\d,]+ 积分，还差 [\d,]+ 积分。$/.test(message);
+const isServiceBudgetNotice = (message?: string | null) => !!message &&
+  (/^图片服务额度暂不可用/.test(message) || /^(?:助手模型|笔记检索|服务)(?:会员|全站)预算暂不可用$/.test(message) || /^Budget for \S+ exhausted \(/.test(message));
 
 /** Only the frozen research policy supports stopping without a writing charge. */
 function researchFeeNotice(quote: AssistantTurnQuote): string | null {
@@ -39,6 +47,11 @@ export function TurnQuoteDialog({
   showRequest = true,
   pending,
   requiresRequote = false,
+  continueAutomatically = false,
+  showRejectedBalance = false,
+  balanceUnavailable = false,
+  serviceUnavailable = false,
+  returnTo,
   requote,
   error,
   close,
@@ -49,6 +62,11 @@ export function TurnQuoteDialog({
   showRequest?: boolean;
   pending: boolean;
   requiresRequote?: boolean;
+  continueAutomatically?: boolean;
+  showRejectedBalance?: boolean;
+  balanceUnavailable?: boolean;
+  serviceUnavailable?: boolean;
+  returnTo?: string;
   requote?: () => void;
   error: string | null;
   close: () => void;
@@ -57,12 +75,21 @@ export function TurnQuoteDialog({
   const titleId = useId();
   const search = quote.additionalFeeKinds?.includes("search");
   const image = quote.additionalFeeKinds?.includes("image");
-  const feeNotice = researchFeeNotice(quote) ?? (quote.task ? "完成或停止后按实际执行结算，未执行部分释放。" : quote.additionalFeeKinds?.includes("vision") ? `如需${quote.additionalFeeKinds.map(kind=>({search:"查询参考",vision:"视觉分析",image:"图片生成"})[kind]).join("、")}，将分别报价并确认。` : quote.additionalFeeKinds === undefined
+  const feeNotice = researchFeeNotice(quote) ?? (quote.task ? "完成或停止后按实际执行结算，未用积分退回可用余额。" : quote.additionalFeeKinds?.includes("vision") ? `如需${quote.additionalFeeKinds.map(kind=>({search:"查询参考",vision:"视觉分析",image:"图片生成"})[kind]).join("、")}，将分别报价并确认。` : quote.additionalFeeKinds === undefined
     ? "额外服务费用以执行前的报价为准。"
     : search && image ? "如需检索或生成图片，将另行计费；图片生成前会单独确认。"
     : search ? "如需查询参考，将另行报价并确认。"
     : image ? "图片生成另行计费，生成前会单独确认。" : null);
   const expired = useQuoteExpired(quote.expiresAt);
+  const needsUpdate = expired || requiresRequote;
+  const serviceBlocked = serviceUnavailable || isServiceBudgetNotice(error);
+  const needsBalance = !serviceBlocked && (!quote.affordable || showRejectedBalance || balanceUnavailable);
+  const { read, refresh } = useQuoteBalance(quote.quoteId, needsBalance);
+  const available = read?.status === "ready" ? read.available! : read?.status === "error" || balanceUnavailable || showRejectedBalance ? null : quote.available;
+  const insufficient = !serviceBlocked && available !== null && available < quote.amount;
+  const balanceFailed = read?.status === "error" || balanceUnavailable && !read;
+  const balanceLabel = available === null ? null : `${read?.status === "ready" ? "刚更新：可用" : "报价时可用"} ${available.toLocaleString()} 积分${needsUpdate ? "（仅供参考）" : ""}`;
+  const errorNotice = error && !isInsufficientCreditsNotice(error) && !serviceBlocked ? error : null;
   return (
     <section
       aria-labelledby={titleId}
@@ -75,10 +102,11 @@ export function TurnQuoteDialog({
             id={titleId}
             className="text-[13px] font-medium text-ink"
           >
-            {quote.task?.label ?? "本次创作"} · {quote.task ? "最多 " : ""}{quote.amount.toLocaleString()} 积分
+            {quote.task?.label ?? "本次创作"} · {needsUpdate ? "上次预计" : "本次最多"} {quote.amount.toLocaleString()} 积分
           </h2>
-          {(expired || requiresRequote) && <p role="status" className="mt-1 text-[12px] text-ink-3">
-            {expired ? "报价已过期，请重新获取最新费用和余额。原需求已保留。" : "请重新获取报价，查看最新费用和余额。"}
+          {balanceLabel && <p className="mt-1 text-[12px] text-ink-3">{balanceLabel}</p>}
+          {needsUpdate && <p role="status" className="mt-1 text-[12px] text-ink-3">
+            费用需要更新，需求已保留。
           </p>}
         </div>
 
@@ -89,36 +117,34 @@ export function TurnQuoteDialog({
         <p className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {message}
         </p>
-        <p className="mt-2">报价时余额：{quote.available.toLocaleString()} 积分。</p>
         {quote.task?.items.map(item=><p key={item.key} className="mt-1">{item.label} × {item.units}：最多 {item.amount*item.units} 积分</p>)}
-        <p className="mt-2">确认后冻结上限并开始任务。未知或部分结果需要核对。</p>
+        <p className="mt-2">确认后预留本次上限并开始任务。未知或部分结果需要核对。</p>
       </details>
-      {!expired && !requiresRequote && !quote.affordable && (
+      {!needsUpdate && insufficient && available !== null && (
         <p role="alert" className="mt-2 text-[12px] text-hot">
-          积分不足，还差 {Math.max(0,quote.amount-quote.available).toLocaleString()} 积分。
-          {requote && <Link to="/account" className="ml-1 underline">查看积分</Link>}
+          还差 {Math.max(0, quote.amount - available).toLocaleString()} 积分。{read?.status === "ready" ? "按刚更新的可用积分计算。" : "按报价时可用积分计算，可刷新余额核对。"}
         </p>
       )}
-      {error && (
+      {balanceFailed && <p role="status" className="mt-2 text-[12px] text-ink-3">{read?.error ?? "暂时无法读取积分。"}</p>}
+      {read?.status === "loading" && <p role="status" className="mt-2 text-[12px] text-ink-3">正在读取积分…</p>}
+      {serviceBlocked && <p role="status" className="mt-2 text-[12px] text-ink-3">服务暂时不可用，需求已保留。可稍后再试或<Link to="/feedback" target="_blank" rel="noopener noreferrer" className="ml-1 underline">联系管理员（新页面）</Link>。</p>}
+      {errorNotice && (
         <p role="alert" className="mt-2 text-[12px] text-hot">
-          {error}
+          {errorNotice}
         </p>
       )}
+      {needsUpdate && requote && continueAutomatically && <p className="mt-2 text-[12px] text-ink-3">更新后按本次费用上限开始。</p>}
       <div className="mt-3 flex flex-wrap gap-2">
+        {insufficient && (pending ? <Button size="sm" tone="primary" disabled>补充积分</Button> : <ButtonLink to={assistantCreditsHref(returnTo)} size="sm" tone="primary">补充积分</ButtonLink>)}
+        {needsBalance && <Button size="sm" tone={available === null ? "primary" : "secondary"} disabled={pending || read?.status === "loading"} onClick={() => void refresh()}>{balanceFailed ? "重试读取" : "刷新余额"}</Button>}
+        {available === null && !serviceBlocked && (pending ? <Button size="sm" disabled>查看积分</Button> : <ButtonLink to={assistantCreditsHref(returnTo)} size="sm">查看积分</ButtonLink>)}
+        {needsUpdate && requote && <Button size="sm" tone={insufficient || available === null ? "secondary" : "primary"} busy={pending} onClick={requote}>{continueAutomatically ? "更新费用并继续" : "更新费用"}</Button>}
+        {!needsUpdate && !insufficient && available !== null && !serviceBlocked && <Button
+          size="sm" tone="primary" busy={pending} disabled={pending || read?.status === "loading"} onClick={confirm}
+        >{continueAutomatically ? "继续这次任务" : "确认开始"}</Button>}
         <Button size="sm" disabled={pending} onClick={close}>
           取消
         </Button>
-        {(expired || requiresRequote || !quote.affordable) && requote && <Button size="sm" tone="primary" busy={pending} onClick={requote}>重新获取报价</Button>}
-        {!expired && !requiresRequote && !quote.affordable && !requote && <ButtonLink to="/account" size="sm" tone="primary">查看积分</ButtonLink>}
-        {!expired && !requiresRequote && quote.affordable && <Button
-          size="sm"
-          tone="primary"
-          busy={pending}
-          disabled={pending}
-          onClick={confirm}
-        >
-          确认开始
-        </Button>}
       </div>
     </section>
   );

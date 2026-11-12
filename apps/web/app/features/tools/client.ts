@@ -51,11 +51,15 @@ export function useToolCommand(csrf: string, commandScope?: string) {
   return { run, pending, error, errorStatus, failure };
 }
 
-export async function toolGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+export class ToolReadAuthError extends Error {
+  constructor() { super("登录已过期，请重新登录。"); }
+}
+
+export async function toolGet<T>(path: string, signal?: AbortSignal, options?: { redirectOnUnauthorized?: boolean }): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin", cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000) });
   if (response.status === 401) {
-    window.location.assign(`/login?${new URLSearchParams({ return: safeAccountReturn(window.location.pathname + window.location.search), expired: "1" })}`);
-    throw new Error("登录已过期，请重新登录。");
+    if (options?.redirectOnUnauthorized !== false) window.location.assign(`/login?${new URLSearchParams({ return: safeAccountReturn(window.location.pathname + window.location.search), expired: "1" })}`);
+    throw new ToolReadAuthError();
   }
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(body?.detail ?? "暂时无法读取，请稍后重试。");

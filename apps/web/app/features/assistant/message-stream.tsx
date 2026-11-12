@@ -4,6 +4,7 @@ import type {
   AssistantMessage,
   AssistantProfileDto,
   AssistantSession,
+  AssistantConfirmationMode,
 } from "@aihot/contracts/assistant";
 import { Button } from "../admin/ui";
 import { PHASE_LABELS, materialText } from "./data";
@@ -12,6 +13,7 @@ import { ConversationNavigation, messageAnchorId } from "./conversation-navigati
 import { artifactDeliveries, indexArtifactDeliveries } from "./artifact-display";
 import { AssistantDelivery } from "./delivery";
 import { IconCheck, IconCopy } from "../../components/icons";
+import { confirmationModeHint } from "./fee-mode";
 const scrollPositions = new Map<string, number>();
 function messageTopInset(element: HTMLElement): number {
   const toggle = element.parentElement?.querySelector<HTMLElement>(".assistant-conversation-nav-toggle");
@@ -50,6 +52,7 @@ export function AssistantMessageStream({
   showWelcome,
   actionsStamp = "",
   canQueue = false,
+  confirmationMode = "automatic",
 }: {
   actions?: ReactNode;
   showWelcome: boolean;
@@ -68,6 +71,7 @@ export function AssistantMessageStream({
   setView: (view: "chat" | "artifacts") => void;
   view: "chat" | "artifacts";
   canQueue?: boolean;
+  confirmationMode?: AssistantConfirmationMode;
 }) {
   const persisted = useMemo(
     () => new Set(messages.map((message) => message.id)),
@@ -189,7 +193,7 @@ export function AssistantMessageStream({
                 {profile?.welcome ?? "此会话的助手当前不可用，请稍后重试。"}
               </p>
               <p className="mt-3 text-[12px] text-ink-4">
-                发送需求后确认任务费用上限，结束时按实际交付结算。
+                {confirmationModeHint(confirmationMode)}。
               </p>
             </div>
           )}
@@ -243,13 +247,13 @@ export function AssistantMessageStream({
                     </div>
                     {savedMessages.get(message.id)?.role !== "tool" && <MessageCopy text={savedMessages.get(message.id)!.text} role={message.role === "user" ? "user" : "assistant"} />}
                   </MessagePrimitive.Root>
-                  {deliveriesAfter.has(message.id) && <AssistantDelivery deliveries={deliveriesAfter.get(message.id)!} hasReply={savedMessages.get(message.id)?.role === "assistant"} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
+                  {deliveriesAfter.has(message.id) && <AssistantDelivery sessionId={session.sessionId} deliveries={deliveriesAfter.get(message.id)!} hasReply={savedMessages.get(message.id)?.role === "assistant"} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
                   </div>
                 ) : null
               }
             </ThreadPrimitive.Messages>
           </section>
-          {!!unanchored.length && <AssistantDelivery deliveries={unanchored} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
+          {!!unanchored.length && <AssistantDelivery sessionId={session.sessionId} deliveries={unanchored} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
           <CurrentTask
             session={session}
             csrf={csrf}

@@ -12,7 +12,8 @@ import { toolGet, useToolCommand } from "../tools/client";
 import { artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
 import { useEditorGuard } from "./unsaved";
 import { CoverPlanBody } from "./cover-plan";
-import { artifactDisplayName, imageDownloadName, type ArtifactTarget } from "./artifact-display";
+import { artifactDisplayName, type ArtifactTarget } from "./artifact-display";
+import { ImageDownload } from "./image-download";
 function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
   const { content } = artifact;
   const titles = [...new Set(content.titles.map(title => title.trim()).filter(Boolean))].filter(title => title !== content.title.trim());
@@ -198,14 +199,14 @@ export function AssistantArtifactPanel({
 export function AssistantArtifactCard(props: Parameters<typeof WritingArtifactCard>[0]) {
   return <WritingArtifactCard {...props} />;
 }
-function ImageBody({ artifact }: { artifact: AssistantArtifact }) {
+function ImageBody({ artifact, sessionId }: { artifact: AssistantArtifact; sessionId: string }) {
   const c = artifact.content;
   if (!c.fileKey) return <p className="text-[13px] text-ink-3">图片文件暂不可读，请重新打开该作品或核对处理结果。</p>;
   const href = `/api/tools/assets/${encodeURIComponent(c.fileKey)}/content`;
   return <div className="min-w-0 space-y-4">
     <h3 className="break-words text-[19px] font-semibold">{c.title}</h3>
     <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
-    <a href={href} download={imageDownloadName(c.title, artifact.version)} className="text-accent underline">下载图片</a>
+    <ImageDownload sessionId={sessionId} artifactId={artifact.artifactId} version={artifact.version} title={c.title} fileKey={c.fileKey} />
     <details className="text-[12px] text-ink-3">
       <summary className="cursor-pointer">图片生成记录</summary>
       <p className="mt-2 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{c.prompt}</p>
@@ -509,7 +510,7 @@ function WritingArtifactCard({
           </Select>
         </label>
       )}
-      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody artifact={selected} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
+      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody artifact={selected} sessionId={sessionId} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
         <form
           className="space-y-4"
           onSubmit={(event) => {

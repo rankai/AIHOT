@@ -80,6 +80,7 @@ export const TurnInput = z
     taskChoice: TaskChoice.optional(),
     skillSelection: SkillSelection.nullable().optional(),
     autoAuthorizationId: z.string().uuid().optional(),
+    confirmationMode: z.enum(["automatic", "manual"]).optional(),
     inputIds: z.array(z.string().uuid()).max(10).optional(),
     artifactVersions: z
       .array(z.object({ artifactId: z.string().uuid(), version: z.number().int().positive() }).strict())

@@ -72,6 +72,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
         initialRequest: z.object({
           message: z.string().trim().min(1).max(30000),
           skillSelection: TurnInput.shape.skillSelection,
+          confirmationMode: TurnInput.shape.confirmationMode,
           taskHint: TurnInput.shape.taskHint,
           taskChoice: TurnInput.shape.taskChoice,
           attachments: z.array(z.object({ assetKey: z.string().min(1).max(300) }).strict()).max(10).default([]),
@@ -112,6 +113,7 @@ export async function createSession(userId: number, raw: unknown, key: unknown) 
       }
       const session = await ownedSession(tx, userId, id);
       const turnInput = { message: input.initialRequest.message, skillSelection: input.initialRequest.skillSelection ?? null,
+        ...(input.initialRequest.confirmationMode ? { confirmationMode: input.initialRequest.confirmationMode } : {}),
         ...(input.initialRequest.taskHint !== undefined ? { taskHint: input.initialRequest.taskHint } : {}),
         ...(input.initialRequest.taskChoice ? {taskChoice:input.initialRequest.taskChoice} : {}),
         expectedRevision: session.revision, inputIds, artifactVersions: [] };
@@ -216,6 +218,7 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
     ...(input.taskChoice ? {taskChoice:input.taskChoice} : {}),
     skillSelection: input.skillSelection ?? null,
     autoAuthorizationId: input.autoAuthorizationId ?? null,
+    ...(input.confirmationMode ? { confirmationMode: input.confirmationMode } : {}),
     brief: session.brief,
     history,
     message: input.message,
@@ -266,6 +269,7 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
       taskChoice: TurnInput.shape.taskChoice,
       skillSelection: z.unknown().optional(),
       autoAuthorizationId: z.string().uuid().optional(),
+      confirmationMode: TurnInput.shape.confirmationMode,
       inputIds: z.unknown().optional(),
       artifactVersions: z.unknown().optional(),
       quoteId: z.string().uuid(),
@@ -297,11 +301,22 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
     const [usage] = await tx`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${id}`;
     if (usage!.n >= 100) throw conflict("单会话最多100个回合，请新建会话");
     const { input, snapshot, intent } = await snapshotInput(tx, userId, id, rest, queueEntryId, true);
-    const [frozenQuote] = await tx`SELECT pricing_snapshot FROM member_tool_quotes WHERE id=${quoteId} AND user_id=${userId}`;
+    const [frozenQuote] = await tx`SELECT pricing_snapshot,input_hash,created_at FROM member_tool_quotes WHERE id=${quoteId} AND user_id=${userId}`;
     if (frozenQuote?.pricing_snapshot.task) {
       if (input.autoAuthorizationId) throw conflict("本次任务需要一次明确费用确认，不能使用旧会话自动授权");
       const { research, ...choice } = JSON.parse(frozenQuote.pricing_snapshot.task.scope);
       await taskPriceDefinition(snapshot, choice, research);
+    }
+    // The quote hash freezes the business date too. Reconstruct only a clock that
+    // matches the entire original intent; all mutable input and admission stay checked.
+    // Snapshot preparation may itself cross midnight before the quote is inserted.
+    if (frozenQuote && creditHash(intent) !== frozenQuote.input_hash) {
+      const currentClock = snapshot.researchClock;
+      for (const date of [frozenQuote.created_at, new Date(frozenQuote.created_at.getTime() - 86_400_000)]) {
+        snapshot.researchClock = researchClock(date);
+        if (creditHash(intent) === frozenQuote.input_hash) break;
+        snapshot.researchClock = currentClock;
+      }
     }
     const turnId = randomUUID();
     if(input.autoAuthorizationId) await checkAuto(tx,userId,id,input.autoAuthorizationId,quoteId,"turn");
@@ -368,7 +383,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
     const activitySnapshot = turn ? await readActivities(tx, turn as Parameters<typeof readActivities>[1]) : null;
     const queued = await tx`SELECT id,position,input,state,quote,error,prepared_input,submitted_turn_id,command_key FROM (SELECT * FROM assistant_message_queue WHERE session_id=${id} AND (state IN ('pending','quoted') OR id IN (SELECT id FROM assistant_message_queue WHERE session_id=${id} ORDER BY position DESC LIMIT 50))) q ORDER BY position`;
     return {
-      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, taskSelectionRequired: q.prepared_input?.taskSelectionRequired === true, skillSelection:q.input.skillSelection??null, ...(q.input.taskHint ? { taskHint: { actionId: q.input.taskHint.actionId } } : {}), state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
+      queue: { paused: s.queue_paused, entries: queued.map(q => ({ id: q.id, position: Number(q.position), message: q.input.message, ...(q.input.confirmationMode ? { confirmationMode: q.input.confirmationMode } : {}), taskSelectionRequired: q.prepared_input?.taskSelectionRequired === true, skillSelection:q.input.skillSelection??null, ...(q.input.taskHint ? { taskHint: { actionId: q.input.taskHint.actionId } } : {}), state: q.state, quote: q.quote, error: q.error, turnId: q.submitted_turn_id, commandKey: q.command_key })) },
       sessionId: s.id,
       initialRequest: !s.active_turn_id && !messages.length ? s.initial_request : null,
       feeAuthorization: await readFeeAuthorization(tx,id),

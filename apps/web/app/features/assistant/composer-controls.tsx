@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 import type { AssistantArtifact, AssistantOptions, AssistantProfileDto, AssistantSkillSelection, AssistantTaskHint } from "@aihot/contracts/assistant";
-import { IconApps, IconChevronDown } from "../../components/icons";
+import { IconSkill, IconChevronDown } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
-import { useQuoteExpired } from "./quote-dialog";
 import { ComposerMenu } from "./composer-menu";
 
-export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeDisabled = disabled, refreshOptions, taskHint, pendingFee }: {
+export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeDisabled = disabled, refreshOptions, taskHint, confirmationMode = "automatic", onConfirmationMode }: {
   taskHint?: AssistantTaskHint | null;
-  pendingFee?: Pick<import("@aihot/contracts/assistant").AssistantTurnQuote, "amount" | "expiresAt">;
+  confirmationMode?: import("@aihot/contracts/assistant").AssistantConfirmationMode;
+  onConfirmationMode?: (mode: import("@aihot/contracts/assistant").AssistantConfirmationMode) => void;
   profile: AssistantProfileDto; selection: AssistantSkillSelection | null; onSelection: (selection: AssistantSkillSelection | null) => void; disabled: boolean;
   addFiles: (files: File[]) => void; capabilities: AssistantOptions["inputCapabilities"];
   artifacts?: AssistantArtifact[]; onReference?: (artifact: AssistantArtifact) => void;
@@ -15,7 +15,6 @@ export function AssistantComposerControls({ profile, selection, onSelection, dis
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [openMenu, setOpenMenu] = useState<"add" | "skill" | "fee" | null>(null);
-  const feeExpired = useQuoteExpired(openMenu === "fee" ? pendingFee?.expiresAt : undefined);
   function changeMenu(owner: "add" | "skill" | "fee", open: boolean) {
     // A previous menu can still observe focus while the next portal is mounting.
     setOpenMenu((current) => open ? owner : current === owner ? null : current);
@@ -36,17 +35,23 @@ export function AssistantComposerControls({ profile, selection, onSelection, dis
       <button role="menuitem" type="button" disabled={disabled || !referenceableArtifacts.length} onClick={() => setPickArtifact(true)}>引用已保存稿件{!referenceableArtifacts.length ? "（暂无）" : ""}</button>
       <p>上传和读取文本不消耗积分。粘贴链接仅作为文字。</p>
     </ComposerMenu>
-    <ComposerMenu open={openMenu === "skill"} setOpen={(open) => changeMenu("skill", open)} disabled={disabled} label={`选择技能，当前${label}`} className="assistant-skill-control" onOpen={refreshOptions}
-      trigger={<><IconApps size={16} /><span>{hinted?.label ?? label}</span></>}>
+    <ComposerMenu open={openMenu === "skill"} setOpen={(open) => changeMenu("skill", open)} disabled={disabled} label={`选择技能，当前${label}`} title={selection ? `技能：${label}` : "技能"} className={`assistant-skill-control${selection ? "" : " assistant-skill-auto"}`} onOpen={refreshOptions}
+      trigger={<><IconSkill size={18} />{selection && <span>{hinted?.label ?? label}</span>}</>}>
       {selection && !legacy && !selected && <button type="button" role="menuitemradio" aria-checked="true" disabled>原技能不可用，请重新选择</button>}
       {legacy && <button type="button" role="menuitemradio" aria-checked="true" disabled>{legacy.skillName} · 本次：{legacy.label}</button>}
       <button type="button" role="menuitemradio" aria-checked={!selection} disabled={disabled} onClick={() => onSelection(null)}>自动选择技能</button>
       {groups.map((group) => <button type="button" key={group.skillId} role="menuitemradio" aria-checked={selected?.skillId === group.skillId} disabled={disabled || !group.available} onClick={() => onSelection({ skillId: group.skillId })}>{group.name}{!group.available ? " · 暂不可用" : ""}</button>)}
     </ComposerMenu>
-    <ComposerMenu open={openMenu === "fee"} setOpen={(open) => changeMenu("fee", open)} disabled={feeDisabled} label="费用确认" className="assistant-fee-menu" informational
-      trigger={<><span>费用确认</span><IconChevronDown size={12} /></>}>
-      <p>当前方式：每次任务确认</p>
-      <p>{pendingFee && !feeExpired ? `本次最多预留 ${pendingFee.amount.toLocaleString()} 积分。` : "开始前会显示本次最多需要多少积分。"}结束后按实际扣除，余下退回可用余额。</p>
+    <ComposerMenu open={openMenu === "fee"} setOpen={(open) => changeMenu("fee", open)} disabled={feeDisabled} label="费用确认" className="assistant-fee-menu"
+      trigger={<><span>{confirmationMode === "automatic" ? "自动" : "每次确认"}</span><IconChevronDown size={12} /></>}>
+      <button type="button" role="menuitemradio" aria-checked={confirmationMode === "automatic"} onClick={() => onConfirmationMode?.("automatic")}>
+        <span className="assistant-fee-choice-title">自动</span>
+        <span className="assistant-fee-choice-description">发送后按本次费用上限开始，结束后按实际费用结算</span>
+      </button>
+      <button type="button" role="menuitemradio" aria-checked={confirmationMode === "manual"} onClick={() => onConfirmationMode?.("manual")}>
+        <span className="assistant-fee-choice-title">每次确认</span>
+        <span className="assistant-fee-choice-description">开始前先确认本次费用上限</span>
+      </button>
     </ComposerMenu>
     {pickArtifact && <ArtifactPicker artifacts={referenceableArtifacts} close={() => setPickArtifact(false)} select={(artifact) => { onReference?.(artifact); setPickArtifact(false); }} />}
   </div>;
