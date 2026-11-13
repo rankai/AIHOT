@@ -623,6 +623,7 @@
 .assistant-question-label { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; font-size: 12px; color: var(--ink-3); }
 .assistant-cover-question { border-radius: var(--radius-panel); background: var(--panel-quiet); }
 .assistant-cover-choices { display: grid; min-width: 0; gap: 4px; }
+.assistant-cover-overviews { display: grid; min-width: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
 .assistant-cover-choice { display: flex; min-height: 44px; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: var(--radius-control); padding: 9px 10px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
 .assistant-cover-choice:hover, .assistant-cover-choice[data-selected="true"] { background: var(--surface); }
 .assistant-cover-choice[data-selected="true"] { border-color: var(--line-strong); color: var(--ink); }
@@ -754,7 +755,8 @@
 .assistant-session-menu { position: relative; }
 .assistant-session-menu > summary { display: flex; width: 36px; min-height: 36px; align-items: center; justify-content: center; border-radius: var(--radius-control); color: var(--ink-3); cursor: pointer; font-size: 19px; list-style: none; }
 .assistant-session-menu > summary::-webkit-details-marker { display: none; }
-.assistant-session-menu > div { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; display: grid; min-width: 165px; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); padding: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / .08); }
+.assistant-session-menu > div { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; display: grid; width: min(280px, calc(100vw - 32px)); max-height: calc(100dvh - 100px); overflow-y: auto; overscroll-behavior: contain; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); padding: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / .08); }
+.assistant-session-title { min-width: 0; border-bottom: 1px solid var(--line); padding: 4px 4px 10px; overflow-wrap: anywhere; white-space: normal; color: var(--ink); font-size: 13px; line-height: 1.6; }
 .assistant-dialog { width: calc(100% - 32px); max-width: 480px; max-height: 85dvh; margin: auto; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sheet); background: var(--surface); padding: 24px; color: var(--ink); box-shadow: 0 12px 40px rgb(0 0 0 / .2); }
 .assistant-dialog::backdrop { background: rgb(0 0 0 / .35); }
 .assistant-workspace :is(button, a, summary, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

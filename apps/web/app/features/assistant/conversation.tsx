@@ -1,5 +1,5 @@
 import { useConfirmationMode } from "./fee-mode";
-import { draftSelection, editDraftText } from "./drafts";
+import { chooseDraftAction, draftSelection, editDraftText } from "./drafts";
 import { useAssistantOptions, unavailableSelection } from "./use-options";
 import { AssistantMessageQueue } from "./message-queue";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +47,7 @@ import { AssistantComposerControls, AssistantSkillNotice, TaskClarification } fr
 import { AssistantAttachmentCards, useAssistantMaterials } from "./materials";
 import { attachmentBatchIssue, attachmentInputIds, attachmentSelectionCount, attachmentsReady, patchAttachment } from "./materials-data";
 import { AssistantFeeDialog } from "./fee-dialog";
-import { SessionControls } from "./session-controls";
+import { SessionControls, ArchivedSessionNotice } from "./session-controls";
 import { AssistantUnsavedGuard } from "./unsaved";
 import {
   assistantHref,
@@ -415,7 +415,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
         }));
         window.dispatchEvent(new Event("assistant-history-changed"));
         setNotice(
-          "会话已归档，从历史隐藏；原地址仍可查看。当前没有归档列表或恢复入口。",
+          "会话已归档，可在历史列表切换“已归档”查看和恢复。",
         );
       } else setNotice("归档结果尚未确认，请重新读取核对。");
       return;
@@ -573,6 +573,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
           subtitle={`${session.assistantId === "creative" ? "创作助手" : "小红书助手"}${session.archived ? " · 已归档" : ""}`}
           controls={
             <SessionControls
+              session={session} csrf={data.me.csrf} refresh={refresh}
               active={active}
               pending={command.pending || !!draft.pendingLifecycle}
               archived={session.archived}
@@ -603,6 +604,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
           }
           chat={
             <ThreadPrimitive.Root className="assistant-thread">
+              <ArchivedSessionNotice session={session} csrf={data.me.csrf} refresh={refresh} onRestored={() => setNotice("会话已恢复。")} />
               <AssistantMessageStream
                 session={session}
                 messages={messages}
@@ -689,7 +691,9 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                   question ? 10000 : options.limits.inputCharacters
                 }
                 hint={
-                  question?.coverPlan
+                  session.turn?.phase === "needs_review" && !session.archived
+                    ? "停止会结束后续执行，费用仍按实际使用结算。"
+                    : question?.coverPlan
                     ? "也可以在这里补充修改要求。"
                     : active && !question
                       ? "输入后发送到队列；输入为空时可停止当前任务。"
@@ -697,7 +701,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
                         ? "已归档会话可查看，不能发送新需求。"
                         : undefined
                 }
-                controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} confirmationMode={confirmation.mode} onConfirmationMode={confirmation.choose} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => { updateDraft((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={options.inputCapabilities} artifacts={session.artifacts} onReference={reference} />}
+                controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} confirmationMode={confirmation.mode} onConfirmationMode={confirmation.choose} profile={profile} taskHint={draft.taskHint} onAction={(action) => updateDraft(previous => chooseDraftAction(previous, action))} selection={draftSelection(draft)} onSelection={(skillSelection) => { updateDraft((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined })); }} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} feeDisabled={session.archived || command.pending || quoteReading || feeModeCommand.pending || feeModeUncertain} addFiles={materials.add} capabilities={options.inputCapabilities} artifacts={session.artifacts} onReference={reference} />}
                 attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} count={attachmentSelectionCount(draft.attachments, draft.inputIds)} max={options.inputCapabilities.maxAttachments} disabled={session.archived || command.pending || quoteReading || !!draft.pendingTurn || !!draft.pendingQueue} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
               >
                 {!question && !!session.inputs.length && <details className="mb-2 text-[12px] text-ink-3"><summary>选择已有会话材料（已选 {draft.inputIds?.length ?? 0} 份）</summary><div className="mt-2 max-h-28 space-y-2 overflow-auto">{session.inputs.filter((input) => !(draft.attachments ?? []).some((card) => card.inputId === input.id)).map((input) => <label key={input.id} className="flex items-start gap-2"><input type="checkbox" checked={draft.inputIds?.includes(input.id) ?? false} disabled={command.pending || quoteReading || session.archived || !!draft.pendingQueue} onChange={(event) => { const checked = event.target.checked; const current = readDraft(key); const issue = checked ? attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), 1, options.inputCapabilities.maxAttachments) : null; if (issue) { setNotice(issue); return; } updateDraft((previous) => ({ ...previous, inputIds: checked ? [...(previous.inputIds ?? []), input.id] : previous.inputIds?.filter((id) => id !== input.id) })); }} /><span className="min-w-0 break-words">{typeof input.source.filename === "string" ? input.source.filename : "转交材料"}{typeof input.source.version === "number" ? ` · v${input.source.version}` : ""}</span></label>)}</div><p className="mt-2 text-[11px]">只引用勾选材料。历史消息仍保留；移除不会抹除已经进入历史的内容。</p></details>}

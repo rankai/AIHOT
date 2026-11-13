@@ -2,17 +2,22 @@ import type { AssistantArtifact, AssistantArtifactDelivery, AssistantCoverChoice
 
 export interface ArtifactTarget { artifactId: string; version: number }
 
+function safeDownloadTitle(title: string): string {
+  return title.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 120);
+}
 /** The response Content-Type owns the extension; a title or storage key cannot prove it. */
 export function imageDownloadName(title: string, version: number): string {
-  const name = title.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 120);
-  return `${name || "图片"} · 第 ${version} 版`;
+  return `${safeDownloadTitle(title) || "图片"} · 第 ${version} 版`;
+}
+export function textDownloadName(title: string, version: number, format: "txt" | "md"): string {
+  return `${safeDownloadTitle(title) || "文案"} · 第 ${version} 版.${format}`;
 }
 
 export function coverChoiceSchemes(choice: AssistantCoverChoiceContext, artifacts: AssistantArtifact[]) {
   const plan = artifacts.find((artifact) => artifact.artifactId === choice.artifactId && artifact.version === choice.version && artifact.kind === "xhs-cover-plan")?.content.coverPlan;
   return choice.schemes.map((scheme) => {
     const detail = plan?.schemes.find((candidate) => candidate.schemeId === scheme.schemeId);
-    return { ...scheme, ...(detail ? { layout: detail.layout, palette: detail.palette } : {}) };
+    return { ...scheme, ...(detail ? { layout: detail.layout, palette: detail.palette, ...(detail.aspectRatio ? { aspectRatio: detail.aspectRatio } : {}), ...(detail.prompt ? { prompt: detail.prompt } : {}) } : {}) };
   });
 }
 

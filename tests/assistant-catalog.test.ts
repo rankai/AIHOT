@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, symlink, cp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { catalog, candidates, resolveCandidate, validatePackage, taskHint, additionalFeeKinds } from "@aihot/backend/assistant/catalog";
-import { actions as boundActions, skillNames, bindings } from "@aihot/backend/assistant/bindings";
+import { actions as boundActions, skillNames, bindings, Binding } from "@aihot/backend/assistant/bindings";
 import { sha256, stableJson } from "@aihot/backend/lib/ids";
 test("assistant fee disclosures follow only the admitted immutable module capabilities", async () => {
   for (const [actionId, expected] of [
@@ -179,4 +179,22 @@ test("skill selection grants only that skill's profile modules while legacy acti
   await assert.rejects(candidates("xiaohongshu", { skillId: "wechat-write" }), /不支持此技能/);
   for (const bad of [{skillId:"xiaohongshu-creator",actionId:"xiaohongshu-rewrite"},{skillId:"xiaohongshu-creator",moduleId:"M1"},{}])
     await assert.rejects(candidates("creative", bad as never));
+});
+
+
+test("user capability descriptions are optional binding display metadata and leave packages intact", async () => {
+  const loaded = await catalog();
+  for (const action of boundActions) {
+    assert(action.userDescription?.length && action.userDescription.length <= 160);
+    assert(!/M[1-9]|供应商|Redfox|API/i.test(action.userDescription));
+  }
+  for (const binding of bindings) {
+    const { directory, ...raw } = binding;
+    const old = Binding.parse({ ...raw, modules: raw.modules.map(({ userDescription, ...module }) => module) });
+    assert(old.modules.every(module => module.userDescription === undefined));
+    const pkg = loaded.find(item => item.manifest.skillId === binding.skillId && item.manifest.version === binding.version)!;
+    assert(pkg && pkg.manifest.resources.every(resource => resource.path !== "binding.json"));
+  }
+  const action = boundActions.find(action => action.actionId === "xiaohongshu-rewrite")!;
+  assert.equal(action.userDescription, "提供原文，改写成小红书笔记");
 });

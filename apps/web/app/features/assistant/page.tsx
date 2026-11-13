@@ -43,14 +43,14 @@ export function AssistantActions({
           size="sm"
           tone={actionId === action.actionId ? "primary" : "secondary"}
           aria-pressed={actionId === action.actionId}
-          title={action.reason ?? undefined}
+          title={action.reason ?? action.userDescription ?? undefined}
           disabled={disabled || !action.available}
           onClick={() =>
             onChange(actionId === action.actionId ? null : action.actionId)
           }
         >
-          {action.label}
-          {!action.available ? " · 暂不可用" : ""}
+          <span>{action.label}{!action.available ? " · 暂不可用" : ""}</span>
+          {action.userDescription && <span className="block max-w-64 text-[11px] font-normal text-ink-4">{action.userDescription}</span>}
         </Button>
       ))}
     </div>
@@ -266,7 +266,7 @@ function EntryContent({
               disabled={!ready || !profile?.available || unavailableSelection(profile, draftSelection(draft)) || !!draft.pendingCreate || !attachmentsReady(draft.attachments)}
               busy={command.pending}
               maxLength={options.limits.inputCharacters}
-              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} confirmationMode={confirmation.mode} onConfirmationMode={confirmation.choose} profile={profile} taskHint={draft.taskHint} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
+              controls={profile && <AssistantComposerControls refreshOptions={refreshOptions} confirmationMode={confirmation.mode} onConfirmationMode={confirmation.choose} profile={profile} taskHint={draft.taskHint} onAction={(action) => update(previous => chooseDraftAction(previous, action))} selection={draftSelection(draft)} onSelection={(skillSelection) => update((previous) => ({ ...previous, skillSelection, actionId: null, taskHint: undefined, taskChoice: undefined }))} disabled={!ready || !profile.available || command.pending || !!draft.pendingCreate} feeDisabled={!ready || !profile.available || command.pending || !!draft.pendingCreate || !attachmentsReady(draft.attachments)} addFiles={materials.add} capabilities={options.inputCapabilities} />}
               attachments={<><AssistantAttachmentCards attachments={draft.attachments ?? []} max={options.inputCapabilities.maxAttachments} disabled={command.pending || !!draft.pendingCreate} retry={materials.retry} remove={materials.remove} error={materials.error} />{!attachmentsReady(draft.attachments) && <p className="mb-2 text-[11px] text-ink-4">全部附件可用后才能发送；可重试或移除问题附件。</p>}</>}
             >
               {optionsError && <p role="status" className="text-[12px] text-ink-3">{optionsError}</p>}

@@ -18,7 +18,7 @@ const capability = z.enum(Object.keys(capabilities) as [keyof typeof capabilitie
 export type Capability = keyof typeof capabilities;
 export const Binding = z.object({ formatVersion: z.literal(1), skillId: id, version: z.string().regex(/^\d+$/), name: z.string().max(80),
   modules: z.array(z.object({ moduleId: id, profiles: z.array(z.enum(["creative", "xiaohongshu"])).min(1), actionId: id,
-    label: z.string().max(80), entry: id, capabilities: z.array(capability).min(1), inputContract: z.enum(["writing-input@1", "image-input@1"]),
+    label: z.string().max(80), userDescription: z.string().trim().min(1).max(160).optional(), entry: id, capabilities: z.array(capability).min(1), inputContract: z.enum(["writing-input@1", "image-input@1"]),
     deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1"]), references: z.array(id),
     researchPolicy: z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1"]).optional(),
     tasks: z.array(z.object({
@@ -64,7 +64,7 @@ if (new Set(currentEntries.map(entry => entry.skillId)).size !== currentEntries.
 export const currentSkillVersions: Record<string, string> = Object.fromEntries(currentEntries.map(entry => [entry.skillId, entry.version]));
 const current = bindings.filter(b => b.version === currentSkillVersions[b.skillId]);
 export const skillNames = Object.fromEntries(current.map(b => [b.skillId, b.name]));
-export const actions = current.flatMap(b => b.modules.map(m => ({ actionId: m.actionId, label: m.label, skillId: b.skillId, moduleId: m.moduleId, profiles: m.profiles })));
+export const actions = current.flatMap(b => b.modules.map(m => ({ actionId: m.actionId, label: m.label, ...(m.userDescription ? { userDescription: m.userDescription } : {}), skillId: b.skillId, moduleId: m.moduleId, profiles: m.profiles })));
 if (new Set(actions.map(a => a.actionId)).size !== actions.length) throw new Error("Duplicate skill action");
 export function bindingScope(id: AssistantId) {
   const available = current.flatMap(b => b.modules.filter(m => m.profiles.includes(id)).map(m => ({ b, m })));

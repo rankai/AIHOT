@@ -23,7 +23,7 @@ export interface ImageOptions {
 export interface PrivateAsset {
   key: string; content_type: string; bytes: number; purpose: string; status: string;
   created_at?: string | null; expires_at?: string | null; expired?: boolean; source?: { articleId: string | null; sourceId: string | null; subscriptionId: number | null; runId: number } | null;
-  metadata: { origin?: string | null; filename: string; kind?: "image" | "audio" | "video" | "text"; width?: number | null; height?: number | null; pages?: number; validation?: string };
+  metadata: { origin?: string | null; filename: string; kind?: "image" | "audio" | "video" | "text" | "document"; width?: number | null; height?: number | null; pages?: number; validation?: string };
 }
 export interface AssetPage { items: PrivateAsset[]; nextCursor: string | null }
 export function assetContentUrl(key: string) { return `/api/admin/assets/${encodeURIComponent(key)}/content`; }

@@ -2,9 +2,9 @@ import type { AssetKind, AssetUploadOptions } from "./asset-types.ts";
 import type { PrivateAsset } from "./image-types.ts";
 import type { OperationFile } from "./operation-types.ts";
 
-export const assetKindLabels: Record<AssetKind | "text", string> = { image: "图片", audio: "音频", video: "视频", text: "文本附件" };
+export const assetKindLabels: Record<AssetKind | "text", string> = { image: "图片", audio: "音频", video: "视频", text: "文本附件", document: "Word 文档" };
 export function assetKind(asset: Pick<PrivateAsset, "content_type" | "metadata">): AssetKind | "text" | null {
-  if (["image", "audio", "video", "text"].includes(asset.metadata.kind ?? "")) return asset.metadata.kind!;
+  if (["image", "audio", "video", "text", "document"].includes(asset.metadata.kind ?? "")) return asset.metadata.kind!;
   if (["text/plain", "text/vtt", "application/x-subrip", "application/json"].includes(asset.content_type.split(";")[0]!.trim())) return "text";
   return asset.content_type.startsWith("image/") ? "image" : asset.content_type.startsWith("audio/") ? "audio" : asset.content_type.startsWith("video/") ? "video" : null;
 }

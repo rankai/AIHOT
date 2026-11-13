@@ -8,17 +8,9 @@ import type {
   AssistantTaskHint,
 } from "@aihot/contracts/assistant";
 import type { ThreadMessageLike } from "@assistant-ui/react";
+import { resultPlainText } from "../tools/result-text-data.ts";
 
-export interface SessionRow {
-  sessionId: string;
-  assistantId: AssistantId;
-  assistantName: string;
-  title: string;
-  createdAt: string;
-}
-export interface SessionPage {
-  sessions: SessionRow[];
-}
+export type { AssistantSessionRow as SessionRow, AssistantSessionPage as SessionPage } from "@aihot/contracts/assistant";
 export interface TurnInput {
   confirmationMode?: import("@aihot/contracts/assistant").AssistantConfirmationMode;
   message: string;
@@ -97,7 +89,13 @@ export function safeSourceHref(raw: string | null): string | null {
     return null;
   }
 }
-export function artifactText(content: AssistantArtifactContent): string {
+function artifactTagValues(content: AssistantArtifactContent): string[] {
+  return [...new Set(content.tags.map(tag => tag.trim().replace(/^#+/, "")).filter(Boolean))];
+}
+export function artifactTags(content: AssistantArtifactContent): string {
+  return artifactTagValues(content).map(tag => `#${tag}`).join(" ");
+}
+export function artifactText(content: AssistantArtifactContent, format: "markdown" | "plain" = "markdown"): string {
   if (content.coverPlan) {
     const plan = content.coverPlan;
     return [
@@ -114,11 +112,14 @@ export function artifactText(content: AssistantArtifactContent): string {
     ].filter(Boolean).join("\n\n");
   }
   const title = content.title.trim();
-  const tags = [...new Set(content.tags.map(tag => tag.trim().replace(/^#+/, "")).filter(Boolean))];
+  const tags = artifactTagValues(content);
   let body = content.body.trim();
-  // Only exact standalone repetitions are omitted; paragraph text and formatting stay intact.
-  while (body && [title, `# ${title}`].includes(body.split("\n", 1)[0]!.trim()))
+  // Only literal titles or explicit Markdown headings are repetitions, not quoted or code text.
+  while (body) {
+    const firstLine = body.split("\n", 1)[0]!.trim();
+    if (firstLine !== title && (!/^#{1,6}\s+/.test(firstLine) || resultPlainText(firstLine) !== title)) break;
     body = body.includes("\n") ? body.slice(body.indexOf("\n") + 1).trimStart() : "";
+  }
   while (tags.length && body) {
     const lastLine = body.slice(body.lastIndexOf("\n") + 1).trim();
     const last = lastLine.split(/\s+/);
@@ -126,7 +127,7 @@ export function artifactText(content: AssistantArtifactContent): string {
         JSON.stringify([...new Set(last.map(tag => tag.replace(/^#+/, "")))].sort()) !== JSON.stringify([...tags].sort())) break;
     body = body.includes("\n") ? body.slice(0, body.lastIndexOf("\n")).trimEnd() : "";
   }
-  return [title, body, tags.map(tag => `#${tag}`).join(" ")].filter(Boolean).join("\n\n");
+  return [format === "plain" ? resultPlainText(title) : title, format === "plain" ? resultPlainText(body) : body, tags.map(tag => `#${tag}`).join(" ")].filter(Boolean).join("\n\n");
 }
 /** Handoff inputs are server-owned text snapshots; known drafts get a readable projection. */
 export function materialText(text: string): string {
