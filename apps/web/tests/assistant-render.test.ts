@@ -318,6 +318,13 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(hinted.includes("小红书创作 · 改写"));
     assert(hinted.includes('aria-haspopup="menu"'));
     assert(!hinted.includes("发送后先确认积分"));
+    const describedProfile = { ...groupedProfile, actions: groupedProfile.actions.map(action => ({ ...action, userDescription: action.actionId === "xiaohongshu-rewrite" ? "提供原文，改写成小红书笔记" : "停用动作的说明" })) };
+    const described = renderToStaticMarkup(createElement(AssistantComposerControls, { profile: describedProfile, selection: { skillId: "xiaohongshu-creator" }, taskHint: { actionId: "xiaohongshu-rewrite" }, onSelection() {}, onAction() {}, disabled: false, addFiles() {}, capabilities: options.inputCapabilities }));
+    assert(described.includes("提供原文，改写成小红书笔记"));
+    assert(!described.includes("停用动作的说明"), "unavailable actions do not become discoverable choices");
+    assert(described.includes("描述需求后，为你选择合适的技能"));
+    const describedText = described.replace(/<[^>]*>/g, "");
+    assert(!describedText.includes("M1") && !describedText.includes("M2"));
     const clarificationProfile = {...groupedProfile,taskOptions:[
       {actionId:"xiaohongshu-write",choice:{skillId:"xiaohongshu-creator",moduleId:"M1",delivery:"writing"},label:"写笔记",sizes:[]},
       {actionId:"xiaohongshu-rewrite",choice:{skillId:"xiaohongshu-creator",moduleId:"M2",delivery:"writing"},label:"改写",sizes:[]},
@@ -887,7 +894,14 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(awaitingApproval.includes("此检索单独计费，不包含在本次创作费用内"));
     const review = renderTask({ ...executingTurn, phase: "needs_review", status: "needs_review" });
     assert(review.includes('data-state="attention"'));
-    assert(review.indexOf("联系管理员") > review.indexOf("</details>"));
+    assert(review.indexOf("反馈问题") > review.indexOf("</details>"));
+    assert(review.includes("复制问题信息"));
+    assert(review.includes("任务暂时停下了，需要确认处理结果。先不用重新发送。"));
+    assert(review.includes("/feedback?from="));
+    assert(!review.includes("供应商仍在处理"));
+    const stoppedUnsettled = renderTask({ ...executingTurn, phase: "stopped", status: "stopped", credits: { state: "review", amount: 12, consumed: 0, released: 0 } });
+    assert(stoppedUnsettled.includes("后续执行已停止，实际费用尚未确定。"));
+    assert(stoppedUnsettled.includes("查看处理结果"));
     assert(!review.includes("assistant-activity-dot"));
     const running = { ...session.turn!.calls[0]!, state: "running" };
     const interrupted = renderTask({ ...executingTurn, phase: "waiting_child", calls: [running] }, session.artifacts, "读取失败");

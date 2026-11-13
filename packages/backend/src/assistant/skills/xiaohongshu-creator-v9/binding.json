@@ -41,7 +41,8 @@
           ]
         }
       ],
-      "researchPolicy": "xhs-empty-window@1"
+      "researchPolicy": "xhs-empty-window@1",
+      "userDescription": "提供主题，研究参考并撰写小红书笔记"
     },
     {
       "moduleId": "M2",
@@ -73,7 +74,8 @@
             }
           ]
         }
-      ]
+      ],
+      "userDescription": "提供原文，改写成小红书笔记"
     },
     {
       "moduleId": "M4",
@@ -137,7 +139,8 @@
             }
           ]
         }
-      ]
+      ],
+      "userDescription": "提供主题，研究参考并设计封面"
     }
   ]
 }

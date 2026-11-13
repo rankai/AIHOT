@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   activityLabel,
   artifactText,
+  artifactTags,
   assistantHref,
   materialText,
   makeTurnInput,
@@ -255,4 +256,30 @@ test("snapshot polling reconciles event-free receipts and retries failures until
     assert.equal(shouldReadSnapshot({ status: "active", phase }, false, false), true);
   assert.equal(shouldReadSnapshot(null, false, false), false);
   assert.equal(shouldReadSnapshot(null, false, true), true);
+});
+
+
+test("article exports share finite display parsing, retain useful content and omit auxiliary fields", () => {
+  const content: AssistantArtifactContent = {
+    title: "标题", body: "## **标题**\n\n**重点**与`a*b`，见[资料](https://example.com/path?q=1)。\n\n3. 第三项\n4. 第四项\n\n| 名称 | 值 |\n| --- | --- |\n| 甲 | 10 | 额外列保留 |\n\n```js\nconst tag = '<b>*原文*</b>';\n```\n\n*未知语法保留*\n\n#AI #写作", intent: "draft", titles: ["备选标题不导出"], tags: ["AI", "#写作", "AI"], sources: [], partial: false, scope: "内部范围不导出",
+  };
+  assert.equal(artifactTags(content), "#AI #写作");
+  assert.equal(artifactText(content, "plain"), "标题\n\n重点与a*b，见资料 (https://example.com/path?q=1)。\n\n3. 第三项\n4. 第四项\n\n名称 | 值\n甲 | 10 | 额外列保留\n\nconst tag = '<b>*原文*</b>';\n\n*未知语法保留*\n\n#AI #写作");
+  const markdown = artifactText(content);
+  assert(markdown.includes("**重点**与`a*b`"));
+  assert(markdown.includes("[资料](https://example.com/path?q=1)"));
+  assert.equal((markdown.match(/#AI #写作/g) ?? []).length, 1);
+  assert(!markdown.includes("备选标题不导出") && !markdown.includes("内部范围不导出"));
+  assert.equal(artifactTags({ ...content, tags: ["多词 标签"] }), "#多词 标签");
+});
+
+test("article exports preserve opening quotes and inline code that match the title", () => {
+  const content: AssistantArtifactContent = {
+    title: "标题", body: "", intent: "draft", titles: [], tags: [], sources: [], partial: false, scope: "",
+  };
+  for (const opening of ["> 标题", "`标题`"]) {
+    const body = `${opening}\n\n后续正文。`;
+    assert.equal(artifactText({ ...content, body }), `标题\n\n${body}`);
+    assert.equal(artifactText({ ...content, body }, "plain"), "标题\n\n标题\n\n后续正文。");
+  }
 });

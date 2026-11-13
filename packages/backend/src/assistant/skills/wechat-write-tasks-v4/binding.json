@@ -44,7 +44,8 @@
           ]
         }
       ],
-      "researchPolicy": "wechat-low-raw-window@1"
+      "researchPolicy": "wechat-low-raw-window@1",
+      "userDescription": "提供主题，研究参考并撰写公众号文章"
     }
   ]
 }

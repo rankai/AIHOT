@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import type { AssistantArtifact, AssistantOptions, AssistantProfileDto, AssistantSkillSelection, AssistantTaskHint } from "@aihot/contracts/assistant";
+import type { AssistantAction, AssistantArtifact, AssistantOptions, AssistantProfileDto, AssistantSkillSelection, AssistantTaskHint } from "@aihot/contracts/assistant";
 import { IconSkill, IconChevronDown } from "../../components/icons";
 import { Button, Select } from "../admin/ui";
 import { ComposerMenu } from "./composer-menu";
 
-export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeDisabled = disabled, refreshOptions, taskHint, confirmationMode = "automatic", onConfirmationMode }: {
+export function AssistantComposerControls({ profile, selection, onSelection, disabled, addFiles, capabilities, artifacts = [], onReference, feeDisabled = disabled, refreshOptions, taskHint, onAction, confirmationMode = "automatic", onConfirmationMode }: {
   taskHint?: AssistantTaskHint | null;
+  onAction?: (action: AssistantAction | null) => void;
   confirmationMode?: import("@aihot/contracts/assistant").AssistantConfirmationMode;
   onConfirmationMode?: (mode: import("@aihot/contracts/assistant").AssistantConfirmationMode) => void;
   profile: AssistantProfileDto; selection: AssistantSkillSelection | null; onSelection: (selection: AssistantSkillSelection | null) => void; disabled: boolean;
@@ -28,19 +29,25 @@ export function AssistantComposerControls({ profile, selection, onSelection, dis
   const hinted = selected && taskHint ? profile.actions.find(action => action.actionId === taskHint.actionId && action.skillId === selected.skillId) : null;
   const label = hinted ? `${hinted.skillName} · ${hinted.label}` : legacy ? `${legacy.skillName} · 本次：${legacy.label}` : selected?.name ?? (selection ? "原技能不可用，请重新选择" : "自动选择技能");
   return <div className="assistant-composer-controls">
-    <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
+    <input ref={input} type="file" multiple accept={capabilities.fileTypes.join(",")} className="sr-only" tabIndex={-1} aria-label="选择 DOCX、TXT 或 MD 文件，可多选" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) addFiles(files); }} />
     <ComposerMenu open={openMenu === "add"} setOpen={(open) => changeMenu("add", open)} disabled={disabled} label="添加材料" className="assistant-add-menu"
       trigger={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>}>
-      <button role="menuitem" type="button" disabled={disabled} onClick={() => input.current?.click()}>上传 TXT / MD 文件</button>
+      <button role="menuitem" type="button" disabled={disabled} onClick={() => { changeMenu("add", false); input.current?.click(); }}>上传文件</button>
       <button role="menuitem" type="button" disabled={disabled || !referenceableArtifacts.length} onClick={() => setPickArtifact(true)}>引用已保存稿件{!referenceableArtifacts.length ? "（暂无）" : ""}</button>
-      <p>上传和读取文本不消耗积分。粘贴链接仅作为文字。</p>
+      <p>支持 Word（DOCX）、TXT、MD，最多 {capabilities.maxAttachments} 个。上传和读取文字不消耗积分。</p>
     </ComposerMenu>
     <ComposerMenu open={openMenu === "skill"} setOpen={(open) => changeMenu("skill", open)} disabled={disabled} label={`选择技能，当前${label}`} title={selection ? `技能：${label}` : "技能"} className={`assistant-skill-control${selection ? "" : " assistant-skill-auto"}`} onOpen={refreshOptions}
       trigger={<><IconSkill size={18} />{selection && <span>{hinted?.label ?? label}</span>}</>}>
       {selection && !legacy && !selected && <button type="button" role="menuitemradio" aria-checked="true" disabled>原技能不可用，请重新选择</button>}
       {legacy && <button type="button" role="menuitemradio" aria-checked="true" disabled>{legacy.skillName} · 本次：{legacy.label}</button>}
-      <button type="button" role="menuitemradio" aria-checked={!selection} disabled={disabled} onClick={() => onSelection(null)}>自动选择技能</button>
+      <button type="button" role="menuitemradio" aria-checked={!selection} disabled={disabled} onClick={() => onSelection(null)}>自动选择技能<span className="block text-[11px] font-normal text-ink-4">描述需求后，为你选择合适的技能</span></button>
       {groups.map((group) => <button type="button" key={group.skillId} role="menuitemradio" aria-checked={selected?.skillId === group.skillId} disabled={disabled || !group.available} onClick={() => onSelection({ skillId: group.skillId })}>{group.name}{!group.available ? " · 暂不可用" : ""}</button>)}
+      {selected && onAction && <>
+        <p>{selected.name}的动作</p>
+        {profile.actions.filter(action => action.skillId === selected.skillId && action.available).map(action => <button key={action.actionId} type="button" role="menuitemradio" aria-checked={hinted?.actionId === action.actionId} disabled={disabled} onClick={() => onAction(action)}>
+          <span className="block">{action.label}</span>{action.userDescription && <span className="block text-[11px] font-normal text-ink-4">{action.userDescription}</span>}
+        </button>)}
+      </>}
     </ComposerMenu>
     <ComposerMenu open={openMenu === "fee"} setOpen={(open) => changeMenu("fee", open)} disabled={feeDisabled} label="费用确认" className="assistant-fee-menu"
       trigger={<><span>{confirmationMode === "automatic" ? "自动" : "每次确认"}</span><IconChevronDown size={12} /></>}>
@@ -90,7 +97,7 @@ export function TaskClarification({profile,selection,taskHint,disabled,confirm}:
      const key=JSON.stringify(option.choice);
      return <label key={key} className="flex items-start gap-2 text-[12px]">
        <input type="radio" name="assistant-task-choice" checked={choiceKey===key} disabled={disabled} onChange={()=>{setChoiceKey(key);setSize(option.sizes[0]??'');}}/>
-       <span>{option.label}</span>
+       <span>{option.label}{option.userDescription && <span className="mt-0.5 block text-[11px] text-ink-4">{option.userDescription}</span>}</span>
      </label>;
    })}</div>
    {current?.sizes.length ? <label className="mt-3 flex items-center gap-2 text-[12px]">图片比例

@@ -1,62 +1,26 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "../admin/ui";
-import { safeExternalUrl } from "../admin/platform-types";
+import { parseResultInline, parseResultText } from "./result-text-data";
 
-/** Provider text is always React text. Only a small set of Markdown syntax is interpreted. */
+/** Provider text stays React text; display and export share the same finite parser. */
 function InlineText({ text }: { text: string }) {
-  const output: ReactNode[] = [];
-  const tokens = /\[[^\]\n]+\]\([^)\n]+\)|\*\*[^*\n]+\*\*|`[^`\n]+`/g;
-  let start = 0;
-  for (const match of text.matchAll(tokens)) {
-    const index = match.index!, token = match[0];
-    output.push(text.slice(start, index));
-    if (token.startsWith("**")) output.push(<strong key={index} className="font-semibold text-ink">{token.slice(2, -2)}</strong>);
-    else if (token.startsWith("`")) output.push(<code key={index} className="rounded-mark bg-bg-sunk px-1 py-0.5 text-[0.92em]">{token.slice(1, -1)}</code>);
-    else {
-      const split = token.indexOf("]("), label = token.slice(1, split), href = safeExternalUrl(token.slice(split + 2, -1));
-      output.push(href ? <a key={index} href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{label}</a> : <Fragment key={index}>{token}</Fragment>);
-    }
-    start = index + token.length;
-  }
-  output.push(text.slice(start));
-  return output;
+  return parseResultInline(text).map((token, index) => token.kind === "strong" ? <strong key={index} className="font-semibold text-ink">{token.text}</strong> :
+    token.kind === "code" ? <code key={index} className="rounded-mark bg-bg-sunk px-1 py-0.5 text-[0.92em]">{token.text}</code> :
+    token.kind === "link" ? <a key={index} href={token.href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{token.text}</a> : <Fragment key={index}>{token.text}</Fragment>);
 }
 
 export function ResultText({ text }: { text: string }) {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n"), blocks: ReactNode[] = [];
-  const tableCells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
-  for (let i = 0; i < lines.length;) {
-    const line = lines[i]!, key = i;
-    if (!line.trim()) { i++; continue; }
-    if (/^\s*```/.test(line)) {
-      const code: string[] = []; i++;
-      while (i < lines.length && !/^\s*```/.test(lines[i]!)) code.push(lines[i++]!);
-      if (i < lines.length) i++;
-      blocks.push(<pre key={key} className="overflow-x-auto rounded-control bg-bg-sunk p-3 text-[12.5px] leading-6"><code>{code.join("\n")}</code></pre>);
-      continue;
+  const blocks = parseResultText(text).map((block, key) => {
+    if (block.kind === "code") return <pre key={key} className="overflow-x-auto rounded-control bg-bg-sunk p-3 text-[12.5px] leading-6"><code>{block.text}</code></pre>;
+    if (block.kind === "table") return <div key={key} className="overflow-x-auto rounded-control border border-line"><table className="w-full min-w-[400px] border-collapse text-left text-[13px]"><thead className="bg-bg-sunk"><tr>{block.headings.map((heading, index) => <th key={index} scope="col" className="border-b border-line px-3 py-2 font-medium text-ink"><InlineText text={heading} /></th>)}</tr></thead><tbody>{block.rows.map((row, index) => <tr key={index}>{block.headings.map((_, column) => <td key={column} className="border-b border-line px-3 py-2 last:border-r-0"><InlineText text={row[column] ?? ""} /></td>)}</tr>)}</tbody></table></div>;
+    if (block.kind === "heading") return <h3 key={key} className="pt-2 text-[16px] font-semibold text-ink"><InlineText text={block.text} /></h3>;
+    if (block.kind === "list") {
+      const items = block.items.map((item, index) => <li key={index}><InlineText text={item} /></li>);
+      return block.ordered ? <ol key={key} start={block.start} className="list-decimal space-y-1 pl-5">{items}</ol> : <ul key={key} className="list-disc space-y-1 pl-5">{items}</ul>;
     }
-    if (line.includes("|") && i + 1 < lines.length && tableCells(lines[i + 1]!).every(cell => /^:?-{3,}:?$/.test(cell))) {
-      const headings = tableCells(line), rows: string[][] = [];
-      i += 2;
-      while (i < lines.length && lines[i]!.trim() && lines[i]!.includes("|")) rows.push(tableCells(lines[i++]!));
-      blocks.push(<div key={key} className="overflow-x-auto rounded-control border border-line"><table className="w-full min-w-[400px] border-collapse text-left text-[13px]"><thead className="bg-bg-sunk"><tr>{headings.map((heading, index) => <th key={index} scope="col" className="border-b border-line px-3 py-2 font-medium text-ink"><InlineText text={heading} /></th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{headings.map((_, column) => <td key={column} className="border-b border-line px-3 py-2 last:border-r-0"><InlineText text={row[column] ?? ""} /></td>)}</tr>)}</tbody></table></div>);
-      continue;
-    }
-    const heading = /^#{1,6}\s+(.+)$/.exec(line);
-    if (heading) { blocks.push(<h3 key={key} className="pt-2 text-[16px] font-semibold text-ink"><InlineText text={heading[1]!} /></h3>); i++; continue; }
-    if (/^\s*(?:[-*+]\s+|\d+[.)]\s+)\S/.test(line)) {
-      const ordered = /^\s*\d+[.)]\s+/.test(line), items: ReactNode[] = [];
-      const pattern = ordered ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-*+]\s+(.+)$/;
-      while (i < lines.length) { const item = pattern.exec(lines[i]!); if (!item) break; items.push(<li key={i}><InlineText text={item[1]!} /></li>); i++; }
-      const start = ordered ? Number(/^\s*(\d+)/.exec(line)?.[1] ?? 1) : undefined;
-      blocks.push(ordered ? <ol key={key} start={start} className="list-decimal space-y-1 pl-5">{items}</ol> : <ul key={key} className="list-disc space-y-1 pl-5">{items}</ul>);
-      continue;
-    }
-    if (/^>\s?/.test(line)) { blocks.push(<blockquote key={key} className="border-l-2 border-line-strong pl-4 text-ink-3"><InlineText text={line.replace(/^>\s?/, "")} /></blockquote>); i++; continue; }
-    const paragraph = [line]; i++;
-    while (i < lines.length && lines[i]!.trim() && !/^\s*(?:```|#{1,6}\s|[-*+]\s|\d+[.)]\s|>)/.test(lines[i]!)) paragraph.push(lines[i++]!);
-    blocks.push(<p key={key} className="whitespace-pre-wrap"><InlineText text={paragraph.join("\n")} /></p>);
-  }
+    if (block.kind === "quote") return <blockquote key={key} className="border-l-2 border-line-strong pl-4 text-ink-3"><InlineText text={block.text} /></blockquote>;
+    return <p key={key} className="whitespace-pre-wrap"><InlineText text={block.text} /></p>;
+  });
   return <div className="min-w-0 space-y-4 break-words text-[14px] leading-7 text-ink-2 [overflow-wrap:anywhere]">{blocks}</div>;
 }
 

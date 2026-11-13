@@ -1,4 +1,5 @@
 import { enqueueMessage, approveQueuedMessage, cancelQueuedMessage, resumeMessageQueue, refreshQueuedQuote } from "@aihot/backend/assistant/message-queue";
+import { readAssistantAttachment } from "@aihot/backend/assistant/attachments";
 import { feeSettings, setFeeAuthorization } from "@aihot/backend/assistant/fees";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -26,7 +27,7 @@ import {
   sessionEvents,
   editArtifact,
 } from "@aihot/backend/assistant/sessions";
-import { answerTurn, controlTurn, archiveSession, handoff } from "@aihot/backend/assistant/controls";
+import { answerTurn, controlTurn, archiveSession, renameSession, restoreSession, handoff } from "@aihot/backend/assistant/controls";
 import { decideCall, refreshCallQuote } from "@aihot/backend/assistant/tools";
 const params = (raw: unknown) =>
   z
@@ -38,6 +39,11 @@ const params = (raw: unknown) =>
     })
     .parse(raw);
 export function registerUserAssistant(app: FastifyInstance) {
+  app.get("/api/assistant/attachments/:key/text", userHandler(async (req, reply, u) => {
+    reply.header("Cache-Control", "no-store");
+    const {key} = z.object({key:z.string().min(1).max(300)}).parse(req.params);
+    return readAssistantAttachment(`user:${u.user.id}`, key);
+  }));
   app.post("/api/assistant/sessions/:id/queue", userHandler(async (req, reply, u) => reply.code(202).send(await enqueueMessage(u.user.id, params(req.params).id, req.body, req.headers["idempotency-key"]))));
   app.post("/api/assistant/sessions/:id/queue/resume", userHandler(async (req, _reply, u) => resumeMessageQueue(u.user.id, params(req.params).id)));
   app.post("/api/assistant/sessions/:id/queue/:entryId/approve", userHandler(async (req, _reply, u) => {
@@ -120,6 +126,8 @@ export function registerUserAssistant(app: FastifyInstance) {
         return decideCall(u.user.id, p.id, p.callId!, action === "approve", req.body, req.headers["idempotency-key"]);
       }),
     );
+  app.post("/api/assistant/sessions/:id/rename", userHandler(async (req, _reply, u) => renameSession(u.user.id, params(req.params).id, req.body)));
+  app.post("/api/assistant/sessions/:id/restore", userHandler(async (req, _reply, u) => restoreSession(u.user.id, params(req.params).id, req.body)));
   for (const action of ["archive", "delete"] as const)
     app.post(
       `/api/assistant/sessions/:id/${action}`,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AssistantArtifact, AssistantCall, AssistantCoverChoiceContext, AssistantSession } from "@aihot/contracts/assistant";
-import { artifactDeliveries, artifactDisplayName, coverChoiceSchemes, currentArtifactTarget, currentImageTarget, deliverySummary, imageDownloadName, indexArtifactDeliveries, uncoveredArtifactUpdates } from "../app/features/assistant/artifact-display.ts";
+import { artifactDeliveries, artifactDisplayName, coverChoiceSchemes, currentArtifactTarget, currentImageTarget, deliverySummary, imageDownloadName, textDownloadName, indexArtifactDeliveries, uncoveredArtifactUpdates } from "../app/features/assistant/artifact-display.ts";
 import { ArtifactVersionQuery, projectArtifactDeliveries } from "../../../packages/backend/src/assistant/delivery-projection.ts";
 
 const content = { title: "本地样本", body: "", intent: "draft" as const, titles: [], tags: [], sources: [], scope: "合成范围", partial: false };
@@ -150,4 +150,10 @@ test("image downloads use a readable versioned name and leave the extension to t
   assert.equal(imageDownloadName("../封面:参考\n图?.png", 1), "封面 参考 图 .png · 第 1 版");
   assert.equal(imageDownloadName(" ... ", 3), "图片 · 第 3 版");
   assert(!imageDownloadName("图片", 1).endsWith(".png"));
+});
+
+
+test("text export names keep a safe title, exact saved version and explicit format", () => {
+  assert.equal(textDownloadName("../稿件:初版\n?.txt", 3, "md"), "稿件 初版 .txt · 第 3 版.md");
+  assert.equal(textDownloadName("...", 1, "txt"), "文案 · 第 1 版.txt");
 });

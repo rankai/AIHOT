@@ -2,7 +2,7 @@ import { receiveAssetUpload, streamAssetContent } from "../http/asset-transfer.t
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import multipart from "@fastify/multipart";
 import { actorOf, type AdminPrincipal } from "@aihot/backend/admin/auth";
-import { assetUploadOptions, AssetError, VIDEO_BYTES, UPLOAD_BYTES, listAssets, assetMetadata, deleteAsset } from "@aihot/backend/operations/assets";
+import { safeAssetRow, assetUploadOptions, AssetError, VIDEO_BYTES, UPLOAD_BYTES, listAssets, assetMetadata, deleteAsset } from "@aihot/backend/operations/assets";
 import { requireAdmin } from "./admin-auth.ts";
 import { sendProblem } from "../http/respond.ts";
 
@@ -29,7 +29,7 @@ export async function registerAdminAssets(app: FastifyInstance) {
   });
   app.get("/api/admin/assets/options", async () => assetUploadOptions());
   app.get("/api/admin/assets/:key", async req => assetMetadata((req.params as {key:string}).key));
-  app.delete("/api/admin/assets/:key", async req => deleteAsset((req.params as {key:string}).key,actorOf(principals.get(req)!)));
+  app.delete("/api/admin/assets/:key", async req => safeAssetRow(await deleteAsset((req.params as {key:string}).key,actorOf(principals.get(req)!))));
   app.get("/api/admin/assets/:key/content", async (req,reply) => {
     return streamAssetContent(req, reply, (req.params as {key:string}).key);
   });

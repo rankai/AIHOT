@@ -3,7 +3,7 @@ import type { AssistantOptions } from "@aihot/contracts/assistant";
 import type { ToolAsset } from "@aihot/contracts/user-tools";
 import { useToolCommand } from "../tools/client";
 import { readDraft, type AssistantDraft } from "./drafts";
-import { attachmentBatchIssue, attachmentIssue, attachmentSelectionCount, patchAttachment, type DraftAttachment } from "./materials-data";
+import { attachmentBatchIssue, attachmentFailure, attachmentIssue, attachmentSelectionCount, patchAttachment, type DraftAttachment } from "./materials-data";
 
 type Update = (next: (previous: AssistantDraft) => AssistantDraft) => void;
 export function useAssistantMaterials({ csrf, scopeKey, capabilities, update, invalidate }: {
@@ -20,28 +20,31 @@ export function useAssistantMaterials({ csrf, scopeKey, capabilities, update, in
       let next: DraftAttachment | undefined;
       while ((next = readDraft(scopeKey).attachments?.find((item) => item.state === "queued"))) {
         const card = next;
+        let failure = attachmentFailure();
         try {
           let assetKey = card.assetKey;
           let contentUrl = card.contentUrl;
           if (!assetKey) {
-            if (!card.file) throw new Error("文件未保留，请移除后重新选择。");
+            if (!card.file) { failure = { error: "文件未保留，请移除后重新选择。", retryable: false }; throw new Error(); }
             patch(card.id, { state: "uploading", error: undefined });
             const body = new FormData(); body.set("file", card.file);
             const asset = await command.run<ToolAsset>("/api/tools/assets", body);
-            if (!asset) throw new Error(command.failure.current?.message ?? "上传未完成，请重试。");
+            if (!asset) {
+              failure = attachmentFailure(command.failure.current?.status, command.failure.current?.message);
+              throw new Error();
+            }
             assetKey = asset.key; contentUrl = asset.contentUrl;
           }
           patch(card.id, { state: "processing", assetKey, contentUrl });
-          const response = await fetch(contentUrl!, { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(30000) });
-          if (!response.ok) throw new Error("无法读取文本，请重试或移除附件。");
-          const bytes = await response.arrayBuffer();
-          if (bytes.byteLength > capabilities.maxFileBytes) throw new Error("文件超过文本材料上限。");
-          const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-          if (!text.trim()) throw new Error("不能使用空白文本。");
-          if (text.length > 30000) throw new Error("文本超过 30000 字符，请缩小材料范围后重新选择；文件已保留在私有素材。");
-          patch(card.id, { state: "ready", text, assetKey, contentUrl, error: undefined });
-        } catch (cause) {
-          patch(card.id, { state: "error", error: cause instanceof Error ? cause.message : "文本处理失败，请重试。" });
+          const response = await fetch(`/api/assistant/attachments/${encodeURIComponent(assetKey)}/text`, { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(30000) });
+          const result = await response.json();
+          if (!response.ok) {
+            failure = attachmentFailure(response.status, typeof result.detail === "string" ? result.detail : undefined);
+            throw new Error();
+          }
+          patch(card.id, { state: "ready", text: result.text, format: result.format, warnings: result.warnings, assetKey, contentUrl, error: undefined });
+        } catch {
+          patch(card.id, { state: "error", ...failure });
         }
       }
     } finally { processing.current = false; }
@@ -51,7 +54,7 @@ export function useAssistantMaterials({ csrf, scopeKey, capabilities, update, in
     const issue = attachmentBatchIssue(attachmentSelectionCount(current.attachments, current.inputIds), files.length, capabilities.maxAttachments);
     if (issue) { setError(issue); return; }
     setError(null); invalidate();
-    const cards: DraftAttachment[] = files.map((file) => { const error = attachmentIssue(file, capabilities); return { id: crypto.randomUUID(), name: file.name, file, state: error ? "error" : "queued", ...(error ? { error } : {}) }; });
+    const cards: DraftAttachment[] = files.map((file) => { const error = attachmentIssue(file, capabilities); return { id: crypto.randomUUID(), name: file.name, file, state: error ? "error" : "queued", ...(error ? { error, retryable: false } : {}) }; });
     update((draft) => ({ ...draft, attachments: [...(draft.attachments ?? []), ...cards] }));
     void drain();
   }
@@ -73,10 +76,10 @@ export function AssistantAttachmentCards({ attachments, max, disabled, retry, re
       <div className="assistant-attachment-list">{attachments.map((card) => <article key={card.id} className="assistant-attachment-card">
         <button type="button" className="assistant-attachment-open" disabled={!card.text && card.state !== "error"} aria-label={`${card.state === "error" ? "查看失败附件" : "预览附件"} ${card.name}`} onClick={() => setPreview(card.id)}>
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="assistant-attachment-icon"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6" /></svg>
-          <span className="min-w-0"><span title={card.name} className="block truncate text-[12px] font-medium text-ink">{card.name}</span><span className={`block text-[10px] ${card.state === "error" ? "text-hot" : "text-ink-3"}`} role="status">{{ queued: "等待上传", uploading: "上传中", processing: "提取文本中", ready: "可用", error: "失败 · 详情" }[card.state]}</span></span>
+          <span className="min-w-0"><span title={card.name} className="block truncate text-[12px] font-medium text-ink">{card.name}</span><span className={`block text-[10px] ${card.state === "error" ? "text-hot" : "text-ink-3"}`} role="status">{card.state === "uploading" && card.name.toLowerCase().endsWith(".docx") ? "上传并读取中" : { queued: "等待上传", uploading: "上传中", processing: "读取文字中", ready: "可用", error: "失败 · 详情" }[card.state]}</span></span>
         </button>
         <button type="button" className="assistant-attachment-remove" disabled={disabled} aria-label={`移除附件 ${card.name}`} title="取消本次引用，私有文件仍保留" onClick={() => remove(card.id)}>×</button>
-        {card.state === "error" && <button type="button" className="assistant-material-action" disabled={disabled} aria-label={`重试附件 ${card.name}`} onClick={() => retry(card)}>重试</button>}
+        {card.state === "error" && card.retryable !== false && <button type="button" className="assistant-material-action" disabled={disabled} aria-label={`重试附件 ${card.name}`} onClick={() => retry(card)}>重试</button>}
 
       </article>)}</div>
       {attachments.some((card) => card.id === preview) && <AttachmentPreview card={attachments.find((card) => card.id === preview)!} close={() => setPreview(null)} />}
@@ -90,6 +93,10 @@ function AttachmentPreview({ card, close }: { card: DraftAttachment; close: () =
   return <dialog ref={(node) => { if (node && !node.open) node.showModal(); }} className="assistant-dialog" aria-label={`${card.state === "error" ? "附件详情" : "附件预览"} ${card.name}`} onCancel={(event) => { event.preventDefault(); close(); }}>
     <div className="flex items-start justify-between gap-3"><h2 className="min-w-0 break-words text-[15px] font-medium">{card.name}</h2><button type="button" className="assistant-material-action shrink-0" aria-label="关闭附件预览" onClick={close}>关闭</button></div>
     {card.error && <p role="alert" className="mt-3 break-words [overflow-wrap:anywhere] text-[13px] text-hot">{card.error}</p>}
+    {card.retryable === false && <p className="mt-2 text-[12px] text-ink-3">请移除并重新选择文件。</p>}
+    {card.text && <p className="mt-3 text-[12px] text-ink-3">助手将使用以下文字 · {card.text.length.toLocaleString()} 字符</p>}
+    {card.format === "docx" && <p className="mt-2 text-[12px] text-ink-3">仅读取正文文字，不还原版式；页眉、页脚与批注不在读取范围内。</p>}
+    {card.warnings?.includes("embedded_content_omitted") && <p className="mt-2 text-[12px] text-ink-3">已读取文字，图片或其他嵌入内容未读取。</p>}
     {card.text && <pre className="assistant-text-preview mt-3">{card.text}</pre>}
   </dialog>;
 }

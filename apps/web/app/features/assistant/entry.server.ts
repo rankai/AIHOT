@@ -1,7 +1,7 @@
 import type { AccountMe } from "@aihot/contracts/account";
 import type { AssistantOptions } from "@aihot/contracts/assistant";
 import { accountGet } from "../../lib/account.server";
-import type { SessionPage } from "./data";
+import type { AssistantSessionPage as SessionPage } from "@aihot/contracts/assistant";
 
 export async function loadAssistantEntry(request: Request) {
   const [me, options, history] = await Promise.all([

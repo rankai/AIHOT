@@ -16,7 +16,7 @@ export type AssistantPhase =
   | "needs_review";
 export type AssistantSkillSelection = { skillId: string; actionId?: never } | { actionId: string; skillId?: never };
 export interface AssistantTaskChoice { skillId: string; moduleId: string; delivery: "writing" | "plans-only" | "image"; size?: string }
-export interface AssistantTaskOption { actionId?: string; choice: AssistantTaskChoice; label: string; sizes: string[] }
+export interface AssistantTaskOption { actionId?: string; choice: AssistantTaskChoice; label: string; userDescription?: string; sizes: string[] }
 export interface AssistantTaskHint {
   actionId: string;
 }
@@ -25,6 +25,8 @@ export interface AssistantAction {
   skillId: string;
   skillName: string;
   label: string;
+  /** Current catalog display metadata only; never an execution instruction. */
+  userDescription?: string;
   available: boolean;
   reason: string | null;
 }
@@ -45,7 +47,7 @@ export interface AssistantFeeAuthorization {
 }
 export interface AssistantFeeSettings { authorization: AssistantFeeAuthorization | null; prices: { turn: AssistantFeePrice; search: AssistantFeePrice | null } }
 export interface AssistantOptions {
-  inputCapabilities: { fileTypes: string[]; maxAttachments: number; maxFileBytes: number };
+  inputCapabilities: { fileTypes: string[]; maxAttachments: number; maxFileBytes: number; maxFileBytesByType?: Record<string, number> };
   assistants: AssistantProfileDto[];
   limits: { modelCalls: number; activeTurns: number; inputCharacters: number };
 }
@@ -178,6 +180,17 @@ export interface AssistantInitialRequest {
   /** The session exists; correct this saved request before requesting a quote. */
   clarification?: { code: "assistant_research_date_required"; message: string };
 }
+export interface AssistantSessionRow {
+  sessionId: string;
+  assistantId: AssistantId;
+  assistantName: string;
+  title: string;
+  createdAt: string;
+}
+export interface AssistantSessionPage {
+  sessions: AssistantSessionRow[];
+  nextCursor: string | null;
+}
 export interface AssistantSession {
   /** Explicit recovery only; never automatically submits or resurrects a dismissed quote. */
   initialRequest?: AssistantInitialRequest | null;
@@ -190,6 +203,8 @@ export interface AssistantSession {
   brief: string;
   revision: number;
   archived: boolean;
+  /** Exact database timestamp for archive compare-and-set; never reconstruct in the browser. */
+  archivedAt?: string | null;
   inputs: { id: string; text: string; source: Record<string, unknown> }[];
   messages: AssistantMessage[];
   artifacts: AssistantArtifact[];

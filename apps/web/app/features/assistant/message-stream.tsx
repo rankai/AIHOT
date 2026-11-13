@@ -173,9 +173,9 @@ export function AssistantMessageStream({
         <div ref={column} className="assistant-message-column">
           {readError && (
             <div role="alert" className="assistant-inline-notice text-hot">
-              连接暂时中断，恢复连接后会继续读取上次请求。上次已知状态：
+              暂时无法获取最新状态，请重新连接。你的输入已保留。上次已知状态：
               {session.turn ? PHASE_LABELS[session.turn.phase] : "尚未开始"}
-              。已读内容仍在；恢复连接后先读取。
+              。
               <Button
                 size="sm"
                 disabled={reading}

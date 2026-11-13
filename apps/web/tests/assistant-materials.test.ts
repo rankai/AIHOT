@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attachmentBatchIssue, attachmentInputIds, attachmentIssue, attachmentSelectionCount, attachmentsReady, patchAttachment, type DraftAttachment } from "../app/features/assistant/materials-data.ts";
+import { attachmentBatchIssue, attachmentFailure, attachmentInputIds, attachmentIssue, attachmentSelectionCount, attachmentsReady, patchAttachment, type DraftAttachment } from "../app/features/assistant/materials-data.ts";
 import { makeTurnInput, type PendingTurn } from "../app/features/assistant/data.ts";
 import { emptyDraft, freezeTurn, rejectedDraft } from "../app/features/assistant/drafts.ts";
 
-const capabilities = { fileTypes: [".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152 };
+const capabilities = { fileTypes: [".docx", ".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152, maxFileBytesByType: { ".docx": 5242880, ".txt": 2097152, ".md": 2097152 } };
 test("a whole excess selection is rejected before adding any card or uploading", () => {
   for (const state of ["queued", "uploading", "processing", "ready", "error"] as const) {
     const existing: DraftAttachment[] = Array.from({ length: 9 }, (_, i) => ({ id: String(i), name: `${i}.txt`, state }));
@@ -49,4 +49,21 @@ test("explicit removal stays empty and frozen skill, files, versions and fee aut
   assert.deepEqual(attachmentInputIds(restored.attachments?.filter((card) => card.id !== "file"), restored.inputIds), []);
   const future = { ...frozen, attachments: [{ ...attachment, id: "new", inputId: "new-material" }] };
   assert.deepEqual(rejectedDraft(future, () => "unused"), { ...future, pendingTurn: undefined });
+});
+
+test("DOCX uses its own cap while old capability responses retain the legacy limit", () => {
+ assert.equal(attachmentIssue({name:"Word.DOCX",size:5242880},capabilities),null);
+ assert.match(attachmentIssue({name:"Word.docx",size:5242881},capabilities)!,/5 MiB/);
+ assert.match(attachmentIssue({name:"Word.doc",size:100},capabilities)!,/另存为 DOCX/);
+ assert(attachmentIssue({name:"a.txt",size:2097153},capabilities));
+ assert(attachmentIssue({name:"Word.docx",size:2097153},{...capabilities,maxFileBytesByType:undefined}));
+});
+
+test("attachment transport and gateway failures use a retryable Chinese message, confirmed rejections keep their detail", () => {
+ for (const status of [undefined, null, 408, 429, 502, 503]) {
+  const failure = attachmentFailure(status, "Failed to fetch / Unexpected token < / TimeoutError");
+  assert.equal(failure.retryable, true);
+  assert.equal(failure.error, "这份文件暂时没读好，可以重试；其他材料已保留。");
+ }
+ for (const status of [413, 422]) assert.deepEqual(attachmentFailure(status, "请缩小材料范围后重新选择。"), {retryable:false,error:"请缩小材料范围后重新选择。"});
 });

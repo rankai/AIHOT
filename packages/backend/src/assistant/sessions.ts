@@ -47,7 +47,7 @@ export async function assistantOptions(userId: number, raw:unknown={}): Promise<
     return { available: !reason, reason };
   };
   return {
-    inputCapabilities: { fileTypes: [".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152 },
+    inputCapabilities: { fileTypes: [".docx", ".txt", ".md"], maxAttachments: 10, maxFileBytes: 2097152, maxFileBytesByType: { ".docx": 5242880, ".txt": 2097152, ".md": 2097152 } },
     assistants: Object.values(profiles).map((p) => ({
       id: p.id,
       name: p.name,
@@ -55,9 +55,9 @@ export async function assistantOptions(userId: number, raw:unknown={}): Promise<
       welcome: p.welcome,
       available: profileActions(p.id).some(a => availability(a).available),
       reason: profileActions(p.id).some(a => availability(a).available) ? null : profileActions(p.id).map(a => availability(a).reason).find(Boolean) ?? "暂无可用技能",
-      taskOptions: bindings.filter(b=>b.version===currentSkillVersions[b.skillId]).flatMap(b=>b.modules.filter(m=>m.profiles.includes(p.id)&&availability({actionId:m.actionId,skillId:b.skillId} as never).available).flatMap(m=>(m.tasks??[]).map(task=>({actionId:m.actionId,choice:{skillId:b.skillId,moduleId:m.moduleId,delivery:task.delivery},label:`${b.name} · ${task.label}`,sizes:task.delivery==='image'?(m.deliveryContract==='xhs-cover-delivery@1'?['3:4']:[...Size.options]):[]})))),
+      taskOptions: bindings.filter(b=>b.version===currentSkillVersions[b.skillId]).flatMap(b=>b.modules.filter(m=>m.profiles.includes(p.id)&&availability({actionId:m.actionId,skillId:b.skillId} as never).available).flatMap(m=>(m.tasks??[]).map(task=>({actionId:m.actionId,choice:{skillId:b.skillId,moduleId:m.moduleId,delivery:task.delivery},label:`${b.name} · ${task.label}`,...(m.userDescription?{userDescription:m.userDescription}:{}),sizes:task.delivery==='image'?(m.deliveryContract==='xhs-cover-delivery@1'?['3:4']:[...Size.options]):[]})))),
       actions: [
-        ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, skillId: a.skillId, skillName: skillNames[a.skillId]!, label: a.label, ...availability(a) })),
+        ...profileActions(p.id).filter(a => policies.find(policy => policy.skillId === a.skillId)?.acceptingNew).map(a => ({ actionId: a.actionId, skillId: a.skillId, skillName: skillNames[a.skillId]!, label: a.label, ...(a.userDescription ? { userDescription: a.userDescription } : {}), ...availability(a) })),
       ],
     })),
     limits: { modelCalls: 8, activeTurns: 2, inputCharacters: 30000 },
@@ -393,6 +393,7 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
       brief: s.brief,
       revision: s.revision,
       archived: !!s.archived_at,
+      archivedAt: s.archived_at_exact,
       inputs: inputs.map((i) => ({ id: i.id, text: i.text, source: i.source })),
       messages: messages.map((m) => ({
         id: m.id,
@@ -497,17 +498,34 @@ function publicCallResult(name: string, value: unknown): unknown {
   return publicResult;
 }
 
-export async function listSessions(userId: number, raw: unknown) {
-  const q = z
-    .object({
-      assistantId: z.enum(["creative", "xiaohongshu"]).optional(),
-      before: z.iso.datetime().optional(),
-    })
-    .parse(raw);
-  return {
-    sessions:
-      await sql`SELECT id AS "sessionId",assistant_id AS "assistantId",assistant_name AS "assistantName",title,created_at AS "createdAt" FROM assistant_sessions WHERE owner_user_id=${userId} AND deleted_at IS NULL AND archived_at IS NULL AND (${q.assistantId ?? null}::text IS NULL OR assistant_id=${q.assistantId ?? null}) AND (${q.before ?? null}::timestamptz IS NULL OR created_at<${q.before ?? null}::timestamptz) ORDER BY created_at DESC LIMIT 50`,
-  };
+export async function listSessions(userId: number, raw: unknown): Promise<import("@aihot/contracts/assistant").AssistantSessionPage> {
+  const q = z.object({
+    assistantId: z.enum(["creative", "xiaohongshu"]).optional(),
+    title: z.string().trim().max(160).default(""),
+    archived: z.enum(["false", "true"]).default("false"),
+    before: z.iso.datetime().optional(),
+    cursor: z.string().max(500).optional(),
+  }).refine(q => !(q.before && q.cursor), { message: "不能同时使用 before 和 cursor" }).parse(raw);
+  const cursorSchema = z.object({ createdAt: z.iso.datetime(), id: z.string().uuid() });
+  let decoded: unknown;
+  if (q.cursor) {
+    try { decoded = JSON.parse(Buffer.from(q.cursor, "base64url").toString("utf8")); }
+    catch { decoded = null; }
+  }
+  const cursor = q.cursor ? cursorSchema.parse(decoded) : null;
+  const pattern = `%${q.title.replace(/[\\%_]/g, "\\$&")}%`;
+  const rows = await sql`SELECT id AS "sessionId",assistant_id AS "assistantId",assistant_name AS "assistantName",title,
+    to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt"
+    FROM assistant_sessions WHERE owner_user_id=${userId} AND deleted_at IS NULL
+    AND (archived_at IS NOT NULL)=${q.archived === "true"}
+    AND (${q.assistantId ?? null}::text IS NULL OR assistant_id=${q.assistantId ?? null})
+    AND title ILIKE ${pattern}
+    AND (${q.before ?? null}::timestamptz IS NULL OR created_at<${q.before ?? null}::timestamptz)
+    AND (${cursor?.createdAt ?? null}::text::timestamptz IS NULL OR (created_at,id)<(${cursor?.createdAt ?? null}::text::timestamptz,${cursor?.id ?? null}::uuid))
+    ORDER BY created_at DESC,id DESC LIMIT 51`;
+  const sessions = rows.slice(0,50) as unknown as import("@aihot/contracts/assistant").AssistantSessionRow[];
+  const last = sessions.at(-1);
+  return { sessions, nextCursor: rows.length > 50 && last ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.sessionId })).toString("base64url") : null };
 }
 export async function sessionEvents(userId: number, id: string, raw: unknown) {
   const q = z.object({ after: z.coerce.number().int().min(0).default(0) }).parse(raw);

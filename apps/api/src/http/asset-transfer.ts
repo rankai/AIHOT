@@ -1,8 +1,8 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
-import { AssetError, VIDEO_BYTES, uploadLimitForMime, UPLOAD_BYTES, UPLOAD_TIMEOUT_MS, uploadKey, prepareUpload, writeUpload, publishUpload, openAsset, type AssetRow } from "@aihot/backend/operations/assets";
+import { safeAssetRow, AssetError, VIDEO_BYTES, uploadLimitForMime, UPLOAD_BYTES, UPLOAD_TIMEOUT_MS, uploadKey, prepareUpload, writeUpload, publishUpload, openAsset, type AssetRow } from "@aihot/backend/operations/assets";
 
 /** Both adapters authenticate before consuming bytes; ownership is supplied by the adapter. */
-export async function receiveAssetUpload(req: FastifyRequest, reply: FastifyReply, actor: string, project: (asset: AssetRow) => unknown = asset => asset) {
+export async function receiveAssetUpload(req: FastifyRequest, reply: FastifyReply, actor: string, project: (asset: AssetRow) => unknown = safeAssetRow) {
     const key = uploadKey(actor, req.headers["idempotency-key"]);
     if (!req.isMultipart()) throw new AssetError(415, "Expected multipart/form-data.");
     if (Number(req.headers["content-length"] ?? 0) > UPLOAD_BYTES) throw new AssetError(413, "Multipart upload exceeds 50 MB plus 64 KiB overhead.");

@@ -5,8 +5,10 @@ import { IconCheck, IconChevronDown, IconClock, IconInfo, IconMinus } from "../.
 import { Button } from "../admin/ui";
 import { useToolCommand } from "../tools/client";
 import { SearchCallCard } from "./turn-cards";
+import { CoverSchemeDetails, CoverSchemeOverview } from "./cover-plan";
+import { useAssistantViewPreference } from "./view-preferences";
 import { artifactDeliveries, coverChoiceSchemes } from "./artifact-display";
-import { PHASE_LABELS, SEARCH_STATE_LABELS, activityLabel, activityIcon, sessionApi } from "./data";
+import { PHASE_LABELS, SEARCH_STATE_LABELS, activityLabel, activityIcon, sessionApi, sessionHref } from "./data";
 
 function ExecutionIcon({ state }: { state: "done" | "active" | "waiting" | "attention" | "stopped" }) {
   return (
@@ -39,14 +41,18 @@ export function CurrentTask({
   const currentActivity = turn?.activities?.find((item) => item.state === "running");
   const working = !readError && !!turn && ["executing", "waiting_child"].includes(turn.phase);
   const [expanded, setExpanded] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   useEffect(() => {
     setExpanded(false);
+    setCopyNotice(null);
   }, [turn?.turnId]);
   useEffect(() => {
     if (turn?.phase === "completed") setExpanded(false);
   }, [turn?.phase]);
   const [longWait, setLongWait] = useState(false);
-  const [coverSelection, setCoverSelection] = useState<{ scope: string; value: { action: "keep-plans" } | { action: "generate"; schemeId: string } } | null>(null);
+  const coverChoice = question?.coverPlan;
+  const choiceScope = JSON.stringify([session.sessionId, turn?.turnId, question?.questionId, coverChoice?.artifactId, coverChoice?.version]);
+  const [coverSelection, setCoverSelection] = useAssistantViewPreference(`cover-selection:${choiceScope}`);
   useEffect(() => {
     setLongWait(false);
     if (!working) return;
@@ -62,10 +68,8 @@ export function CurrentTask({
       (session.deliveries === undefined && turn.activities?.some((item) => item.kind === activityKind && item.state === "completed")));
   const summaryLabel = completedDelivery(["image"], "generate_image") ? "图片已保存" : completedDelivery(["xhs-cover-plan"], "save_xhs_cover_plan") ? "封面方案已保存" : completedDelivery(["text-draft", "xhs-note"], "save_draft") ? "稿件已保存" : PHASE_LABELS[turn.phase];
   const businessActivities = turn.activities?.filter(activity => !["model_request", "load_skill", "read_skill_reference"].includes(activity.kind));
-  const coverChoice = question?.coverPlan;
   const choiceSchemes = coverChoice ? coverChoiceSchemes(coverChoice, session.artifacts) : [];
-  const choiceScope = JSON.stringify([session.sessionId, turn.turnId, question?.questionId, coverChoice?.artifactId, coverChoice?.version]);
-  const selectedCover = coverSelection?.scope === choiceScope ? coverSelection.value : null;
+  const selectedCover = coverSelection === "keep-plans" ? { action: "keep-plans" as const } : coverSelection?.startsWith("scheme:") ? { action: "generate" as const, schemeId: coverSelection.slice(7) } : null;
   const selectedScheme = selectedCover?.action === "generate" ? coverChoice?.schemes.find((scheme) => scheme.schemeId === selectedCover.schemeId) : undefined;
   const choiceDisabled = pending || reading || command.pending || session.archived || !!readError || turn.status !== "waiting";
   const canContinueCover = !choiceDisabled && (selectedCover?.action === "keep-plans" || (!!selectedScheme && coverChoice?.imageAvailable));
@@ -101,16 +105,20 @@ export function CurrentTask({
     turn.activities?.some((activity) => activity.callId === call.callId && activity.state === "needs_review");
   const retainedCredits = turn.credits && ["reserved", "review"].includes(turn.credits.state)
     ? turn.credits.amount - turn.credits.consumed - turn.credits.released : 0;
+  const feeSummary = turn.credits ? ['settled','released'].includes(turn.credits.state)
+    ? `本次用了 ${turn.credits.consumed} 积分${turn.credits.released > 0 ? `，另有 ${turn.credits.released} 积分已退回可用余额` : ""}。`
+    : turn.credits.state === 'review' ? `实际费用尚未确定（已预留 ${turn.credits.amount} 积分）`
+    : `本次已预留上限 ${turn.credits.amount} 积分，结束后按实际交付结算。` : "暂无费用记录";
   const reviewSummary = [
     readError ? "上次已知：" : "",
-    "当前任务已暂停，等待核对。",
+    "任务暂时停下了，需要确认处理结果。先不用重新发送。",
     retainedCredits > 0 ? `${retainedCredits} 积分暂时保留${turn.credits?.consumed === 0 ? "，尚未扣除" : "，费用按实际结果核对"}。` : "",
-    "无需重新提交。",
+
   ].join("");
 
   return (
     <section className="assistant-task-card" aria-label="当前创作状态" data-phase={turn.phase} data-status-known={!readError}>
-      {turn.credits && !(turn.phase === "needs_review" && retainedCredits > 0) && <p role="status" className="text-[12px] leading-relaxed text-ink-3">{['settled','released'].includes(turn.credits.state)?`本次用了 ${turn.credits.consumed} 积分${turn.credits.released > 0 ? `，另有 ${turn.credits.released} 积分已退回可用余额` : ""}。`:turn.credits.state==='review'?`费用核对中（已预留 ${turn.credits.amount} 积分）`:`本次已预留上限 ${turn.credits.amount} 积分，结束后按实际交付结算。`}</p>}
+      {turn.credits && !(turn.phase === "needs_review" && retainedCredits > 0) && <p role="status" className="text-[12px] leading-relaxed text-ink-3">{feeSummary}</p>}
       <details className="assistant-execution" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary className="assistant-execution-summary">
           <ExecutionIcon state={phaseState} />
@@ -198,13 +206,18 @@ export function CurrentTask({
       <div className="assistant-task-controls">
         {!readError && turn.canResume && <Button size="sm" disabled={pending} onClick={() => void control("resume")}>继续处理</Button>}
       </div>
-      {turn.phase === "needs_review" && (
+      {(turn.phase === "needs_review" || turn.phase === "stopped" && retainedCredits > 0) && (
         <div className="text-[13px] leading-relaxed text-ink-2">
-          <p>{reviewSummary}</p>
+          <p>{turn.phase === "stopped" ? `${readError ? "上次已知：" : ""}后续执行已停止，实际费用尚未确定。` : reviewSummary}</p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
             {!readError && <button type="button" className="whitespace-nowrap underline" disabled={reading} onClick={() => void refresh()}>查看处理结果</button>}
-            <Link to="/feedback" className="whitespace-nowrap underline">联系管理员</Link>
+            <Link to={`/feedback?${new URLSearchParams({ from: sessionHref(session.sessionId) })}`} className="whitespace-nowrap underline">反馈问题</Link>
+            <button type="button" className="whitespace-nowrap underline" onClick={async () => {
+              try { await navigator.clipboard.writeText(`会话：${session.sessionId}\n任务：${turn.turnId}\n${readError ? "上次已知状态" : "状态"}：${PHASE_LABELS[turn.phase]}\n费用状态：${feeSummary}`); setCopyNotice("问题信息已复制，可自行粘贴到反馈表。"); }
+              catch { setCopyNotice("复制失败，请重试。"); }
+            }}>复制问题信息</button>
           </div>
+          {copyNotice && <p role="status" className="mt-2 text-[12px] text-ink-3">{copyNotice}</p>}
         </div>
       )}
       {question && (
@@ -215,15 +228,17 @@ export function CurrentTask({
             <button className="text-[12px] text-accent underline" onClick={() => showArtifacts({ artifactId: coverChoice.artifactId, version: coverChoice.version })}>查看方案 · 版本 {coverChoice.version}</button>
             <fieldset className="assistant-cover-choices" disabled={choiceDisabled}>
               <legend className="sr-only">选择封面方案</legend>
-              {choiceSchemes.map((scheme, index) => <label key={scheme.schemeId} className="assistant-cover-choice" data-selected={selectedCover?.action === "generate" && selectedCover.schemeId === scheme.schemeId}>
-                <span className="assistant-cover-choice-number" aria-hidden="true">{index + 1}</span>
-                <span className="min-w-0 flex-1 break-words"><span className="block font-medium">{scheme.name}</span>{scheme.layout && scheme.palette && <span className="mt-1 block text-[12px] leading-relaxed text-ink-3">布局：{scheme.layout} · 配色：{scheme.palette}</span>}</span>
-                <input type="radio" name={`cover-choice-${question.questionId}`} value={`scheme:${scheme.schemeId}`} checked={selectedCover?.action === "generate" && selectedCover.schemeId === scheme.schemeId} disabled={choiceDisabled || !coverChoice.imageAvailable} onChange={() => setCoverSelection({ scope: choiceScope, value: { action: "generate", schemeId: scheme.schemeId } })} />
-              </label>)}
+              {choiceSchemes.map((scheme, index) => <div key={scheme.schemeId} className="min-w-0 rounded-control border border-line">
+                <label className="assistant-cover-choice" data-selected={selectedCover?.action === "generate" && selectedCover.schemeId === scheme.schemeId}>
+                  <div className="min-w-0 flex-1"><CoverSchemeOverview scheme={scheme} index={index} /></div>
+                  <input type="radio" name={`cover-choice-${question.questionId}`} value={`scheme:${scheme.schemeId}`} checked={selectedCover?.action === "generate" && selectedCover.schemeId === scheme.schemeId} disabled={choiceDisabled || !coverChoice.imageAvailable} onChange={() => setCoverSelection(`scheme:${scheme.schemeId}`)} />
+                </label>
+                <div className="px-3 pb-3"><CoverSchemeDetails scheme={scheme} scope={`${session.sessionId}:${coverChoice.artifactId}:${coverChoice.version}:${scheme.schemeId}:choice`} /></div>
+              </div>)}
               <label className="assistant-cover-choice" data-selected={selectedCover?.action === "keep-plans"}>
                 <span className="assistant-cover-choice-number" aria-hidden="true">{coverChoice.schemes.length + 1}</span>
                 <span className="min-w-0 flex-1">只保存方案</span>
-                <input type="radio" name={`cover-choice-${question.questionId}`} value="keep-plans" checked={selectedCover?.action === "keep-plans"} disabled={choiceDisabled} onChange={() => setCoverSelection({ scope: choiceScope, value: { action: "keep-plans" } })} />
+                <input type="radio" name={`cover-choice-${question.questionId}`} value="keep-plans" checked={selectedCover?.action === "keep-plans"} disabled={choiceDisabled} onChange={() => setCoverSelection("keep-plans")} />
               </label>
             </fieldset>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -243,8 +258,8 @@ export function CurrentTask({
           <SearchCallCard call={call} session={session} csrf={csrf} refresh={refresh} statusUnknown={!!readError} activityState={turn.activities?.find((item) => item.callId === call.callId)?.state} />
         </div>
       ))}
-      {turn.phase === "stopped" && (
-        <p className="text-[12px] leading-relaxed text-ink-3">已有内容仍可查看。已发出的外部请求不保证取消，费用按实际结果核对。</p>
+      {turn.phase === "stopped" && deliveries.length > 0 && (
+        <button type="button" className="text-[12px] text-accent underline" onClick={() => showArtifacts(deliveries.at(-1))}>查看已保存作品</button>
       )}
     </section>
   );

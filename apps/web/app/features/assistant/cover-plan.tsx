@@ -1,7 +1,8 @@
 import { useState } from "react";
-import type { AssistantArtifact, AssistantCoverPlan } from "@aihot/contracts/assistant";
+import type { AssistantArtifact, AssistantCoverPlan, AssistantCoverScheme } from "@aihot/contracts/assistant";
 import { Button } from "../admin/ui";
 import { safeSourceHref } from "./data";
+import { useAssistantViewPreference } from "./view-preferences";
 
 type CoverSample = AssistantCoverPlan["evidence"]["samples"][number];
 
@@ -20,40 +21,56 @@ function CoverSampleImage({ sample }: { sample: CoverSample }) {
   );
 }
 
-export function CoverPlanBody({ artifact }: { artifact: AssistantArtifact }) {
+type CoverOverview = Pick<AssistantCoverScheme, "name"> & Partial<Pick<AssistantCoverScheme, "layout" | "palette" | "aspectRatio" | "prompt">>;
+
+export function CoverSchemeOverview({ scheme, index }: { scheme: CoverOverview; index: number }) {
+  return <div className="min-w-0 space-y-2 break-words [overflow-wrap:anywhere]">
+    <p className="text-[14px] font-semibold text-ink">方案 {index + 1} · {scheme.name}{scheme.aspectRatio && <span className="ml-2 text-[11px] font-normal text-ink-4">{scheme.aspectRatio}</span>}</p>
+    {(scheme.layout || scheme.palette) && <dl className="space-y-2 text-[12px] leading-relaxed text-ink-3">
+      {scheme.layout && <div><dt className="text-[11px] text-ink-4">布局节选</dt><dd className="line-clamp-2 whitespace-pre-wrap">{scheme.layout}</dd></div>}
+      {scheme.palette && <div><dt className="text-[11px] text-ink-4">配色</dt><dd className="line-clamp-2 whitespace-pre-wrap">{scheme.palette}</dd></div>}
+    </dl>}
+  </div>;
+}
+
+export function CoverSchemeDetails({ scheme, scope }: { scheme: CoverOverview; scope: string }) {
+  const [expanded, setExpanded] = useAssistantViewPreference(`${scope}:scheme-details`);
+  if (!scheme.layout && !scheme.palette && !scheme.prompt) return null;
+  return <details open={expanded === "open"} className="text-[12px] leading-relaxed text-ink-2">
+    <summary className="cursor-pointer text-accent" onClick={event => { event.preventDefault(); setExpanded(expanded === "open" ? null : "open"); }}>{expanded === "open" ? "收起完整方案" : "展开完整方案"}</summary>
+    <div className="mt-3 space-y-3 whitespace-pre-wrap">
+      {scheme.layout && <p><span className="text-ink-4">完整布局：</span>{scheme.layout}</p>}
+      {scheme.palette && <p><span className="text-ink-4">配色：</span>{scheme.palette}</p>}
+      {scheme.prompt && <p className="select-text"><span className="text-ink-4">完整提示词：</span>{scheme.prompt}</p>}
+    </div>
+  </details>;
+}
+
+export function CoverPlanBody({ artifact, sessionId = "" }: { artifact: AssistantArtifact; sessionId?: string }) {
   const plan = artifact.content.coverPlan;
   const [notice, setNotice] = useState<string | null>(null);
-  if (!plan) return <p className="text-[13px] text-ink-3">封面方案暂不可读，请重新读取作品。</p>;
+  const scope = `${sessionId}:${artifact.artifactId}:${artifact.version}`;
+  const [researchOpen, setResearchOpen] = useAssistantViewPreference(`${scope}:research`);
+  if (!plan) return <p className="whitespace-pre-wrap text-[13px] text-ink-3">{artifact.content.body || "封面方案暂不可读，请重新读取作品。"}</p>;
   const { evidence } = plan;
   return (
     <div className="min-w-0 space-y-4 break-words [overflow-wrap:anywhere]">
       <h3 className="text-[19px] font-semibold text-ink">{artifact.content.title}</h3>
       <p className="text-[13px] leading-relaxed text-ink-3">参考了 {evidence.observedCount} 张可读封面。{evidence.observedCount < evidence.selectedCount ? "部分选定样本未能读取，方案仅依据已读图片。" : "仅代表本次查询中可读的样本。"}</p>
-      {plan.schemes.map((scheme, index) => (
-        <section key={scheme.schemeId} className="min-w-0 space-y-3 border-t border-line pt-4" aria-label={`封面方案 ${index + 1}：${scheme.name}`}>
-          <h4 className="text-[14px] font-semibold text-ink">方案 {index + 1} · {scheme.name}<span className="ml-2 text-[11px] font-normal text-ink-4">{scheme.aspectRatio}</span></h4>
-          {(scheme.layout || scheme.palette) && <dl className="space-y-2 text-[13px] leading-relaxed text-ink-2">
-            {scheme.layout && <div><dt className="text-[11px] text-ink-4">布局</dt><dd className="whitespace-pre-wrap">{scheme.layout}</dd></div>}
-            {scheme.palette && <div><dt className="text-[11px] text-ink-4">配色</dt><dd className="whitespace-pre-wrap">{scheme.palette}</dd></div>}
-          </dl>}
+      <div className="assistant-cover-overviews">{plan.schemes.map((scheme, index) => (
+        <section key={scheme.schemeId} className="min-w-0 space-y-3 rounded-control border border-line p-3" aria-label={`封面方案 ${index + 1}：${scheme.name}`}>
+          <CoverSchemeOverview scheme={scheme} index={index} />
+          <CoverSchemeDetails scheme={scheme} scope={`${scope}:${scheme.schemeId}:artifact`} />
           {!scheme.sourceIds.length && <p className="text-[12px] leading-relaxed text-ink-3">本方案未单独指定参考图；本次研究参考见下方已观察图片。</p>}
-          <details>
-            <summary className="cursor-pointer text-[12px] text-accent">查看完整提示词</summary>
-            <p className="mt-2 select-text whitespace-pre-wrap text-[12px] leading-relaxed text-ink-2">{scheme.prompt}</p>
-          </details>
           <Button size="sm" onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(scheme.prompt);
-              setNotice(`已复制“${scheme.name}”的提示词。`);
-            } catch {
-              setNotice("无法自动复制，请展开提示词后选择文字复制。");
-            }
+            try { await navigator.clipboard.writeText(scheme.prompt); setNotice(`已复制“${scheme.name}”的提示词。`); }
+            catch { setNotice("无法自动复制，请展开提示词后选择文字复制。"); }
           }}>复制方案 {index + 1} 提示词</Button>
         </section>
-      ))}
+      ))}</div>
       {notice && <p role="status" className="text-[12px] text-accent">{notice}</p>}
-      <details className="border-t border-line pt-4">
-        <summary className="cursor-pointer text-[12px] font-medium text-ink-3">查看研究依据</summary>
+      <details open={researchOpen === "open"} className="border-t border-line pt-4">
+        <summary className="cursor-pointer text-[12px] font-medium text-ink-3" onClick={event => { event.preventDefault(); setResearchOpen(researchOpen === "open" ? null : "open"); }}>查看研究依据</summary>
         <div className="mt-3 space-y-1 text-[12px] leading-relaxed text-ink-3">
           <p>纳入候选 {evidence.candidateCount} 张 · 选定 {evidence.selectedCount} 张 · 已下载 {evidence.downloadedCount} 张 · 已分析 {evidence.analyzedCount} 张 · 可读 {evidence.observedCount} 张</p>
           <p>查询“{evidence.keyword}” · {evidence.startDate} 起；查询仅支持起始日期，未提供的信息不作推断。</p>

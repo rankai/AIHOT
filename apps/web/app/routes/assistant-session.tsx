@@ -7,7 +7,7 @@ import type {
 import { SITE } from "@aihot/industry/site";
 import { accountGet } from "../lib/account.server";
 import { ACCOUNT_HEADERS } from "../features/account/data";
-import type { SessionPage } from "../features/assistant/data";
+import type { AssistantSessionPage as SessionPage } from "@aihot/contracts/assistant";
 import { AssistantConversation } from "../features/assistant/conversation";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const [me, options, history, session] = await Promise.all([

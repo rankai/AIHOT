@@ -10,8 +10,8 @@ export const conflict = (message: string) => new AccountError(409, "conflict", m
 export async function ownedSession(db: Db, userId: number, id: string, lock = false) {
   uuid.parse(id);
   const rows = lock
-    ? await db`SELECT * FROM assistant_sessions WHERE id=${id} AND owner_user_id=${userId} AND deleted_at IS NULL FOR UPDATE`
-    : await db`SELECT * FROM assistant_sessions WHERE id=${id} AND owner_user_id=${userId} AND deleted_at IS NULL`;
+    ? await db`SELECT *, to_char(archived_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS archived_at_exact FROM assistant_sessions WHERE id=${id} AND owner_user_id=${userId} AND deleted_at IS NULL FOR UPDATE`
+    : await db`SELECT *, to_char(archived_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS archived_at_exact FROM assistant_sessions WHERE id=${id} AND owner_user_id=${userId} AND deleted_at IS NULL`;
   if (!rows[0]) throw new AccountError(404, "not_found", "会话不存在或不可访问");
   return rows[0];
 }

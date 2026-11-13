@@ -74,6 +74,7 @@ const MAX_TEXT = 2000;
 export default function FeedbackPage() {
   const presentation = usePresentation();
   const [params] = useSearchParams();
+  const returnTo = /^\/assistant\/sessions\/[0-9a-f-]{36}$/.test(params.get("from") ?? "") ? params.get("from") : null;
   const [draft, setDraft] = useState<Draft>({ content: "", email: "", pageUrl: params.get("from") ?? "" });
   const [shot, setShot] = useState<{ file: File; url: string } | null>(null);
   const [state, setState] = useState<{ kind: "idle" | "sending" | "done" | "error"; message?: string; id?: number }>({ kind: "idle" });
@@ -145,8 +146,8 @@ export default function FeedbackPage() {
           <p className="mt-2 text-[14px] text-ink-3">
             反馈编号 <span className="mono font-semibold text-ink">#{state.id}</span>，需要回复时我们会引用这个编号。
           </p>
-          <Link to="/" className="mt-8 inline-flex h-10 items-center rounded-full bg-ink px-6 text-[14px] font-medium text-bg transition-opacity hover:opacity-90">
-            {`回到${navigationLabel(presentation, "selected", "精选")}`}
+          <Link to={returnTo ?? "/"} className="mt-8 inline-flex h-10 items-center rounded-full bg-ink px-6 text-[14px] font-medium text-bg transition-opacity hover:opacity-90">
+            {returnTo ? "返回会话" : `回到${navigationLabel(presentation, "selected", "精选")}`}
           </Link>
         </div>
       </ReadingLayout>
@@ -159,6 +160,7 @@ export default function FeedbackPage() {
   return (
     <ReadingLayout aside={<FeedbackAside />}>
       <header>
+        {returnTo && <Link to={returnTo} onClick={() => writeDraft(draft)} className="mb-3 inline-block text-[13px] text-accent underline">返回会话</Link>}
         <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">说说你的想法</h1>
         <p className="mt-2 text-[14.5px] leading-relaxed text-ink-3">发现 bug、想要的功能、看不顺眼的地方，都可以告诉我，我都会看到。</p>
       </header>

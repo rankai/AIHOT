@@ -8,6 +8,7 @@ import { Transform, type Readable } from "node:stream";
 import path from "node:path";
 import { describeVideoMedia, inputMediaOptions, inspectAsset, declaredMediaLimit, MediaValidationError, INPUT_IMAGE_BYTES, INPUT_AUDIO_BYTES, INPUT_VIDEO_BYTES } from "./asset-media.ts";
 import {inspectTextAttachment,attachmentTextTypes,inputTextFormat,ATTACHMENT_TEXT_BYTES,type AttachmentTextFormat} from "./attachment-text.ts";
+import { inspectDocx, DocxError, isDocx, DOCX_BYTES, DOCX_MIME, type DocxExtraction } from "./docx.ts";
 import { audit } from "../admin/auth.ts";
 import { config } from "../config.ts";
 import { sql, type Tx, type Db } from "../db.ts";
@@ -24,7 +25,7 @@ export const MEMBER_STORAGE_BYTES = 1024 * 1024 * 1024;
 export const MEMBER_STORAGE_FILES = 200;
 export function assetUploadOptions(){
   const media=inputMediaOptions(IMAGE_PIXELS);
-  return {...media,formats:[...media.formats,...(['txt','md'] as const).map(format=>({format,kind:'text' as const,extensions:[format],mime:attachmentTextTypes[format]}))],limits:{...media.limits,textBytes:ATTACHMENT_TEXT_BYTES}};
+  return {...media,formats:[...media.formats,...(['txt','md'] as const).map(format=>({format,kind:'text' as const,extensions:[format],mime:attachmentTextTypes[format]})),{format:'docx',kind:'document' as const,extensions:['docx'],mime:DOCX_MIME}],limits:{...media.limits,textBytes:ATTACHMENT_TEXT_BYTES,documentBytes:DOCX_BYTES}};
 }
 let uploads = 0;
 const activeTemps = new Set<string>();
@@ -34,6 +35,7 @@ export class AssetError extends Error {
   constructor(status: number, message: string) { super(message); this.statusCode = status; if(status===409)this.code="conflict"; }
 }
 export function uploadLimitForMime(mime:string,filename=""){
+  if(isDocx(filename,mime))return DOCX_BYTES;
   if(inputTextFormat(filename,mime))return ATTACHMENT_TEXT_BYTES;
   try{return declaredMediaLimit(mime);}catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);throw error;}
 }
@@ -45,7 +47,7 @@ export function assetPath(key: string): string {
   if (!/^uploads\/redfox\/[a-f0-9]{64}$/.test(key)) throw new AssetError(400, "Invalid asset key.");
   return path.join(config.dataDir, key);
 }
-export interface AssetRow { key: string; content_type: string; bytes: number; purpose: string; status: string; sha256: string; created_at?: Date; expires_at?: Date | null; metadata: { filename: string; origin?: "subscription-video"|"assistant-cover-reference"; kind?: "image"|"audio"|"video"|"text"; validation?: string; width?: number; height?: number; pages?: number }; }
+export interface AssetRow { key: string; content_type: string; bytes: number; purpose: string; status: string; sha256: string; created_at?: Date; expires_at?: Date | null; metadata: { filename: string; origin?: "subscription-video"|"assistant-cover-reference"; kind?: "image"|"audio"|"video"|"text"|"document"; extraction?: DocxExtraction; format?: string; validation?: string; width?: number; height?: number; pages?: number }; }
 export async function prepareUpload(maxBytes = IMAGE_BYTES) {
   if (uploads >= 2) throw new AssetError(503, "Two uploads are already in progress. Try again shortly.");
   uploads++;
@@ -86,20 +88,43 @@ async function imageFormat(file:string) {
   return format;
 }
 export async function publishUpload(input: { actor: string; key: string; file: string; filename: string; mime: string; bytes: number; sha256: string; purpose?: "operation-input"|"operation-output"; origin?: "subscription-video"|"assistant-cover-reference" }, tx?:Tx) {
-  let inspected: Awaited<ReturnType<typeof inspectAsset>> | Awaited<ReturnType<typeof inspectTextAttachment>>;
+  // Replay a completed DOCX upload without rerunning a newer parser. Both the incoming
+  // bytes and immutable original must still match; the existing extraction is authoritative.
+  if (input.purpose !== "operation-output" && !input.origin && isDocx(input.filename,input.mime)) {
+    const [prior] = await (tx ?? sql)<AssetRow[]>`SELECT * FROM stored_files WHERE key=${input.key} AND owner_actor=${input.actor}`;
+    if (prior && prior.sha256 === input.sha256 && prior.metadata.kind === "document") {
+      if (await fileHash(input.file) !== input.sha256 || (await stat(input.file)).size !== input.bytes) throw new AssetError(422,"File changed before publication.");
+      const replay = async (db: Tx) => {
+        await db`SELECT pg_advisory_xact_lock(hashtextextended(${input.key},0))`;
+        const [existing] = await db<AssetRow[]>`SELECT * FROM stored_files WHERE key=${input.key} FOR UPDATE`;
+        if (!existing || existing.status !== "available" || assetExpired(existing) || existing.sha256 !== input.sha256) throw new AssetError(409,"This upload command already refers to unavailable content.");
+        if (await fileHash(assetPath(input.key)).catch(()=>null) !== input.sha256) throw new AssetError(409,"This upload command's original file is unavailable.");
+        return existing;
+      };
+      return tx ? replay(tx) : sql.begin(replay);
+    }
+  }
+  let inspected: Awaited<ReturnType<typeof inspectAsset>> | Awaited<ReturnType<typeof inspectTextAttachment>> | Awaited<ReturnType<typeof inspectDocx>>;
   try {
     const ext=path.extname(input.filename).slice(1) as AttachmentTextFormat;
-    if(input.purpose!=="operation-output"&&inputTextFormat(input.filename,input.mime)){
+    if(input.purpose!=="operation-output"&&isDocx(input.filename,input.mime)){
+      inspected=await inspectDocx(input.file,input.sha256);
+    }else if(input.purpose!=="operation-output"&&inputTextFormat(input.filename,input.mime)){
       inspected=await inspectTextAttachment(input.file,inputTextFormat(input.filename,input.mime)!);
     }else if(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,ext)){
       if(input.mime!==attachmentTextTypes[ext])throw new AssetError(422,"Text format and MIME differ");
       inspected=await inspectTextAttachment(input.file,ext);
     }else inspected=await inspectAsset(input.file,input.filename,input.mime,input.purpose==="operation-output",input.purpose==="operation-output"?OUTPUT_IMAGE_PIXELS:IMAGE_PIXELS,OUTPUT_IMAGE_BYTES); }
-  catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);if(inputTextFormat(input.filename,input.mime)||(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,path.extname(input.filename).slice(1))))throw new AssetError(input.bytes>2*1024*1024?413:422,error instanceof Error?error.message:"Invalid text attachment");throw error;}
+  catch(error){if(error instanceof DocxError)throw new AssetError(error.statusCode,error.message);if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);if(inputTextFormat(input.filename,input.mime)||(input.purpose==="operation-output"&&Object.hasOwn(attachmentTextTypes,path.extname(input.filename).slice(1))))throw new AssetError(input.bytes>2*1024*1024?413:422,error instanceof Error?error.message:"Invalid text attachment");throw error;}
   if(inspected.bytes!==input.bytes)throw new AssetError(422,"File size changed before publication.");
   if(input.origin && (input.purpose!=="operation-output" || inspected.metadata.kind!==(input.origin==="assistant-cover-reference"?"image":"video")))throw new AssetError(422,input.origin==="assistant-cover-reference"?"Cover reference publication requires a validated image output":"Subscription video publication requires a validated video output");
   const mime=inspected.mime;
-  const metadata = { filename: path.posix.basename(input.filename.replaceAll("\\","/")).replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200), ...inspected.metadata, ...(input.origin ? {origin:input.origin} : {}) };
+  const filename = path.posix.basename(input.filename.replaceAll("\\","/")).replace(/[\x00-\x1f\x7f]/g, "");
+  const extension = path.posix.extname(filename);
+  // The extension participates in attachment validation; truncate only the display stem.
+  const storedFilename = filename.length > 200 && extension.length < 200
+    ? filename.slice(0, 200 - extension.length) + extension : filename.slice(0, 200);
+  const metadata = { filename: storedFilename, ...inspected.metadata, ...(input.origin ? {origin:input.origin} : {}) };
   const publish=async (tx:Tx) => {
     let owner = input.actor;
     const generated = /^operation:([1-9][0-9]*)$/.exec(input.actor);
@@ -127,7 +152,7 @@ export async function publishUpload(input: { actor: string; key: string; file: s
     if(existing)return existing;
     const [asset] = await tx<AssetRow[]>`INSERT INTO stored_files(key,content_type,bytes,purpose,sha256,metadata,expires_at,owner_actor)
       VALUES (${input.key},${mime},${input.bytes},${input.purpose??'operation-input'},${input.sha256},${tx.json(metadata)},CASE WHEN ${!!input.origin} THEN now()+interval '30 days' ELSE NULL END,${owner}) RETURNING *`;
-    await audit(input.actor,input.purpose==="operation-output"?"asset.save":"asset.upload",input.key,null,null,{bytes:input.bytes,contentType:mime,sha256:input.sha256,...inspected.metadata},undefined,tx);
+    await audit(input.actor,input.purpose==="operation-output"?"asset.save":"asset.upload",input.key,null,null,{bytes:input.bytes,contentType:mime,sha256:input.sha256,...safeAssetMetadata(metadata)},undefined,tx);
     return asset!;
   };
   return tx?publish(tx):sql.begin(publish);
@@ -159,7 +184,7 @@ async function assetSources(rows:AssetRow[]) {
     FROM operation_results z JOIN operation_runs r ON r.id=z.run_id WHERE z.file_key IN ${sql(rows.map(r=>r.key))}
       AND r.operation_key='subscription.video.download' ORDER BY z.file_key,z.id`;
   const byKey=new Map(origins.map(({file_key,...origin})=>[file_key,origin]));
-  return rows.map(row=>({...row,expired:assetExpired(row),source:byKey.get(row.key)??null}));
+  return rows.map(row=>({...safeAssetRow(row),expired:assetExpired(row),source:byKey.get(row.key)??null}));
 }
 export async function assetMetadata(key:string) {
   assetPath(key);const rows=await sql<AssetRow[]>`SELECT * FROM stored_files WHERE key=${key}`;
@@ -331,3 +356,10 @@ export async function describeGeneratedVideoFile(file:string){
  let detected;try{detected=await describeVideoMedia(file);}catch(error){if(error instanceof MediaValidationError)throw new AssetError(error.status,error.message);throw error;}
  return {file,filename:`generated.${detected.format}`,mime:detected.mime,bytes:detected.bytes,sha256:await fileHash(file),purpose:"operation-output" as const};
 }
+
+/** Explicit outward projection: private document text never belongs in listings or audit. */
+export function safeAssetMetadata(metadata: AssetRow["metadata"]) {
+ const {filename,origin,kind,validation,width,height,pages,format,extraction}=metadata;
+ return {filename,origin,kind,validation,width,height,pages,format,...(extraction ? {extraction:{version:extraction.version,sourceSha256:extraction.sourceSha256,textSha256:extraction.textSha256,characters:extraction.characters,warnings:extraction.warnings}} : {})};
+}
+export function safeAssetRow(row: AssetRow) { return {...row, metadata:safeAssetMetadata(row.metadata)}; }

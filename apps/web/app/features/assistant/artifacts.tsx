@@ -10,12 +10,14 @@ import type {
 import { Badge, Button, Input, Select, Textarea } from "../admin/ui";
 import { toolGet, useToolCommand } from "../tools/client";
 import { ResultText } from "../tools/result-text";
-import { artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
+import { artifactTags, artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
 import { useEditorGuard } from "./unsaved";
 import { CoverPlanBody } from "./cover-plan";
-import { artifactDisplayName, type ArtifactTarget } from "./artifact-display";
+import { artifactDisplayName, textDownloadName, type ArtifactTarget } from "./artifact-display";
 import { ImageDownload } from "./image-download";
-function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
+import { Menu, MenuItem } from "../../components/ui/Menu";
+import { Lightbox } from "../../components/ui/Lightbox";
+function DraftBody({ artifact, onCopy }: { artifact: AssistantArtifact; onCopy?: (text: string) => void }) {
   const { content } = artifact;
   const titles = [...new Set(content.titles.map(title => title.trim()).filter(Boolean))].filter(title => title !== content.title.trim());
   const tags = [...new Set(content.tags.map(tag => tag.trim().replace(/^#+/, "")).filter(Boolean))];
@@ -32,7 +34,7 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
           <ul className="mt-2 list-inside list-decimal space-y-1 text-[14px] text-ink-2">
             {titles.map((title, i) => (
               <li key={i} className="break-words">
-                {title}
+                {title}{onCopy && <button type="button" className="ml-2 text-[12px] text-accent" aria-label={`复制备选标题：${title}`} onClick={() => onCopy(title)}>复制</button>}
               </li>
             ))}
           </ul>
@@ -188,7 +190,7 @@ export function AssistantArtifactPanel({
             key={artifact.artifactId}
             hidden={artifact.artifactId !== selectedId}
           >
-            <AssistantArtifactCard artifact={artifact} followLatest={!chosen && !reading && !acceptedTarget} versionTarget={selectedId === artifact.artifactId && acceptedTarget?.artifactId === artifact.artifactId ? acceptedTarget : undefined} {...props} />
+            <AssistantArtifactCard artifact={artifact} visible={artifact.artifactId === selectedId} followLatest={!chosen && !reading && !acceptedTarget} versionTarget={selectedId === artifact.artifactId && acceptedTarget?.artifactId === artifact.artifactId ? acceptedTarget : undefined} {...props} />
           </div>
         ))}
       </div>
@@ -198,13 +200,18 @@ export function AssistantArtifactPanel({
 export function AssistantArtifactCard(props: Parameters<typeof WritingArtifactCard>[0]) {
   return <WritingArtifactCard {...props} />;
 }
-function ImageBody({ artifact, sessionId }: { artifact: AssistantArtifact; sessionId: string }) {
+function ImageBody({ artifact, sessionId, visible }: { artifact: AssistantArtifact; sessionId: string; visible: boolean }) {
+  const [preview, setPreview] = useState(false);
+  useEffect(() => { if (!visible) setPreview(false); }, [visible]);
   const c = artifact.content;
   if (!c.fileKey) return <p className="text-[13px] text-ink-3">图片文件暂不可读，请重新打开该作品或核对处理结果。</p>;
   const href = `/api/tools/assets/${encodeURIComponent(c.fileKey)}/content`;
   return <div className="min-w-0 space-y-4">
     <h3 className="break-words text-[19px] font-semibold">{c.title}</h3>
-    <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
+    <button type="button" aria-label={`放大图片：${c.title} · 第 ${artifact.version} 版`} className="block w-full cursor-zoom-in rounded-control focus-visible:outline-2 focus-visible:outline-accent" onClick={() => setPreview(true)}>
+      <img src={href} alt={c.title} width={c.width} height={c.height} className="h-auto w-full rounded-control object-contain" />
+    </button>
+    <Lightbox allowOriginalSize images={[{ src: href, alt: `${c.title} · 第 ${artifact.version} 版` }]} index={preview && visible ? 0 : null} onIndex={() => {}} onClose={() => setPreview(false)} />
     <ImageDownload sessionId={sessionId} artifactId={artifact.artifactId} version={artifact.version} title={c.title} fileKey={c.fileKey} />
     <details className="text-[12px] text-ink-3">
       <summary className="cursor-pointer">图片生成记录</summary>
@@ -224,6 +231,7 @@ function WritingArtifactCard({
   onReference,
   versionTarget,
   followLatest = false,
+  visible = true,
 }: {
   artifact: AssistantArtifact;
   sessionId: string;
@@ -234,6 +242,7 @@ function WritingArtifactCard({
   onReference?: (artifact: AssistantArtifact) => void;
   versionTarget?: { artifactId: string; version: number };
   followLatest?: boolean;
+  visible?: boolean;
 }) {
   const command = useToolCommand(csrf, `assistant:session:${sessionId}`);
   const [versions, setVersions] = useState<AssistantArtifact[]>([]);
@@ -381,6 +390,21 @@ function WritingArtifactCard({
       if (alive.current && read.current === controller) setLoading(false);
     }
   }
+  async function copyText(text: string) {
+    if (editing || targetBlocked) return;
+    try { await navigator.clipboard.writeText(text); setNotice("已复制选定的已保存版本。"); }
+    catch { setError("无法自动复制，请选择正文后复制。"); }
+  }
+  function downloadText(format: "txt" | "md") {
+    if (editing || targetBlocked || image || cover) return;
+    const blob = new Blob([artifactText(selected.content, format === "txt" ? "plain" : "markdown")], { type: format === "txt" ? "text/plain;charset=utf-8" : "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+    anchor.href = url; anchor.download = textDownloadName(selected.content.title, selected.version, format);
+    document.body.appendChild(anchor);
+    try { anchor.click(); setNotice(`已下载选定的第 ${selected.version} 版。`); }
+    catch { setError("下载失败，请重试或复制文案。"); }
+    finally { anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  }
   return (
     <article
       className="min-w-0 space-y-4"
@@ -415,21 +439,16 @@ function WritingArtifactCard({
         </div>
       )}
       {!targetBlocked && <div className="flex flex-wrap gap-2">
-        {!image && <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(
-                artifactText(selected.content),
-              );
-              setNotice("已复制选定的已保存版本。");
-            } catch {
-              setError("无法自动复制，请选择正文后复制。");
-            }
-          }}
-        >
+        {!image && !editing && <Button size="sm" onClick={() => void copyText(artifactText(selected.content, cover ? "markdown" : "plain"))}>
           {cover ? "复制" : "复制文案"}
         </Button>}
+        {!image && !cover && !editing && <Menu label="更多文案操作" trigger={<span aria-hidden="true">•••</span>} align="left">{close => <>
+          <MenuItem onSelect={() => { close(); void copyText(artifactText(selected.content)); }}>复制原格式</MenuItem>
+          <MenuItem onSelect={() => { close(); void copyText(selected.content.title); }}>复制标题</MenuItem>
+          {artifactTags(selected.content) && <MenuItem onSelect={() => { close(); void copyText(artifactTags(selected.content)); }}>复制标签</MenuItem>}
+          <MenuItem onSelect={() => { close(); downloadText("txt"); }}>下载 TXT</MenuItem>
+          <MenuItem onSelect={() => { close(); downloadText("md"); }}>下载 MD</MenuItem>
+        </>}</Menu>}
         <Button
           size="sm"
           disabled={loading}
@@ -473,6 +492,7 @@ function WritingArtifactCard({
           转交助手
         </Button>}
       </div>}
+      {editing && <p role="status" className="text-[12px] text-ink-3">先保存修改，再复制或下载文案。</p>}
       {!targetBlocked && historyOpen && (
         <label className="block space-y-2 text-[12px] text-ink-3">
           <span>查看版本</span>
@@ -509,7 +529,7 @@ function WritingArtifactCard({
           </Select>
         </label>
       )}
-      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody artifact={selected} sessionId={sessionId} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} /> : editing ? (
+      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody key={`${sessionId}:${selected.artifactId}:${selected.version}`} artifact={selected} sessionId={sessionId} visible={visible} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} sessionId={sessionId} /> : editing ? (
         <form
           className="space-y-4"
           onSubmit={(event) => {
@@ -578,7 +598,7 @@ function WritingArtifactCard({
           </div>
         </form>
       ) : (
-        <DraftBody artifact={selected} />
+        <DraftBody artifact={selected} onCopy={(text) => void copyText(text)} />
       )}
       {onReference && !image && !targetBlocked && (
         <Button

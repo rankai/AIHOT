@@ -253,6 +253,31 @@ export async function archiveSession(userId: number, id: string, remove: boolean
     return { sessionId: id };
   });
 }
+/** Session metadata deliberately does not advance the paid-work revision or resume the queue. */
+export async function renameSession(userId: number, id: string, raw: unknown) {
+  const input = z.object({ originalTitle: z.string().min(1).max(160), title: z.string().trim().min(1).max(160) }).strict().parse(raw);
+  return sql.begin(async tx => {
+    await lockMemberAdmission(tx, `user:${userId}`);
+    const session = await ownedSession(tx,userId,id,true);
+    if (session.title === input.title) return { sessionId: id };
+    if (session.title !== input.originalTitle) throw conflict("标题已在其他页面修改，请刷新后再保存。你的输入已保留。");
+    await tx`UPDATE assistant_sessions SET title=${input.title} WHERE id=${id}`;
+    await event(tx,id,"session",id);
+    return { sessionId: id };
+  });
+}
+export async function restoreSession(userId: number, id: string, raw: unknown) {
+  const input = z.object({ archivedAt: z.iso.datetime() }).strict().parse(raw);
+  return sql.begin(async tx => {
+    await lockMemberAdmission(tx, `user:${userId}`);
+    const session = await ownedSession(tx,userId,id,true);
+    if (!session.archived_at) return { sessionId: id };
+    if (session.archived_at_exact !== input.archivedAt) throw conflict("会话归档状态已变化，请刷新后再恢复。");
+    await tx`UPDATE assistant_sessions SET archived_at=NULL WHERE id=${id}`;
+    await event(tx,id,"session",id);
+    return { sessionId: id };
+  });
+}
 export async function handoff(userId: number, id: string, raw: unknown, key: unknown) {
   const input = z
       .object({
