@@ -84,3 +84,9 @@ Terra Ultra 在新建空间 40 操作同一隔离实例，未确认报价或执�
 截图：`/private/tmp/aihot-docx-recheck-list-desktop.png`、`/private/tmp/aihot-docx-recheck-list-320.png`、`/private/tmp/aihot-docx-recheck-error-320.png`、`/private/tmp/aihot-docx-recheck-retried-320.png`。未加入仓库。
 
 本轮三项修复已完成定向复核，没有发现新的确定性回归；不扩大为 WPS/Strict OOXML/真机触摸全部兼容的结论。空间 40 已结束，隔离服务与专用测试容器已停止、测试数据保留。未提交、未推送、未部署，localhost:3000 不变。
+
+### 提交前后 CI 补查
+
+整理为 PR #27 后，首轮远端 CI 的类型、Web、Docker 检查通过，后端为 1351/1353：两处共用素材旧测试未随 DOCX 更新。`operation-assets` 的完整限额断言遗漏 `documentBytes`；`redfox-media-upload` 将“非 text”都当作媒体，误将新 document 格式送入媒体格式校验并失败。此为接入测试范围遗漏，不记作首次全绿。
+
+最小修订仅更新上述两处测试：完整断言 DOCX 5 MiB 和 document 格式声明；图片/音频/视频仍必须可识别，TXT/MD/DOCX 明确断言不能进入媒体格式入口。原业务代码和媒体允许范围未改。在原专用库运行对应两个用例，2/2 通过；未重复本地全量测试，最终合并以远端 CI 为准。
