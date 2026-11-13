@@ -7,6 +7,7 @@ import type {
   AssistantConfirmationMode,
 } from "@aihot/contracts/assistant";
 import { Button } from "../admin/ui";
+import { ResultText } from "../tools/result-text";
 import { PHASE_LABELS, materialText } from "./data";
 import { CurrentTask } from "./current-task";
 import { ConversationNavigation, messageAnchorId } from "./conversation-navigation";
@@ -242,9 +243,11 @@ export function AssistantMessageStream({
                           ? "检索结果"
                           : session.assistantName}
                     </p>
-                    <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] text-ink-2 [overflow-wrap:anywhere]">
+                    {savedMessages.get(message.id)?.role === "assistant" ? (
+                      <MessagePrimitive.Parts components={{ Text: ResultText }} />
+                    ) : <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] text-ink-2 [overflow-wrap:anywhere]">
                       <MessagePrimitive.Parts />
-                    </div>
+                    </div>}
                     {savedMessages.get(message.id)?.role !== "tool" && <MessageCopy text={savedMessages.get(message.id)!.text} role={message.role === "user" ? "user" : "assistant"} />}
                   </MessagePrimitive.Root>
                   {deliveriesAfter.has(message.id) && <AssistantDelivery sessionId={session.sessionId} deliveries={deliveriesAfter.get(message.id)!} hasReply={savedMessages.get(message.id)?.role === "assistant"} imageFiles={imageFiles} showArtifacts={showArtifacts} />}

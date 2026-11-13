@@ -260,6 +260,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
   }
   async function requestQuote(message: string, manually = false) {
     if (!confirmation.ready || sendDisabled || quoting.current || !message.trim()) return;
+    setNotice(null);
     // Cross-tab preference changes apply to the next Send, not this request's authorization.
     const confirmationMode = modeRef.current;
     updateDraft(previous => ({ ...previous, submissionError: undefined }));

@@ -9,6 +9,7 @@ import type {
 } from "@aihot/contracts/assistant";
 import { Badge, Button, Input, Select, Textarea } from "../admin/ui";
 import { toolGet, useToolCommand } from "../tools/client";
+import { ResultText } from "../tools/result-text";
 import { artifactText, safeSourceHref, sessionApi, sessionHref } from "./data";
 import { useEditorGuard } from "./unsaved";
 import { CoverPlanBody } from "./cover-plan";
@@ -24,9 +25,7 @@ function DraftBody({ artifact }: { artifact: AssistantArtifact }) {
       <h3 className="break-words text-[19px] font-semibold text-ink">
         {content.title}
       </h3>
-      <div className="whitespace-pre-wrap break-words text-[14px] leading-[1.9] text-ink-2 [overflow-wrap:anywhere]">
-        {content.body}
-      </div>
+      <ResultText text={content.body} />
       {!!titles.length && (
         <div>
           <h4 className="text-[12px] font-medium text-ink-3">备选标题</h4>

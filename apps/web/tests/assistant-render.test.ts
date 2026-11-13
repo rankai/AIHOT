@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { rolldown } from "rolldown";
+import { artifactText } from "../app/features/assistant/data.ts";
 import type { AccountMe } from "@aihot/contracts/account";
 import type {
   AssistantActivity,
@@ -554,6 +555,55 @@ test("real assistant runtime SSR renders only persisted messages, explicit appro
     assert(html.includes("带入正文"));
     assert(html.includes("保留原稿事实"));
     assert(!html.includes("继续处理"));
+    const markdown = [
+      "## 会前准备",
+      "",
+      "**一、会前确认材料**",
+      "",
+      "- 核对事实",
+      "- 保留 `原话`",
+      "",
+      "1. 确认时间",
+      "2. 整理记录",
+      "",
+      "```text",
+      "<script>code stays text</script>",
+      "```",
+      "",
+      "| 项目 | 状态 |",
+      "| --- | --- |",
+      "| 材料 | **齐全** |",
+      "",
+      "<img src=x onerror=alert(1)>",
+      "",
+      "[安全来源](https://example.com/reference)",
+      "[危险链接](javascript:unsafe)",
+      "*未知语法保留*",
+    ].join("\n");
+    const markdownArtifact = { ...session.artifacts[0]!, content: { ...session.artifacts[0]!.content, body: markdown } };
+    const markdownSession = {
+      ...session,
+      messages: session.messages.map(message => ({ ...message, text: message.role === "assistant" ? markdown : "**用户原文保持纯文本**" })),
+      artifacts: [markdownArtifact],
+    };
+    const markdownHtml = render(AssistantConversation, { data: { me, options, session: markdownSession } });
+    for (const tag of ["h3", "strong", "ul", "ol", "pre", "code", "table"]) {
+      assert.match(markdownHtml, new RegExp(`<${tag}(?:\\s|>)`), `${tag} renders as an element`);
+    }
+    assert.equal((markdownHtml.match(/>会前准备<\/h3>/g) ?? []).length, 2, "draft and assistant reply both render Markdown");
+    assert.equal((markdownHtml.match(/>一、会前确认材料<\/strong>/g) ?? []).length, 2);
+    assert.equal((markdownHtml.match(/<table /g) ?? []).length, 2);
+    assert(markdownHtml.includes("**用户原文保持纯文本**"));
+    assert(!markdownHtml.includes(">用户原文保持纯文本</strong>"));
+    assert(markdownHtml.includes("&lt;script&gt;code stays text&lt;/script&gt;"));
+    assert(markdownHtml.includes("&lt;img src=x onerror=alert(1)&gt;"));
+    assert(!markdownHtml.includes("<script>") && !markdownHtml.includes("<img src=x"));
+    assert(markdownHtml.includes('href="https://example.com/reference" target="_blank" rel="noopener noreferrer"'));
+    assert(!markdownHtml.includes('href="javascript:'));
+    assert(markdownHtml.includes("[危险链接](javascript:unsafe)") && markdownHtml.includes("*未知语法保留*"));
+    assert.equal(markdownSession.messages[1]!.text, markdown, "message copy retains saved Markdown");
+    assert.equal(artifactText(markdownArtifact.content), `真实稿件\n\n${markdown}\n\n#AI`, "draft copy retains original Markdown");
+    assert.equal(markdownArtifact.content.body, markdown, "reading does not change saved body");
     const imageHtml = render(AssistantConversation, {
       data: {
         me,
