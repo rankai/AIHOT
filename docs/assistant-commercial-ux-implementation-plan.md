@@ -1,6 +1,6 @@
 # 创作助手商用体验优化实施方案
 
-日期：2026-11-13。状态：**第一批 A 已按后续授权实施并完成核心局部及隔离浏览器验收，未提交、未部署；B 已实现并通过核心局部测试及代表性大小屏浏览器验收；C 的 DOCX 已实施并完成核心局部及代表性浏览器验收，未部署**。基线：`dev@0bcebb5` 及对应 localhost:3000 部署。依据：[商用体验评估 U1–U8](reviews/2026-11-13-assistant-commercial-ux-audit.md)。实际证据与未覆盖项见[第一批验收记录](reviews/2026-11-13-assistant-history-acceptance.md)及[第二批验收记录](reviews/2026-11-13-assistant-delivery-acceptance.md)。方案本身不替代付费、日常数据写入、提交和部署授权。
+日期：2026-11-13；状态更新：2026-11-14。**第一批 A、第二批 B 与 C / U8 的 DOCX 已合并至 `dev@bc56368`，并部署到 localhost:3000**。实施基线为 `dev@0bcebb5`。依据：[商用体验评估 U1–U8](reviews/2026-11-13-assistant-commercial-ux-audit.md)。核心局部及隔离浏览器证据见[第一批验收记录](reviews/2026-11-13-assistant-history-acceptance.md)、[第二批验收记录](reviews/2026-11-13-assistant-delivery-acceptance.md)及 [DOCX 验收记录](reviews/2026-11-13-assistant-docx-acceptance.md)；本地发布、配置保护及部署后操作核验见[部署验收记录](reviews/2026-11-14-assistant-ab-docx-local-deployment.md)。历史首次失败与未覆盖项保留，不因发布而改写。方案本身不替代后续付费或部署授权。
 
 ## 1. 目标与本轮范围
 

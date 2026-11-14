@@ -1,8 +1,8 @@
 # 助手 DOCX 上传与文字提取方案（U8 第一阶段）
 
-日期：2026-11-13。状态：**已实施，核心局部测试与代表性隔离浏览器验收通过，未部署**。用户后续已授权实施 DOCX；本轮改动使用独立测试库与本地模型桩，不修改 localhost:3000，不执行真实付费调用。
+日期：2026-11-13；状态更新：2026-11-14。**已实施，完成核心局部与代表性隔离浏览器验收，随 PR #27 合并至 `dev@bc56368`，已部署到 localhost:3000**。开发验收使用独立测试库与本地模型桩；部署后通过现有材料入口核验 DOCX/TXT/MD 混合上传与 DOCX 预览，没有新增真实付费调用。
 
-依据：[商用体验实施方案](assistant-commercial-ux-implementation-plan.md)的 C / U8。代码核对基于 `codex/assistant-delivery-ux-1113`、`dev@0bcebb5` 及当前未提交的 A/B 改动。A/B 的验收结论继续有效；DOCX 尚未部署到日常实例。
+依据：[商用体验实施方案](assistant-commercial-ux-implementation-plan.md)的 C / U8。实施基线为 `codex/assistant-delivery-ux-1113`、`dev@0bcebb5` 及当时 A/B 改动。历史复审结论与限制继续保留；最新发布与数据核对结果见[本地部署验收记录](reviews/2026-11-14-assistant-ab-docx-local-deployment.md)。
 
 ## 1. 目标与范围
 
