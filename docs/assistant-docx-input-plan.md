@@ -1,6 +1,6 @@
 # 助手 DOCX 上传与文字提取方案（U8 第一阶段）
 
-日期：2026-11-13；状态更新：2026-11-14。**已实施，完成核心局部与代表性隔离浏览器验收，随 PR #27 合并至 `dev@bc56368`，已部署到 localhost:3000**。开发验收使用独立测试库与本地模型桩；部署后通过现有材料入口核验 DOCX/TXT/MD 混合上传与 DOCX 预览，没有新增真实付费调用。
+日期：2026-11-13；状态更新：2026-11-16。**已实施，完成核心局部与代表性隔离浏览器验收，随 PR #27 合并至 `dev@bc56368`，已部署到 localhost:3000**。开发验收使用独立测试库与本地模型桩；部署后通过现有材料入口核验 DOCX/TXT/MD 混合上传与 DOCX 预览，没有新增真实付费调用。
 
 依据：[商用体验实施方案](assistant-commercial-ux-implementation-plan.md)的 C / U8。实施基线为 `codex/assistant-delivery-ux-1113`、`dev@0bcebb5` 及当时 A/B 改动。历史复审结论与限制继续保留；最新发布与数据核对结果见[本地部署验收记录](reviews/2026-11-14-assistant-ab-docx-local-deployment.md)。
 
@@ -12,7 +12,7 @@
 
 本阶段支持 `.docx`、保留 `.txt` / `.md`；只交付文字提取。`.doc`、`.docm`、PDF、OCR、图片理解、音视频、链接正文抓取、Word 在线编辑和 DOCX 导出均不包含。无需 Word、LibreOffice 服务、Python 环境或新的供应商配置。
 
-实施核验边界：当前支持普通 Word DOCX（Transitional OOXML）；Strict OOXML 会明确拒绝，需要另存普通 DOCX。已补验解析库自带的 Microsoft Word 样本，WPS 实际保存样本尚未验证。第二轮复审的修复与证据见[验收记录](reviews/2026-11-13-assistant-docx-acceptance.md#第二轮完整复审)。
+实施核验边界：当前支持普通 Word DOCX（Transitional OOXML）；Strict OOXML 会明确拒绝，需要另存普通 DOCX。已补验解析库自带的 Microsoft Word 样本；2026-11-16 补验本机 WPS Office 12.1.26046 实际另存的普通 DOCX，正文、常规列表、普通表格提取与附件预览一致，见 [WPS 样本验收](reviews/2026-11-16-assistant-wps-docx-acceptance.md)。该结果不扩大为所有 WPS 版本、复杂版式或 DOCX 子格式。第二轮复审的修复与证据见[验收记录](reviews/2026-11-13-assistant-docx-acceptance.md#第二轮完整复审)。
 
 ## 2. 现有链路与复用点
 
