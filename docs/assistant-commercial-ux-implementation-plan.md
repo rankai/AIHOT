@@ -2,7 +2,9 @@
 
 日期：2026-11-13；状态更新：2026-11-17。**第一批 A、第二批 B 与 C / U8 的 DOCX 已合并至 `dev@bc56368`，并部署到 localhost:3000**。实施基线为 `dev@0bcebb5`。依据：[商用体验评估 U1–U8](reviews/2026-11-13-assistant-commercial-ux-audit.md)。核心局部及隔离浏览器证据见[第一批验收记录](reviews/2026-11-13-assistant-history-acceptance.md)、[第二批验收记录](reviews/2026-11-13-assistant-delivery-acceptance.md)及 [DOCX 验收记录](reviews/2026-11-13-assistant-docx-acceptance.md)；本地发布、配置保护及部署后操作核验见[部署验收记录](reviews/2026-11-14-assistant-ab-docx-local-deployment.md)。历史首次失败与未覆盖项保留，不因发布而改写。方案本身不替代后续付费或部署授权。
 
-当前文档核对基线为 `dev@e31c57b`，最近部署仍为 `bc56368`；后续提交未改变运行程序。任务 64 已完成账务收尾，普通 WPS DOCX 样本已补验通过，详见[当前状态](assistant-local-trial-plan.md#当前状态)。历史失败与未覆盖边界保留，本次不重复测试或部署。
+当前文档核对基线为 `dev@4ff2c94`，最近部署仍为 `bc56368`；后续提交未改变运行程序。任务 64 已完成账务收尾，普通 WPS DOCX 样本已补验通过，详见[当前状态](assistant-local-trial-plan.md#当前状态)。历史失败与未覆盖边界保留，本次不重复测试或部署。
+
+**本期收口决定（2026-11-17）：**用户确认 A/B 与 DOCX 范围已收口，后续按现有报价正常使用，不再重复已通过的验收。真机软键盘、触摸菜单、手机附件选择和图片下载体验明确后置，不阻塞本期收口，也不标为已通过。其余材料格式、媒体能力、发布与协作等仅按实际需求另行评估；具体分类见[本期收口与后续安排](assistant-local-trial-plan.md#本期收口与后续安排2026-11-17)。后续仅在出现具体问题或批准新增能力时，对受影响范围做必要验证，不重启全套验收。
 
 ## 1. 目标与本轮范围
 
