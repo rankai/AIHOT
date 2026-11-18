@@ -1,4 +1,4 @@
-import { currentSkillVersions } from "@aihot/backend/assistant/bindings";
+import { currentSkillVersions, actions, bindings } from "@aihot/backend/assistant/bindings";
 import { researchDateRange } from "@aihot/backend/assistant/research-window";
 import { finishResearchTask } from "./assistant-research-window-fixture.ts";
 import { quoteLegacyTurn, submitLegacyTurn as submitTurn } from "./assistant-legacy-fixture.ts";
@@ -390,14 +390,17 @@ test("M1 persisted search → analysis → draft → credits; bypasses cannot de
       const { sessionId: sid } = await createSession(u.id, { assistantId: "xiaohongshu" }, randomUUID());
       const raw = { message: "为上班族写一篇小红书笔记：AI时代下，人如何才能不被替代？先研究再写作，不提供风格样本。", expectedRevision: 1, skillSelection: { actionId: "xiaohongshu-write" } };
       // Admit a real v7 contract in this serial fixture, then restore the current catalog before execution/recovery.
-      const currentVersion=currentSkillVersions["xiaohongshu-creator"]!;
+      const currentVersion=currentSkillVersions["xiaohongshu-creator"]!,currentActions=[...actions];
+      const historical=bindings.find(b=>b.skillId==='xiaohongshu-creator'&&b.version==='7')!;
       const run=await (async()=>{
         currentSkillVersions["xiaohongshu-creator"]="7";
+        // Reconstruct both parts of the old catalog only while admitting the historical task.
+        actions.splice(0,actions.length,...currentActions.filter(a=>a.skillId!=='xiaohongshu-creator'),...historical.modules.map(m=>({actionId:m.actionId,label:m.label,...(m.userDescription?{userDescription:m.userDescription}:{}),skillId:historical.skillId,moduleId:m.moduleId,profiles:m.profiles})));
         try {
           const q=await currentQuoteTurn(u.id,sid,raw);
           assert.equal(q.amount,220);
           return await currentSubmitTurn(u.id,sid,{...raw,quoteId:q.quoteId},randomUUID());
-        } finally { currentSkillVersions["xiaohongshu-creator"]=currentVersion; }
+        } finally { currentSkillVersions["xiaohongshu-creator"]=currentVersion; actions.splice(0,actions.length,...currentActions); }
       })();
       const hits = redfox.hits();
       for (let i = 0; i < 4; i++) await advance(run.runId);

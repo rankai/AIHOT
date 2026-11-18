@@ -58,6 +58,10 @@ test('word parser keeps three classes, safe positions, per-occurrence English am
 });
 test('word workflows freeze exact batches, reuse duplicate calls without sleeping parent, and settle report or partial queries',async()=>{
  const [db]=await sql`SELECT current_database() name,inet_server_port() port`;assertConfiguredTestDatabase(db!.name,db!.port);
+ const [priorPolicy]=await sql`SELECT * FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+ const [priorPrice]=await sql`SELECT * FROM service_prices WHERE service='redfox.query' AND model=${operationId}`;
+ const [priorMemberPrice]=await sql`SELECT * FROM member_tool_prices WHERE kind='query' AND provider='redfox' AND model=${operationId} AND tier='' AND parameter_match='{}'`;
+ const priorBudgets=await sql`SELECT * FROM budgets WHERE service IN ('assistant.text','assistant.quote-preparation','redfox.query')`;
  const restore=await allowTestBudgetScope(['assistant.text','assistant.quote-preparation','redfox.query'],'member'),oldPrivate=config.allowPrivateNetworkFetch;
  const model=`word-${tag()}`;let modelCount=0,queryCount=0,repeated=false,scenario='zero',status=200,drop=false;const requests:any[]=[];
  const server=http.createServer((req,res)=>{let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{queryCount++;const input=JSON.parse(body);requests.push(input);assert.equal(req.url,'/story/api/cozeSkill/sensitiveWordSearch');if(input.platform){assert.equal(input.platform,'小红书');assert.equal(input.source,XHS_WORD_SOURCE);assert.equal(req.headers['x-api-key'],'synthetic-key');}else {assert.equal(input.source,undefined);assert.equal(req.headers.redfox_api_key,'synthetic-key');}if(drop){req.socket.destroy();return;}res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(input.platform&&input.content.length>2000?{code:1003,msg:'body.content参数长度超过限制，最大允许2000字符'}:{code:status===200?2000:429,data:response(input.content)}));});});await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -168,6 +172,15 @@ test('word workflows freeze exact batches, reuse duplicate calls without sleepin
   const parameters={content:'普通文案',platform:'小红书'},prior=queryCount;status=429;const window=tag();await assert.rejects(queryMediaTool(operationId,parameters,window,{}));await assert.rejects(queryMediaTool(operationId,parameters,window,{}));assert.equal(queryCount,prior+1);
   status=200;drop=true;const unknown=tag(),before=queryCount;await assert.rejects(queryMediaTool(operationId,parameters,unknown,{}));await assert.rejects(queryMediaTool(operationId,parameters,unknown,{}));assert.equal(queryCount,before+1);drop=false;
   await queryMediaTool(operationId,{content:'普通文案'},tag(),{});
- }finally{config.allowPrivateNetworkFetch=oldPrivate;await restore();await modelStub.close();await new Promise<void>(r=>server.close(()=>r()));}
+ }finally{
+  if(priorPolicy)await sql`UPDATE settings SET value=${sql.json(priorPolicy.value)},updated_at=${priorPolicy.updated_at},updated_by=${priorPolicy.updated_by} WHERE key='assistant.skills.xiaohongshu-creator'`;
+  else await sql`DELETE FROM settings WHERE key='assistant.skills.xiaohongshu-creator'`;
+  if(priorPrice)await sql`UPDATE service_prices SET per_request=${priorPrice.per_request},source_url=${priorPrice.source_url} WHERE service='redfox.query' AND model=${operationId}`;
+  else await sql`DELETE FROM service_prices WHERE service='redfox.query' AND model=${operationId}`;
+  if(priorMemberPrice)await sql`UPDATE member_tool_prices SET ${sql(priorMemberPrice,'base_credits','image_credits','video_second_credits','reference_credits','enabled','version','updated_at')} WHERE id=${priorMemberPrice.id}`;
+  else await sql`UPDATE member_tool_prices SET enabled=false WHERE kind='query' AND provider='redfox' AND model=${operationId} AND tier='' AND parameter_match='{}'`;
+  for(const budget of priorBudgets)await sql`UPDATE budgets SET per_minute=${budget.per_minute},per_hour=${budget.per_hour},per_day=${budget.per_day} WHERE service=${budget.service}`;
+  config.allowPrivateNetworkFetch=oldPrivate;await restore();await modelStub.close();await new Promise<void>(r=>server.close(()=>r()));
+ }
 });
 after(async()=>{await stopBoss();await closeDb();});
