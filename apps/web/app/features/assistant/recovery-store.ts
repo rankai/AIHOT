@@ -16,10 +16,11 @@ export const recoveryId = (record: Recovery) => `${record.kind}:${record.kind ==
 const string = (v: unknown, max = 200) => typeof v === "string" && v.length > 0 && v.length <= max;
 const object = (v: any) => v && typeof v === "object" && !Array.isArray(v);
 const keys = (v: any, allowed: string[]) => object(v) && Object.keys(v).every(k => allowed.includes(k));
+function validWordSource(v:any){return keys(v,['kind','start','end'])&&v.kind==='message'&&Number.isInteger(v.start)&&v.start>=0&&Number.isInteger(v.end)&&v.end>v.start || keys(v,['kind','inputId'])&&v.kind==='input'&&string(v.inputId) || keys(v,['kind','artifactId','version'])&&v.kind==='artifact'&&string(v.artifactId)&&Number.isInteger(v.version)&&v.version>0;}
 function input(v: any): boolean {
   return keys(v, ["message", "expectedRevision", "skillSelection", "inputIds", "artifactVersions", "autoAuthorizationId", "taskHint", "taskChoice", "confirmationMode"]) && (v.confirmationMode === undefined || ["automatic", "manual"].includes(v.confirmationMode)) && string(v.message, 30000) && Number.isInteger(v.expectedRevision) && v.expectedRevision >= 0 &&
     (v.skillSelection === null || keys(v.skillSelection, ["actionId"]) && string(v.skillSelection.actionId) || keys(v.skillSelection, ["skillId"]) && string(v.skillSelection.skillId)) &&
-    (v.taskChoice === undefined || keys(v.taskChoice,["skillId","moduleId","delivery","size"]) && string(v.taskChoice.skillId) && string(v.taskChoice.moduleId) && ["writing","plans-only","image"].includes(v.taskChoice.delivery) && (v.taskChoice.size===undefined || string(v.taskChoice.size))) &&
+    (v.taskChoice === undefined || keys(v.taskChoice,["skillId","moduleId","delivery","size","wordSource"]) && string(v.taskChoice.skillId) && string(v.taskChoice.moduleId) && ["writing","plans-only","image","title-report","word-check"].includes(v.taskChoice.delivery) && (v.taskChoice.size===undefined || string(v.taskChoice.size)) && (v.taskChoice.wordSource===undefined || validWordSource(v.taskChoice.wordSource))) &&
     (v.taskHint === undefined || v.taskHint === null || keys(v.taskHint, ["actionId"]) && string(v.taskHint.actionId)) &&
     Array.isArray(v.inputIds) && v.inputIds.length <= 10 && v.inputIds.every((id: unknown) => string(id)) &&
     Array.isArray(v.artifactVersions) && v.artifactVersions.length <= 10 && v.artifactVersions.every((r: any) => keys(r, ["artifactId", "version"]) && string(r.artifactId) && Number.isInteger(r.version) && r.version > 0) &&

@@ -23,7 +23,9 @@ test("strict skill selection and explicit empty selections",async()=>{
  assert.deepEqual(manual.map(c=>c.moduleId),["M2"]);
  await assert.rejects(()=>resolveCandidate(manual,"xiaohongshu-creator","M1"));
  await assert.rejects(()=>candidates("xiaohongshu",{actionId:"general-writing"}));
- assert.equal((await candidates("creative")).length,8);
+ const creative=await candidates("creative");
+ assert.equal(creative.length,11);
+ assert.deepEqual(creative.filter(c=>c.skillId==='xiaohongshu-creator').map(c=>c.moduleId).sort(),['M1','M2','M3-A','M3-B','M4','M5']);
  const base={message:"材料",expectedRevision:1};
  assert.equal(TurnInput.parse(base).inputIds,undefined);
  assert.deepEqual(TurnInput.parse({...base,inputIds:[],artifactVersions:[]}).inputIds,[]);
@@ -179,8 +181,8 @@ test("automatic fee admission freezes input, serializes replay, counts all versi
  await controlTurn(user.id,raceSession.sessionId,winner.value.turnId,"stop",{generation:0});
  // Oversized text is rejected before issuing a quote or reserving credits.
  const boundarySession=await createSession(user.id,{assistantId:"creative"},randomUUID());
- await assert.rejects(()=>quoteTurn(user.id,boundarySession.sessionId,{message:"龘".repeat(30000),expectedRevision:1,inputIds:[],artifactVersions:[]}),/连续文本过长/);
- await assert.rejects(()=>quoteTurn(user.id,boundarySession.sessionId,{message:"龘 ".repeat(14000),expectedRevision:1,inputIds:[],artifactVersions:[]}),/上下文超过上限/);
+ await assert.rejects(()=>quoteTurn(user.id,boundarySession.sessionId,{message:"龘".repeat(30000),expectedRevision:1,inputIds:[],artifactVersions:[],skillSelection:{actionId:"general-writing"}}),/连续文本过长/);
+ await assert.rejects(()=>quoteTurn(user.id,boundarySession.sessionId,{message:"龘 ".repeat(14000),expectedRevision:1,inputIds:[],artifactVersions:[],skillSelection:{actionId:"general-writing"}}),/上下文超过上限/);
  const [noTurns]=await sql`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${boundarySession.sessionId}`;
  assert.equal(noTurns!.n,0);
  // A new automatic authorization cannot turn an earlier manual quote into consent.

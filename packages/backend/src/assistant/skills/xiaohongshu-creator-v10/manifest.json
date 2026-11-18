@@ -1,0 +1,338 @@
+{
+  "formatVersion": 1,
+  "skillId": "xiaohongshu-creator",
+  "version": "10",
+  "name": "xiaohongshu-creator",
+  "description": "小红书写作、标题生成与评分、文案检测及受控封面创作",
+  "source": {
+    "kind": "external",
+    "url": "https://github.com/redfox-data/redfox-community/tree/d2e24f02340a440a73a96aa6ad6a65f681fba89f/skills/xiaohongshu-creator",
+    "commit": "d2e24f02340a440a73a96aa6ad6a65f681fba89f",
+    "license": "NOASSERTION",
+    "usageBasis": "user-directed-local-evaluation",
+    "maintainer": "AIHOT integration; upstream redfox-data/redfox-community",
+    "review": "docs/assistant-skill-integration-standard.md"
+  },
+  "modules": [
+    {
+      "moduleId": "M1",
+      "version": "9",
+      "description": "真实笔记检索、规律分析与完整M1创作",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M1",
+      "resources": [
+        "M1",
+        "m1-adaptation",
+        "hot-article-format"
+      ],
+      "tools": [
+        "save_draft",
+        "search_xhs_notes",
+        "analyze_xhs_research"
+      ],
+      "outputKinds": [
+        "xhs-note"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M1/success",
+        "fixtures#M1/missing-input",
+        "fixtures#M1/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "writing-delivery@1",
+      "hash": "27998d945a8f130afb1a1a65eda1aaeeadb8540fd08c0886c246e384b11aa0b7"
+    },
+    {
+      "moduleId": "M2",
+      "version": "7",
+      "description": "Redfox原文M2小红书风格改写（完整platform-rules）",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M2",
+      "resources": [
+        "M2",
+        "adaptation",
+        "platform-rules"
+      ],
+      "tools": [
+        "save_draft"
+      ],
+      "outputKinds": [
+        "xhs-note"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M2/success",
+        "fixtures#M2/missing-input",
+        "fixtures#M2/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "writing-delivery@1",
+      "hash": "54979b091a0c44c9a8e7d88d63d3364484e9300aaff8abdecb7f097ca563735b"
+    },
+    {
+      "moduleId": "M4",
+      "version": "7",
+      "description": "真实封面查询与视觉研究、三套方案及可选单张图片",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M4",
+      "resources": [
+        "M4",
+        "core-workflow"
+      ],
+      "tools": [
+        "search_xhs_covers",
+        "analyze_xhs_covers",
+        "save_xhs_cover_plan",
+        "generate_image"
+      ],
+      "outputKinds": [
+        "xhs-cover-plan",
+        "image"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M4/success",
+        "fixtures#M4/missing-input",
+        "fixtures#M4/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "xhs-cover-delivery@1",
+      "hash": "c967e2fb3f0bab0bed30aacf2152d4f5e69076fc99a6b5294db600b4bc5d4411"
+    },
+    {
+      "moduleId": "M3-A",
+      "version": "10",
+      "description": "起标题；同主题参考研究与编辑建议",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M3-A",
+      "resources": [
+        "M3-A",
+        "title-adaptation",
+        "title-score-guide",
+        "trend-data-format"
+      ],
+      "tools": [
+        "search_xhs_titles",
+        "save_xhs_title_report"
+      ],
+      "outputKinds": [
+        "xhs-title-report"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M3-A/success",
+        "fixtures#M3-A/missing-input",
+        "fixtures#M3-A/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "xhs-title-report@1",
+      "hash": "57877f410ceb40ec7e324f6b108366f26a125931be832a7dbdabad61166a3a58"
+    },
+    {
+      "moduleId": "M3-B",
+      "version": "10",
+      "description": "评标题；同主题参考研究与编辑建议",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M3-B",
+      "resources": [
+        "M3-B",
+        "title-adaptation",
+        "title-score-guide",
+        "trend-data-format"
+      ],
+      "tools": [
+        "search_xhs_titles",
+        "save_xhs_title_report"
+      ],
+      "outputKinds": [
+        "xhs-title-report"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M3-B/success",
+        "fixtures#M3-B/missing-input",
+        "fixtures#M3-B/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "xhs-title-report@1",
+      "hash": "39f4a2716ebc75f854391158b7dcd6a030c2742a53b97512c497222567b54a24"
+    },
+    {
+      "moduleId": "M5",
+      "version": "10",
+      "description": "检查单份明确原文并保存检测与修改建议报告",
+      "inputSchema": "writing-input@1",
+      "entryResource": "M5",
+      "resources": [
+        "M5",
+        "word-check-adaptation",
+        "prohibited-word-workflow"
+      ],
+      "tools": [
+        "check_xhs_words",
+        "save_xhs_word_check"
+      ],
+      "outputKinds": [
+        "xhs-word-check"
+      ],
+      "modelCapabilities": [
+        "text-tools"
+      ],
+      "fixtures": [
+        "fixtures#M5/success",
+        "fixtures#M5/missing-input",
+        "fixtures#M5/delivery"
+      ],
+      "toolContractVersion": 1,
+      "outputSchemaVersion": 1,
+      "deliveryContract": "xhs-word-check@1",
+      "hash": "2c42400c2914f82c7e2e23ff2e6d355fb4d0209bea5294482d38ab76421e614d"
+    }
+  ],
+  "resources": [
+    {
+      "resourceId": "M1",
+      "path": "write.md",
+      "type": "text/markdown",
+      "bytes": 16329,
+      "sha256": "c9f0c76fe679db5354bd538a37b72a55950a14cfc2f9d6131c6f328e8f530f48"
+    },
+    {
+      "resourceId": "M2",
+      "path": "rewrite.md",
+      "type": "text/markdown",
+      "bytes": 8259,
+      "sha256": "d651f9e0a1b5f2aeac0e6376b404c3984a6e592e91f1891bb603d7b1a3482e7f"
+    },
+    {
+      "resourceId": "adaptation",
+      "path": "adaptation.md",
+      "type": "text/markdown",
+      "bytes": 5165,
+      "sha256": "de0dcd320cf8d33e41bc97813f0dbfe5c45b7d490164b72ec0ef3f577c7d65ba"
+    },
+    {
+      "resourceId": "upstream-skill",
+      "path": "SKILL.md",
+      "type": "text/markdown",
+      "bytes": 21738,
+      "sha256": "3ff2f1f0e91f2fcbc2ae6cda08aa1ff2a3581cf195d7a8939c3f11d1fb518a48"
+    },
+    {
+      "resourceId": "platform-rules",
+      "path": "assets/platform-rules.md",
+      "type": "text/markdown",
+      "bytes": 2886,
+      "sha256": "db88ca7f08d151568bb25050bce697b9aa8564c2c6edbcfcbc7d18356015a02e"
+    },
+    {
+      "resourceId": "hot-article-format",
+      "path": "references/xhs_hot_article_format.md",
+      "type": "text/markdown",
+      "bytes": 5791,
+      "sha256": "cd946e0efa3930f505a3ee7ed2a0eb99ec09820f3cebc7bd5ec8c2a6731bd1ee"
+    },
+    {
+      "resourceId": "fixtures",
+      "path": "fixtures.json",
+      "type": "application/json",
+      "bytes": 5807,
+      "sha256": "535aa06bc1b36d8603f8dad2821474a878223dc689ccee0bbdd3dd122fbdfdde"
+    },
+    {
+      "resourceId": "M4",
+      "path": "cover.md",
+      "type": "text/markdown",
+      "bytes": 2558,
+      "sha256": "13faa2ce4dd529671249362bfe78331bafa83957888d78e47cb957eeaad686ac"
+    },
+    {
+      "resourceId": "core-workflow",
+      "path": "references/core_workflow.md",
+      "type": "text/markdown",
+      "bytes": 12186,
+      "sha256": "0270b41677b132f7fe5bd7ca023b20a45a082814454554c9b09cdc16d6966ab1"
+    },
+    {
+      "resourceId": "m1-adaptation",
+      "path": "m1-adaptation.md",
+      "type": "text/markdown",
+      "bytes": 6443,
+      "sha256": "407ca0035a7b6f340495c9cf7cd9d16682464fd0d802e80c03840644b1d449f6"
+    },
+    {
+      "resourceId": "M3-A",
+      "path": "generate-titles.md",
+      "type": "text/markdown",
+      "bytes": 364,
+      "sha256": "71b4fbbba9a2675f2f5ac209ff907b7bc096e9d00e7e50b3463a038826413baf"
+    },
+    {
+      "resourceId": "M3-B",
+      "path": "score-titles.md",
+      "type": "text/markdown",
+      "bytes": 389,
+      "sha256": "267edc8e5fbe3c9d2dc0309e8c83f3e71abc66425118e3cd2121903ab694d675"
+    },
+    {
+      "resourceId": "title-adaptation",
+      "path": "title-adaptation.md",
+      "type": "text/markdown",
+      "bytes": 2414,
+      "sha256": "497acbd63529ae09e7b5b9ab959738a0879b523b6b00c25cb2e4f0d800d59b6e"
+    },
+    {
+      "resourceId": "title-score-guide",
+      "path": "references/title_score_guide.md",
+      "type": "text/markdown",
+      "bytes": 8890,
+      "sha256": "386756a827e3a142380a8b31e103659d9f8d3726dd3227b0f6b7c1710f84555b"
+    },
+    {
+      "resourceId": "trend-data-format",
+      "path": "references/xhs_trend_data_format.md",
+      "type": "text/markdown",
+      "bytes": 8500,
+      "sha256": "7a1ab74a92f3e36323c8c2960541725e29dca6927314ff541ac676b55984bd1d"
+    },
+    {
+      "resourceId": "M5",
+      "path": "check-words.md",
+      "type": "text/markdown",
+      "bytes": 816,
+      "sha256": "2c8c998174b25dba4d8bfe40813808b4811d806524db7a15e730f5ed8a6d7db1"
+    },
+    {
+      "resourceId": "word-check-adaptation",
+      "path": "word-check-adaptation.md",
+      "type": "text/markdown",
+      "bytes": 1707,
+      "sha256": "789ae98525a1dfa6d06b978a8a6311ff6d2aaf0d11e3dae11c453f06de002c69"
+    },
+    {
+      "resourceId": "prohibited-word-workflow",
+      "path": "references/prohibited_word_core_workflow.md",
+      "type": "text/markdown",
+      "bytes": 16739,
+      "sha256": "cd11c743e56e34912c3bc76e4af8c48aaae5da0f1af3e1db906872f9f223b16c"
+    }
+  ],
+  "manifestHash": "c10146341ee813f125a0c6e5c5c1ad598bb3c4f2f1c667a7207916e52cb639e7",
+  "packageHash": "0280c5e74f8bc5fb91e688a72d62e6b96ce24ce35ba1789b2a8e0dc065aea594"
+}

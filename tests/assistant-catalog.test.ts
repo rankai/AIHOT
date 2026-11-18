@@ -68,8 +68,8 @@ test("assistant catalogs bind package namespace, contracts, fixtures and profile
   assert.equal(skillNames["ai-image-generator"], "图片生成");
   assert.equal(boundActions.find(a => a.actionId === "image-generator")?.label, "图片创作 · 帮我完善描述");
   assert.equal(boundActions.find(a => a.actionId === "ai-image-generator")?.label, "图片生成");
-  assert.equal(creative.length, 8);
-  assert.equal(xhs.length, 3);
+  assert.equal(creative.length, 11);
+  assert.equal(xhs.length, 6);
   assert(xhs.every((c) => c.skillId === "xiaohongshu-creator"));
   await assert.rejects(() => resolveCandidate(xhs, "general-writing", "write"));
   await assert.rejects(() => resolveCandidate(xhs, "xiaohongshu-creator", "M3"));
@@ -172,7 +172,17 @@ test("validated temporary packages enforce finite delivery dependencies after le
 
 test("skill selection grants only that skill's profile modules while legacy actions stay exact", async () => {
   const skill = await candidates("creative", { skillId: "xiaohongshu-creator" });
-  assert.deepEqual(skill.map(c => c.moduleId), ["M1", "M2", "M4"]);
+  assert.deepEqual(skill.map(c => c.moduleId), ["M1", "M2", "M4", "M3-A", "M3-B", "M5"]);
+  assert(skill.every(c=>c.version==='11'));
+  const current=bindings.find(b=>b.skillId==='xiaohongshu-creator'&&b.version==='11')!;
+  const prior=bindings.find(b=>b.skillId==='xiaohongshu-creator'&&b.version==='10')!;
+  assert.equal(prior.modules.find(m=>m.moduleId==='M5')!.tasks![0]!.units.find(u=>u.capability==='check-xhs-words@1')!.maximum,4);
+  assert.equal(current.modules.find(m=>m.moduleId==='M5')!.tasks![0]!.units.find(u=>u.capability==='check-xhs-words@1')!.maximum,6);
+  assert.deepEqual(current.modules.filter(m=>m.moduleId!=='M5'),prior.modules.filter(m=>m.moduleId!=='M5'));
+  const {directory,...raw}=structuredClone(current);
+  raw.modules.find(m=>m.moduleId==='M1')!.tasks![0]!.units.find(u=>u.capability!=='creation')!.maximum=6;
+  assert.throws(()=>Binding.parse(raw));
+
   assert.deepEqual((await candidates("creative", { actionId: "xiaohongshu-rewrite" })).map(c => c.moduleId), ["M2"]);
   assert.deepEqual(await additionalFeeKinds(skill), ["search", "image", "vision"]);
   assert.deepEqual(await additionalFeeKinds(await candidates("creative", { actionId: "xiaohongshu-rewrite" })), []);

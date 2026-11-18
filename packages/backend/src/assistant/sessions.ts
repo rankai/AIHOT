@@ -1,3 +1,4 @@
+import { wordCheckModelInput } from "./word-check-input.ts";
 import { bindings, currentSkillVersions } from "./bindings.ts";
 import { projectArticleVersions } from "./article-research.ts";
 import { Size } from "../providers/redfox/image-models.ts";
@@ -200,7 +201,9 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
       if (attachment.source.sha256 !== item.source.sha256 || attachment.text !== item.text) throw conflict("材料内容已变化，请重新添加");
     }
   }
+  const [queuedSelection]=queueEntryId?await db`SELECT admission_snapshot->'materialSelection' selection FROM assistant_message_queue WHERE id=${queueEntryId} AND session_id=${sessionId}`:[];
   const snapshot = {
+    materialSelection:queuedSelection?.selection??{inputs:input.inputIds!==undefined,artifacts:input.artifactVersions!==undefined},
     sessionId,
     researchClock: researchClock(),
     revision: session.revision,
@@ -235,8 +238,11 @@ export async function snapshotInput(db: Tx | typeof sql, userId: number, session
   const savedCoverResearch=hasSavedCoverResearch(materials);
   const coverResearch=modules.some(({module})=>module.tools.includes("analyze_xhs_covers")
     && !(module.deliveryContract===COVER_DELIVERY_CONTRACT&&savedCoverResearch));
-  const continuationReserve = coverResearch || modules.some(({ module }) => module.tools.includes("search_wechat_articles")) ? 20000 : 4096;
-  if (contextTokens(JSON.stringify(snapshot)) + continuationReserve > model.maxInputTokens)
+  const wordOnly=input.taskChoice?.delivery==='word-check';
+  const continuationReserve = !wordOnly&&(coverResearch || modules.some(({ module }) => module.tools.includes("search_wechat_articles"))) ? 20000 : 4096;
+  Object.assign(snapshot,{contextReserve:continuationReserve});
+  const mayCheckWords=modules.some(({module})=>module.deliveryContract==='xhs-word-check@1');
+  if (!mayCheckWords && contextTokens(JSON.stringify(wordOnly?{...snapshot,selected:materials.map(m=>({id:m.id,kind:m.kind,characters:m.text?.length??m.content?.body?.length})),history:[]}:snapshot)) + continuationReserve > model.maxInputTokens)
     throw conflict(coverResearch ? "模型上下文超过封面研究材料额度，请减少材料，或选择具体非封面技能后重试" : continuationReserve === 20000 ? "模型上下文超过上限，请减少材料；自动选择包含公众号研究，可明确选择其他不需要研究的技能后重试" : "模型上下文超过上限，请缩小材料");
   const intent: ToolCreditIntent = {
     kind: "assistant-turn",
@@ -304,8 +310,8 @@ export async function submitTurnTx(tx: Tx, userId: number, id: string, raw: unkn
     const [frozenQuote] = await tx`SELECT pricing_snapshot,input_hash,created_at FROM member_tool_quotes WHERE id=${quoteId} AND user_id=${userId}`;
     if (frozenQuote?.pricing_snapshot.task) {
       if (input.autoAuthorizationId) throw conflict("本次任务需要一次明确费用确认，不能使用旧会话自动授权");
-      const { research, ...choice } = JSON.parse(frozenQuote.pricing_snapshot.task.scope);
-      await taskPriceDefinition(snapshot, choice, research);
+      const { research, wordCheck, ...choice } = JSON.parse(frozenQuote.pricing_snapshot.task.scope);
+      await taskPriceDefinition(snapshot, choice, research,wordCheck);
     }
     // The quote hash freezes the business date too. Reconstruct only a clock that
     // matches the entire original intent; all mutable input and admission stay checked.
@@ -375,9 +381,15 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
           FROM assistant_tool_calls c
           JOIN assistant_model_steps m ON m.id=c.model_step_id
           LEFT JOIN operation_runs r ON r.id=c.child_run_id
-          WHERE c.turn_id=${turn.id} AND c.name IN ('analyze_xhs_covers','search_xhs_covers','search_xhs_notes','search_wechat_articles','generate_image')
+          WHERE c.turn_id=${turn.id} AND c.name IN ('check_xhs_words','search_xhs_titles','analyze_xhs_covers','search_xhs_covers','search_xhs_notes','search_wechat_articles','generate_image')
           ORDER BY m.model_ordinal,c.ordinal`
       : [];
+    // Historical paid query facts live in the original tool calls, including turns with no delivery.
+    const wordQueries = await tx`SELECT DISTINCT ON (c.turn_id,c.input->>'batch') c.turn_id,c.result
+      FROM assistant_tool_calls c JOIN assistant_turns t ON t.id=c.turn_id
+      WHERE t.session_id=${id} AND c.name='check_xhs_words' AND c.state='completed'
+        AND c.result->>'complete'='true'
+      ORDER BY c.turn_id,c.input->>'batch',c.id`;
     const [water] =
       await tx`SELECT coalesce(max(seq),0)::int seq FROM assistant_events WHERE session_id=${id}`;
     const activitySnapshot = turn ? await readActivities(tx, turn as Parameters<typeof readActivities>[1]) : null;
@@ -412,6 +424,10 @@ export async function sessionSnapshot(userId: number, id: string): Promise<Assis
         sources: a.source_snapshot,
       })),
       deliveries: projectArtifactDeliveries(deliveries),
+      wordQueries: wordQueries.map(c => ({ turnId: c.turn_id, batch: c.result.batch,
+        hits: c.result.hits.map((h: Record<string, any>) => ({id:h.id,word:h.word,context:h.context,suspected:h.suspected})),
+        ...(c.result.reportUnavailable ? {reportUnavailable:true} : {}),
+      })),
       turn: turn
         ? {
             credits: (await tx`SELECT amount,consumed,released,state FROM member_credit_charges WHERE root_run_id=${turn.parent_operation_run_id} AND pricing_snapshot ? 'task'`)[0] ?? null,
@@ -483,7 +499,7 @@ function imageParameters(call: Record<string, any>): AssistantImageParameters | 
 }
 
 function publicCallResult(name: string, value: unknown): unknown {
-  if (name !== "generate_image" && name !== "analyze_xhs_covers") return value;
+  if (name !== "generate_image" && name !== "analyze_xhs_covers" && name !== "check_xhs_words") return value;
   const result = objectValue(value);
   if (!result) return value;
   const {

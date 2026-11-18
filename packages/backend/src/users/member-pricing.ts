@@ -1,3 +1,4 @@
+import { XHS_TITLE_OPERATION } from "../providers/redfox/xhs-title-contract.ts";
 import { CoverVisionInput } from "../assistant/cover-vision-contract.ts";
 import { XHS_COVER_OPERATION } from "../providers/redfox/xhs-cover-contract.ts";
 import { WECHAT_HOT_OPERATION } from "../providers/redfox/wechat-hot-contract.ts";
@@ -54,7 +55,7 @@ export async function assertMemberCostEligible(intent: ToolCreditIntent): Promis
   return;
  }
  if (intent.recoveryRunId !== undefined && intent.kind.endsWith('/query')) return;
- if (intent.kind === 'query' && intent.provider === 'redfox' && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(intent.model ?? '')) {
+ if (intent.kind === 'query' && intent.provider === 'redfox' && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(intent.model ?? '')) {
   const [cost] = await sql`SELECT per_request FROM service_prices WHERE service='redfox.query' AND model=${intent.model!} AND currency='CNY' AND per_request IS NOT NULL AND per_request>=0 AND source_url IS NOT NULL`;
   if (!cost) throw new AccountError(409,'cost_unverified','研究查询的供应商成本尚未核定');
   const price = await selectToolPrice(sql, intent);

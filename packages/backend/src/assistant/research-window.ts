@@ -1,3 +1,5 @@
+import { wordCheckResults } from "./word-check-results.ts";
+import { xhsTitleResults } from "../providers/redfox/xhs-titles.ts";
 import { z } from "zod";
 import { addDays } from "@aihot/contracts/time";
 import { bindings } from "./bindings.ts";
@@ -8,15 +10,15 @@ import { wechatResearchResults } from "./wechat-research.ts";
 import type { Tx } from "../db.ts";
 import { DraftArgumentsError } from "./tool-arguments.ts";
 
-export const ResearchPolicy = z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1"]);
+export const ResearchPolicy = z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1", "xhs-title-generate@1", "xhs-title-score@1"]);
 export const ResearchScope = z.object({ policy: ResearchPolicy, maximumQueries: z.union([z.literal(1), z.literal(2)]),
-  fixedDates: z.boolean(), startDate: z.iso.date(), endDate: z.iso.date(),
+  topic:z.string().max(20000).optional(), allSite:z.boolean().optional(), fixedDates: z.boolean(), startDate: z.iso.date(), endDate: z.iso.date(),
   clock: z.object({ timeZone: z.literal("Asia/Shanghai"), today: z.iso.date(), earliestDate: z.iso.date(), latestDate: z.iso.date(), defaultStartDate: z.iso.date() }).strict(),
 }).strict();
 export type ResearchScopeValue = z.infer<typeof ResearchScope>;
 export function researchTaskPolicy(snapshot: Record<string, any>) {
   const scope = snapshot.taskScope;
-  if (scope?.delivery !== "writing") return null;
+  if (!["writing","title-report"].includes(scope?.delivery)) return null;
   const candidate = snapshot.candidates.find((c: any) => c.skillId === scope.skillId && c.moduleId === scope.moduleId);
   return bindings.find(b => b.skillId === candidate?.skillId && b.version === candidate.version)?.modules
     .find(m => m.moduleId === candidate.moduleId)?.researchPolicy ?? null;
@@ -77,6 +79,12 @@ export function researchDateRange(message: string, clock: ReturnType<typeof rese
   }
   return { maximumQueries: once ? 1 as const : 2 as const, fixedDates: false };
 }
+/** Only an affirmative, unquoted site-wide query request permits an empty keyword. */
+export function explicitAllSiteTitles(message:string){
+ const text=message.replace(/[“「『《][^”」』》]*[”」』》]|"[^"\n]*"/g,'');
+ return !/(?:不要|不用|不查|不搜|禁止|不是|不需要|别|勿)[^。；\n]{0,20}全站|(?:全站|全平台)[^。；\n]{0,12}(?:不要|不查|禁止)/.test(text)
+  && /(?:查询|检索|搜索|查找|查|搜)(?:一下)?(?:小红书)?(?:全站|全平台)(?:热门|热点|爆款|标题)/.test(text);
+}
 export function freezeResearchScope(snapshot: Record<string, any>, frozen?: unknown) {
   const policy = researchTaskPolicy(snapshot);
   if (!policy) return null;
@@ -89,6 +97,13 @@ export function freezeResearchScope(snapshot: Record<string, any>, frozen?: unkn
   const clock = snapshot.researchClock;
   const latestDate = policy === "xhs-empty-window@1" ? clock.latestDate : clock.today;
   const range = researchDateRange(snapshot.message, clock, latestDate);
+  if(policy==='xhs-title-generate@1'||policy==='xhs-title-score@1') {
+    if('endDate' in range)throw new AccountError(409,'assistant_research_date_required','标题参考查询仅支持起始日期，请移除精确截止日限制。');
+    const scope=ResearchScope.parse({policy,...range,startDate:'startDate' in range?range.startDate:policy==='xhs-title-score@1'?clock.earliestDate:clock.defaultStartDate,endDate:clock.latestDate,clock,
+      maximumQueries:policy==='xhs-title-score@1'?1:range.maximumQueries,topic:snapshot.message,allSite:explicitAllSiteTitles(snapshot.message)});
+    if(scope.startDate<clock.earliestDate||scope.startDate>clock.latestDate)throw conflict('标题查询起始日超出可用范围');
+    return scope;
+  }
   const scope = ResearchScope.parse({ policy, ...range, startDate: "startDate" in range ? range.startDate : clock.defaultStartDate,
     endDate: "endDate" in range ? range.endDate : latestDate, clock });
   if (scope.startDate < clock.earliestDate || scope.startDate > scope.endDate || scope.endDate > latestDate)
@@ -98,6 +113,11 @@ export function freezeResearchScope(snapshot: Record<string, any>, frozen?: unkn
 type ResultRow = { id: number; kind: string; data: any };
 /** A missing/invalid summary is not an empty successful query. */
 export function researchQueryOutcome(name: string, rows: ResultRow[]) {
+  if(name==='search_xhs_titles'){
+    const summary=rows.find(r=>r.kind==='xhs_title_research')?.data;
+    if(!summary||!Number.isInteger(summary.rawCount)||summary.rawCount<0)throw conflict('标题查询结果尚未核清');
+    return {rawCount:summary.rawCount,usableCount:xhsTitleResults(rows).results.length,expand:false};
+  }
   if (name === "search_wechat_articles") {
     const summary = rows.find(r => r.kind === "wechat_hot_research")?.data;
     if (!summary || !Number.isInteger(summary.rawCount) || summary.rawCount < 0) throw conflict("公众号查询结果尚未核清");
@@ -122,6 +142,19 @@ export async function assertKnownResearchQuery(tx: Tx, childRunId: number) {
 /** Admission is checked again in the child-creation transaction. Only the server-linked expansion may follow the first query. */
 export async function validateResearchSearch(tx: Tx, turn: Record<string, any>, call: Record<string, any>, input: { activationId: string; keyword: string; startDate: string; endDate?: string }) {
   const policy = researchTaskPolicy(turn.snapshot);
+  if(call.name==='search_xhs_titles'){
+    if(!policy?.startsWith('xhs-title-'))throw conflict('标题查询必须属于已冻结标题任务');
+    const scope=ResearchScope.parse(turn.snapshot.taskScope.research);
+    if(!input.keyword&&!scope.allSite)throw queryArguments('主题查询不能用空关键词');
+    if(input.endDate!==undefined)throw queryArguments('标题查询不支持截止日期');
+    const prior=await tx`SELECT c.* FROM assistant_tool_calls c WHERE c.turn_id=${turn.id} AND c.name=${call.name} AND c.child_run_id IS NOT NULL ORDER BY c.ordinal`;
+    if(!prior.length){if(input.startDate!==scope.startDate)throw queryArguments('首查须使用冻结起始日'+scope.startDate);return true;}
+    const first=prior[0]!;
+    if(prior.length!==1||scope.maximumQueries!==2||scope.fixedDates||first.state!=='completed'||input.keyword!==first.input.keyword||input.activationId!==first.input.activationId||input.startDate!==scope.clock.earliestDate||first.input.startDate!==scope.clock.defaultStartDate)throw queryArguments('仅允许同词从近7天扩到近30天一次');
+    await assertKnownResearchQuery(tx,first.child_run_id);
+    researchQueryOutcome(call.name,await tx<ResultRow[]>`SELECT id,kind,data FROM operation_results WHERE run_id=${first.child_run_id}`);
+    return true;
+  }
   if (!policy || !["search_xhs_notes", "search_wechat_articles"].includes(call.name)) return false;
   const scope = ResearchScope.parse(turn.snapshot.taskScope.research);
   const prior = await tx`SELECT c.*,r.status FROM assistant_tool_calls c JOIN operation_runs r ON r.id=c.child_run_id
@@ -145,18 +178,18 @@ export async function validateResearchSearch(tx: Tx, turn: Record<string, any>, 
 
 /** Dispatchers are already stopped. Close only proved unsent or fully saved query calls, so settlement can distinguish creation from query fees. */
 export async function closeResearchCallsForStop(tx: Tx, turn: Record<string, any>) {
-  if(!researchTaskPolicy(turn.snapshot))return;
+  if(!researchTaskPolicy(turn.snapshot)&&!turn.snapshot.taskScope?.wordCheck)return;
   await tx`UPDATE assistant_tool_calls SET state='failed',result=${tx.json({error:'stopped_before_dispatch',message:'用户停止，尚未外发的调用未执行'})}
     WHERE turn_id=${turn.id} AND child_run_id IS NULL AND state IN ('pending','proposed')`;
   const calls=await tx`SELECT c.*,r.status FROM assistant_tool_calls c JOIN operation_runs r ON r.id=c.child_run_id
-    WHERE c.turn_id=${turn.id} AND c.state='running' AND c.name IN ('search_xhs_notes','search_wechat_articles')`;
+    WHERE c.turn_id=${turn.id} AND c.state='running' AND c.name IN ('check_xhs_words','search_xhs_titles','search_xhs_notes','search_wechat_articles')`;
   for(const call of calls) {
     if(call.status==='completed') {
       try {
         await assertKnownResearchQuery(tx,call.child_run_id);
         const rows=await tx<ResultRow[]>`SELECT id,kind,data FROM operation_results WHERE run_id=${call.child_run_id} ORDER BY id`;
-        researchQueryOutcome(call.name,rows);
-        const result=call.name==='search_wechat_articles'?wechatResearchResults(rows):researchResults(rows);
+        if(call.name!=='check_xhs_words')researchQueryOutcome(call.name,rows);
+        const result=call.name==='check_xhs_words'?wordCheckResults(rows,turn.snapshot,call.input.batch):call.name==='search_xhs_titles'?xhsTitleResults(rows):call.name==='search_wechat_articles'?wechatResearchResults(rows):researchResults(rows);
         await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json(result as never)} WHERE id=${call.id}`;
       }catch(error){if(!(error instanceof AccountError))throw error;}
     } else if(call.status==='stopped') {

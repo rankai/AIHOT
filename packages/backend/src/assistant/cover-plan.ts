@@ -1,3 +1,5 @@
+import { wordCheckInputProjection } from "./word-check.ts";
+import { titleReportInputProjection } from "./title-report.ts";
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
 import { sql,type Tx,type Db } from "../db.ts";
@@ -38,9 +40,9 @@ export async function selectedArtifactVersions(db:Db,sessionId:string,versions:r
  const selected:Record<string,any>[]=[],seen=new Set<string>();
  for(const a of versions){
   const key=`${a.artifactId}:${a.version}`;if(seen.has(key))continue;
-  const [row]=await db`SELECT artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND artifact_id=${a.artifactId} AND version=${a.version} AND kind IN ('text-draft','xhs-note','xhs-cover-plan')`;
+  const [row]=await db`SELECT artifact_id,version,kind,content,source_snapshot FROM assistant_artifact_versions WHERE session_id=${sessionId} AND artifact_id=${a.artifactId} AND version=${a.version} AND kind IN ('text-draft','xhs-note','xhs-cover-plan','xhs-title-report','xhs-word-check')`;
   if(!row)throw conflict("选定稿件不存在");
-  selected.push(row.kind==="xhs-cover-plan"?coverPlanInputProjection(row):row);seen.add(key);
+  selected.push(row.kind==='xhs-word-check'?wordCheckInputProjection(row):row.kind==="xhs-title-report"?titleReportInputProjection(row):row.kind==="xhs-cover-plan"?coverPlanInputProjection(row):row);seen.add(key);
  }
  return selected;
 }

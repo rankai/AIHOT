@@ -167,6 +167,8 @@ test("research result cards only project saved results and safe source links", (
           secret: "ignored",
         },
         { id: 6, title: "无效URL", text: "文本", url: "javascript:alert(1)" },
+        { id: 7, title: "只有完整标题的参考", url: "https://example.com/title" },
+        { id: 8, title: "无效正文类型", text: { secret: "ignored" } },
         { invalid: true },
       ],
       limited: true,
@@ -180,6 +182,7 @@ test("research result cards only project saved results and safe source links", (
           url: "https://example.com/note",
         },
         { id: "6", title: "无效URL", text: "文本", url: null },
+        { id: "7", title: "只有完整标题的参考", text: "", url: "https://example.com/title" },
       ],
       limited: true,
     },
@@ -282,4 +285,9 @@ test("article exports preserve opening quotes and inline code that match the tit
     assert.equal(artifactText({ ...content, body }), `标题\n\n${body}`);
     assert.equal(artifactText({ ...content, body }, "plain"), "标题\n\n标题\n\n后续正文。");
   }
+});
+
+test('word report export takes only stored suggested copy, including zero-hit original',()=>{
+ const base={title:'检测报告标题',body:'检测说明',titles:[],tags:[],sources:[],intent:'draft',partial:false,scope:'检测范围'};
+ for(const modifiedText of ['原文保持\n换行','建议改稿😀'])assert.equal(artifactText({...base,wordCheck:{modifiedText}} as unknown as AssistantArtifactContent),modifiedText);
 });

@@ -1,3 +1,5 @@
+import { WordCheckBody } from "./word-check";
+import { TitleReportBody } from "./title-report";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
@@ -269,6 +271,8 @@ function WritingArtifactCard({
     !!editing &&
     JSON.stringify(editing.content) !== JSON.stringify(editing.original);
   const newer = artifact.version > selected.version;
+  const wordCheck = selected.kind === "xhs-word-check";
+  const titleReport = selected.kind === "xhs-title-report";
   const cover = selected.kind === "xhs-cover-plan";
   const image = selected.kind === "image";
   useEffect(() => {
@@ -317,7 +321,7 @@ function WritingArtifactCard({
     return () => { controller.abort(); setLoading(false); };
   }, [versionTarget, path]);
   async function save(): Promise<boolean> {
-    if (!editing || image || cover || artifact.kind === "xhs-cover-plan" || active || command.pending) return false;
+    if (!editing || image || wordCheck || titleReport || cover || artifact.kind === "xhs-cover-plan" || active || command.pending) return false;
     const content = {
       ...editing.content,
       titles: editing.content.titles
@@ -408,12 +412,12 @@ function WritingArtifactCard({
   return (
     <article
       className="min-w-0 space-y-4"
-      aria-label={`${cover ? "封面方案" : image ? "图片" : "稿件"}：${selected.content.title}`}
+      aria-label={`${wordCheck ? "检测报告" : titleReport ? "标题报告" : cover ? "封面方案" : image ? "图片" : "稿件"}：${selected.content.title}`}
       data-artifact-id={artifact.artifactId}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge tone={(cover || image) && selected.content.partial ? "warn" : "ok"}>
-          {cover ? "小红书封面方案" : image ? artifactDisplayName(selected) : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
+          {wordCheck ? "检测报告" : titleReport ? "标题报告" : cover ? "小红书封面方案" : image ? artifactDisplayName(selected) : selected.kind === "xhs-note" ? "小红书笔记" : "文章草稿"}
         </Badge>
         <span className="text-[12px] text-ink-4">
           版本 {selected.version}
@@ -440,13 +444,13 @@ function WritingArtifactCard({
       )}
       {!targetBlocked && <div className="flex flex-wrap gap-2">
         {!image && !editing && <Button size="sm" onClick={() => void copyText(artifactText(selected.content, cover ? "markdown" : "plain"))}>
-          {cover ? "复制" : "复制文案"}
+          {wordCheck ? selected.content.wordCheck?.hits.length ? "复制修改稿" : "复制原文" : cover ? "复制" : "复制文案"}
         </Button>}
         {!image && !cover && !editing && <Menu label="更多文案操作" trigger={<span aria-hidden="true">•••</span>} align="left">{close => <>
           <MenuItem onSelect={() => { close(); void copyText(artifactText(selected.content)); }}>复制原格式</MenuItem>
           <MenuItem onSelect={() => { close(); void copyText(selected.content.title); }}>复制标题</MenuItem>
           {artifactTags(selected.content) && <MenuItem onSelect={() => { close(); void copyText(artifactTags(selected.content)); }}>复制标签</MenuItem>}
-          <MenuItem onSelect={() => { close(); downloadText("txt"); }}>下载 TXT</MenuItem>
+          <MenuItem onSelect={() => { close(); downloadText("txt"); }}>{wordCheck && !selected.content.wordCheck?.hits.length ? "下载原文 TXT" : wordCheck ? "下载修改稿 TXT" : "下载 TXT"}</MenuItem>
           <MenuItem onSelect={() => { close(); downloadText("md"); }}>下载 MD</MenuItem>
         </>}</Menu>}
         <Button
@@ -456,7 +460,7 @@ function WritingArtifactCard({
         >
           {historyOpen ? "收起版本" : "历史版本"}
         </Button>
-        {!cover && !image && <Button
+        {!wordCheck && !titleReport && !cover && !image && <Button
           size="sm"
           disabled={
             active ||
@@ -476,7 +480,7 @@ function WritingArtifactCard({
         >
           编辑稿件
         </Button>}
-        {!cover && !image && <Button
+        {!wordCheck && !titleReport && !cover && !image && <Button
           size="sm"
           disabled={
             command.pending ||
@@ -529,7 +533,7 @@ function WritingArtifactCard({
           </Select>
         </label>
       )}
-      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody key={`${sessionId}:${selected.artifactId}:${selected.version}`} artifact={selected} sessionId={sessionId} visible={visible} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} sessionId={sessionId} /> : editing ? (
+      {targetBlocked ? <p role="status" className="text-[13px] text-ink-3">{targetRead === "failed" ? "未能读取指定版本。当前未切换到其他版本。" : `正在读取第 ${versionTarget?.version} 版…`}</p> : image ? <ImageBody key={`${sessionId}:${selected.artifactId}:${selected.version}`} artifact={selected} sessionId={sessionId} visible={visible} /> : cover ? <CoverPlanBody key={selected.version} artifact={selected} sessionId={sessionId} /> : wordCheck ? <WordCheckBody artifact={selected} /> : titleReport ? <TitleReportBody artifact={selected} onCopy={text=>void copyText(text)} /> : editing ? (
         <form
           className="space-y-4"
           onSubmit={(event) => {
@@ -607,7 +611,7 @@ function WritingArtifactCard({
           disabled={command.pending}
           onClick={() => request(() => onReference(selectedRef.current), true)}
         >
-          用这版继续修改
+          {wordCheck ? "引用建议文案" : titleReport ? selected.content.titleReport?.mode === "generate" ? "引用候选标题" : "引用原标题" : "用这版继续修改"}
         </Button>
       )}
       {active && !cover && !image && (

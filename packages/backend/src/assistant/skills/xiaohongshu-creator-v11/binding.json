@@ -1,0 +1,264 @@
+{
+  "formatVersion": 1,
+  "skillId": "xiaohongshu-creator",
+  "version": "11",
+  "name": "小红书创作",
+  "modules": [
+    {
+      "moduleId": "M1",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-write",
+      "label": "小红书创作",
+      "entry": "M1",
+      "capabilities": [
+        "save-writing@1",
+        "search-xhs-notes@1",
+        "analyze-xhs-research@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "m1-adaptation",
+        "hot-article-format"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "小红书创作",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-notes@1",
+              "maximum": 2
+            }
+          ]
+        }
+      ],
+      "researchPolicy": "xhs-empty-window@1",
+      "userDescription": "提供主题，研究参考并撰写小红书笔记"
+    },
+    {
+      "moduleId": "M2",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-rewrite",
+      "label": "小红书改写",
+      "entry": "M2",
+      "capabilities": [
+        "save-writing@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "writing-delivery@1",
+      "references": [
+        "adaptation",
+        "platform-rules"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "writing",
+          "label": "小红书改写",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            }
+          ]
+        }
+      ],
+      "userDescription": "提供原文，改写成小红书笔记"
+    },
+    {
+      "moduleId": "M4",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-cover",
+      "label": "小红书封面",
+      "entry": "M4",
+      "capabilities": [
+        "search-xhs-covers@1",
+        "analyze-xhs-cover-images@1",
+        "save-xhs-cover-plan@1",
+        "generate_image@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "xhs-cover-delivery@1",
+      "references": [
+        "core-workflow"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "plans-only",
+          "label": "研究并交付三套封面方案",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-covers@1",
+              "maximum": 1
+            },
+            {
+              "capability": "analyze-xhs-cover-images@1",
+              "maximum": 1
+            }
+          ]
+        },
+        {
+          "delivery": "image",
+          "label": "研究、三套方案及一张封面图",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-covers@1",
+              "maximum": 1
+            },
+            {
+              "capability": "analyze-xhs-cover-images@1",
+              "maximum": 1
+            },
+            {
+              "capability": "generate_image@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ],
+      "userDescription": "提供主题，研究参考并设计封面"
+    },
+    {
+      "moduleId": "M3-A",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-title-generate",
+      "label": "起标题",
+      "userDescription": "研究同主题参考标题，生成10个候选标题",
+      "entry": "M3-A",
+      "capabilities": [
+        "search-xhs-titles@1",
+        "save-xhs-title-report@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "xhs-title-report@1",
+      "references": [
+        "title-adaptation",
+        "title-score-guide",
+        "trend-data-format"
+      ],
+      "scriptBindings": [],
+      "researchPolicy": "xhs-title-generate@1",
+      "tasks": [
+        {
+          "delivery": "title-report",
+          "label": "起标题",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-titles@1",
+              "maximum": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "moduleId": "M3-B",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-title-score",
+      "label": "评标题",
+      "userDescription": "研究同主题参考标题，评价同主题1至10个标题",
+      "entry": "M3-B",
+      "capabilities": [
+        "search-xhs-titles@1",
+        "save-xhs-title-report@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "xhs-title-report@1",
+      "references": [
+        "title-adaptation",
+        "title-score-guide",
+        "trend-data-format"
+      ],
+      "scriptBindings": [],
+      "researchPolicy": "xhs-title-score@1",
+      "tasks": [
+        {
+          "delivery": "title-report",
+          "label": "评标题",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "search-xhs-titles@1",
+              "maximum": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "moduleId": "M5",
+      "profiles": [
+        "creative",
+        "xiaohongshu"
+      ],
+      "actionId": "xiaohongshu-word-check",
+      "label": "检查违禁词",
+      "userDescription": "检查一份明确文案并给出必要替换建议",
+      "entry": "M5",
+      "capabilities": [
+        "check-xhs-words@1",
+        "save-xhs-word-check@1"
+      ],
+      "inputContract": "writing-input@1",
+      "deliveryContract": "xhs-word-check@1",
+      "references": [
+        "word-check-adaptation",
+        "prohibited-word-workflow"
+      ],
+      "scriptBindings": [],
+      "tasks": [
+        {
+          "delivery": "word-check",
+          "label": "检查违禁词",
+          "units": [
+            {
+              "capability": "creation",
+              "maximum": 1
+            },
+            {
+              "capability": "check-xhs-words@1",
+              "maximum": 6
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

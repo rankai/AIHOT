@@ -1,3 +1,4 @@
+import { parseXhsWords } from "./xhs-words.ts";
 import { z } from "zod";
 import sanitizeHtml from "sanitize-html";
 import type { PaidRequestOptions } from "../receipts.ts";
@@ -17,6 +18,7 @@ export function parseMediaTool(op:MediaToolOperation,raw:unknown,parameters:Reco
  const results:MediaToolResult[]=[];
  const resource=(record:Record<string,unknown>,index:number)=>results.push({kind:"media_resource",itemKey:`resource:${index}`,data:{...base,record,reportedType:record.type,resourceUrl:safeUrl(record.downloadUrl),...(Object.hasOwn(record,"durationSeconds")?{durationSeconds:record.durationSeconds}:{}),missing:safeUrl(record.downloadUrl)?[]:["资源地址不是可展示的HTTP(S)地址；原值仅作诊断"]}});
  let metadata:Record<string,unknown>={},diagnostics:string[]=[];
+ if(op==="API_1791881343238"&&parameters.platform==='小红书')return [{kind:'text_check',itemKey:'check',data:{platform:'xiaohongshu',operationId:op,...parseXhsWords(raw,String(parameters.content))}}];
  if(op==="API_1791881343238"){
   const record=z.object({content:z.string(),originalContent:z.string(),prohibitedWordsType:z.array(z.string())}).passthrough().parse(raw);
   const sanitizedHighlightHtml=sanitizeHtml(record.content,{allowedTags:["span"],allowedAttributes:{span:["class"]},allowedClasses:{span:["banned-word","industry-banned-word"]},allowedSchemes:[],disallowedTagsMode:"discard"});

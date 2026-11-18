@@ -96,6 +96,7 @@ async function allocateTaskItem(tx: Tx, actor: string, runId: number, authorizat
   if (!call || call.child_run_id !== null || !["pending","proposed"].includes(call.state) || creditHash(call.result?.normalized?.intent) !== creditHash(intent)) throw new AccountError(409,"task_scope_changed","子任务不属于本次授权建议");
   const items = await tx`SELECT * FROM member_credit_task_items WHERE charge_id=${charge.id} AND run_id IS NULL ORDER BY item_key,unit FOR UPDATE`;
   const item = items.find(item => {
+    if(allocation.itemKey!==undefined&&item.item_key!==allocation.itemKey)return false;
     const frozen = item.intent as ToolCreditIntent;
     return frozen.kind === intent.kind && frozen.provider === intent.provider && (frozen.model ?? "") === (intent.model ?? "") && (frozen.tier ?? "") === (intent.tier ?? "")
       && (frozen.imageCount ?? 0) === (intent.imageCount ?? 0) && (frozen.videoSeconds ?? 0) === (intent.videoSeconds ?? 0) && (frozen.referenceCount ?? 0) === (intent.referenceCount ?? 0)

@@ -9,6 +9,7 @@ import type {
 import { Button } from "../admin/ui";
 import { ResultText } from "../tools/result-text";
 import { PHASE_LABELS, materialText } from "./data";
+import { WordCheckQueryResult } from "./word-check";
 import { CurrentTask } from "./current-task";
 import { ConversationNavigation, messageAnchorId } from "./conversation-navigation";
 import { artifactDeliveries, indexArtifactDeliveries } from "./artifact-display";
@@ -250,6 +251,7 @@ export function AssistantMessageStream({
                     </div>}
                     {savedMessages.get(message.id)?.role !== "tool" && <MessageCopy text={savedMessages.get(message.id)!.text} role={message.role === "user" ? "user" : "assistant"} />}
                   </MessagePrimitive.Root>
+                  {savedMessages.get(message.id)?.role === "user" && savedMessages.get(message.id)?.turnId !== session.turn?.turnId && session.wordQueries?.filter(result => result.turnId === savedMessages.get(message.id)?.turnId).map(result => <WordCheckQueryResult key={`${result.turnId}:${result.batch}`} value={result} />)}
                   {deliveriesAfter.has(message.id) && <AssistantDelivery sessionId={session.sessionId} deliveries={deliveriesAfter.get(message.id)!} hasReply={savedMessages.get(message.id)?.role === "assistant"} imageFiles={imageFiles} showArtifacts={showArtifacts} />}
                   </div>
                 ) : null

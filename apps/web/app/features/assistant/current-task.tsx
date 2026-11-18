@@ -1,3 +1,4 @@
+import { WordCheckQueryResult } from "./word-check";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { AssistantSession } from "@aihot/contracts/assistant";
@@ -63,10 +64,11 @@ export function CurrentTask({
   const deliveries = artifactDeliveries(session).filter((item) => item.turnId === turn.turnId);
   // A projected empty result is authoritative. Older snapshots may still prove
   // a save through this turn's completed activity, never through old artifacts.
-  const completedDelivery = (kinds: string[], activityKind: "generate_image" | "save_xhs_cover_plan" | "save_draft") =>
+  const completedDelivery = (kinds: string[], activityKind: "generate_image" | "save_xhs_cover_plan" | "save_draft" | "save_xhs_title_report" | "save_xhs_word_check") =>
     turn.phase === "completed" && (deliveries.some((item) => kinds.includes(item.kind)) ||
       (session.deliveries === undefined && turn.activities?.some((item) => item.kind === activityKind && item.state === "completed")));
-  const summaryLabel = completedDelivery(["image"], "generate_image") ? "图片已保存" : completedDelivery(["xhs-cover-plan"], "save_xhs_cover_plan") ? "封面方案已保存" : completedDelivery(["text-draft", "xhs-note"], "save_draft") ? "稿件已保存" : PHASE_LABELS[turn.phase];
+  const summaryLabel = completedDelivery(["xhs-word-check"], "save_xhs_word_check") ? "检测报告已保存" : completedDelivery(["xhs-title-report"], "save_xhs_title_report") ? "标题报告已保存" : completedDelivery(["image"], "generate_image") ? "图片已保存" : completedDelivery(["xhs-cover-plan"], "save_xhs_cover_plan") ? "封面方案已保存" : completedDelivery(["text-draft", "xhs-note"], "save_draft") ? "稿件已保存" : PHASE_LABELS[turn.phase];
+  const wordResults=turn.calls.filter(call=>call.name==='check_xhs_words'&&call.state==='completed').filter((call,index,all)=>all.findIndex(other=>other.input.batch===call.input.batch)===index);
   const businessActivities = turn.activities?.filter(activity => !["model_request", "load_skill", "read_skill_reference"].includes(activity.kind));
   const choiceSchemes = coverChoice ? coverChoiceSchemes(coverChoice, session.artifacts) : [];
   const selectedCover = coverSelection === "keep-plans" ? { action: "keep-plans" as const } : coverSelection?.startsWith("scheme:") ? { action: "generate" as const, schemeId: coverSelection.slice(7) } : null;
@@ -91,6 +93,8 @@ export function CurrentTask({
     turn.phase === "stopped" ? "stopped" : turn.phase === "completed" ? "done" :
     working ? "active" : "waiting";
   const businessLabels: Partial<Record<NonNullable<typeof currentActivity>["kind"], string>> = {
+    check_xhs_words: "正在检查文案", save_xhs_word_check: "正在保存检测报告",
+    search_xhs_titles: "正在查找参考标题", save_xhs_title_report: "正在保存标题报告",
     search_xhs_notes: "正在查找参考笔记", search_xhs_covers: "正在查找参考封面",
     search_wechat_articles: "正在查找参考文章", analyze_xhs_covers: "正在分析参考封面",
     analyze_xhs_research: "正在整理参考笔记", analyze_wechat_research: "正在分析参考文章",
@@ -133,7 +137,7 @@ export function CurrentTask({
             {businessActivities?.length === 0 && <li className="assistant-execution-step"><ExecutionIcon state={phaseState} /><p>{statusLabel}</p></li>}
             {businessActivities ? businessActivities.map((activity) => {
               const call = activity.callId ? turn.calls.find((call) => call.callId === activity.callId) : undefined;
-              const label = activity.state === "waiting" && call?.state === "proposed"
+              const label = activity.kind==='check_xhs_words'&&call?.state==='completed'&&call.result&&typeof call.result==='object'&&'reusedRunId' in call.result ? '已复用检测结果' : activity.state === "waiting" && call?.state === "proposed"
                 ? activity.kind === "generate_image"
                   ? "等待确认图片生成"
                   : activity.kind === "search_wechat_articles"
@@ -258,6 +262,7 @@ export function CurrentTask({
           <SearchCallCard call={call} session={session} csrf={csrf} refresh={refresh} statusUnknown={!!readError} activityState={turn.activities?.find((item) => item.callId === call.callId)?.state} />
         </div>
       ))}
+      {wordResults.map(call=><WordCheckQueryResult key={call.callId} value={call.result}/>)}
       {turn.phase === "stopped" && deliveries.length > 0 && (
         <button type="button" className="text-[12px] text-accent underline" onClick={() => showArtifacts(deliveries.at(-1))}>查看已保存作品</button>
       )}
