@@ -218,8 +218,9 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
    const sentence="当你面对复杂的工作任务时，先确认实际需求，再记录观察到的问题和团队反馈。不要急着照搬他人的经验，试着把目标拆成可以执行的小步骤，并根据结果调整下一步行动。";
    response={code:2000,data:{articles:Array.from({length:10},(_,i)=>({...sample(i),summary:sentence.repeat(40).slice(0,1500),title:"职场成长的方法与观察".repeat(40).slice(0,300),author:"合成案例作者".repeat(40).slice(0,200),clicksCount:null}))}};
    const fresh=await createSession(user.id,{assistantId:"creative"},randomUUID());
-   const raw={message:"写公众号文章并补充一次研究。"+sentence.repeat(40),expectedRevision:1,skillSelection:{actionId:"wechat-write"}};
-   const over={...raw,message:raw.message+sentence};
+   // Leave room for randomized IDs/model names and persisted queue metadata within the same 3800–4000 band.
+   const raw={message:"写公众号文章并补充一次研究。"+sentence.repeat(39),expectedRevision:1,skillSelection:{actionId:"wechat-write"}};
+   const over={...raw,message:raw.message+sentence.repeat(2)};
    await assert.rejects(currentQuoteTurn(user.id,fresh.sessionId,over),/减少材料.*明确选择/);
    for(const actionId of ["general-writing","xiaohongshu-rewrite"]) assert((await currentQuoteTurn(user.id,fresh.sessionId,{...over,skillSelection:{actionId}})).quoteId);
    assert.equal((await sql`SELECT count(*)::int n FROM assistant_turns WHERE session_id=${fresh.sessionId}`)[0]!.n,0,"admission checks and quotes create no paid turn");
@@ -240,8 +241,9 @@ test("wechat v1 accepted authorization recovery plus current single-task researc
    const tokenCounts=steps.map(step=>contextTokens(JSON.stringify(step.request_snapshot))+256);
    t.diagnostic(`maximum article request tokens: ${Math.max(...tokenCounts)}/24000`);
    const [frozen]=await sql`SELECT snapshot FROM assistant_turns WHERE id=${next.turnId}`;
-   assert(contextTokens(JSON.stringify(frozen!.snapshot))>=3800 && contextTokens(JSON.stringify(frozen!.snapshot))<=4000);
-   t.diagnostic(`admitted frozen material snapshot tokens: ${contextTokens(JSON.stringify(frozen!.snapshot))}/4000`);
+   const frozenTokens=contextTokens(JSON.stringify(frozen!.snapshot));
+   t.diagnostic(`admitted frozen material snapshot tokens: ${frozenTokens}/4000`);
+   assert(frozenTokens>=3800 && frozenTokens<=4000,`frozen material snapshot tokens: ${frozenTokens}, expected 3800–4000`);
    for(const step of steps){assert(contextTokens(JSON.stringify(step.request_snapshot))+256<=24000);assert(!step.request_snapshot.system.includes("用户明确M1"));}
    assert.equal(saved.turn?.status,"completed");
    const [analysis]=await sql`SELECT result FROM assistant_tool_calls WHERE turn_id=${next.turnId} AND name='analyze_wechat_research'`;
