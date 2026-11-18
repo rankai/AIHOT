@@ -28,10 +28,12 @@ export function SearchCallCard({
   );
   const vision = call.name === "analyze_xhs_covers";
   const covers = call.name === "search_xhs_covers";
+  const titles = call.name === "search_xhs_titles";
+  const words = call.name === "check_xhs_words";
   const image = call.name === "generate_image";
   const imageParameters = image ? call.imageParameters : null;
   const imageSpecMissing = image && !imageParameters;
-  const label = vision ? "封面视觉分析" : image ? "图片生成" : call.name === "search_xhs_covers" ? "封面查询" : call.name === "search_wechat_articles" ? "公众号查询" : "小红书检索";
+  const label = words ? "文案检测" : titles ? "标题参考查询" : vision ? "封面视觉分析" : image ? "图片生成" : call.name === "search_xhs_covers" ? "封面查询" : call.name === "search_wechat_articles" ? "公众号查询" : "小红书检索";
   const proposed =
     !session.turn?.credits && call.state === "proposed" &&
     session.turn?.phase === "waiting_approval" &&
@@ -64,23 +66,23 @@ export function SearchCallCard({
       </div>
       <dl className="space-y-1 break-words text-[13px] text-ink-2">
         <div>
-          <dt className="inline text-ink-4">{vision ? "样本：" : image ? "提示词：" : "关键词："}</dt>
+          <dt className="inline text-ink-4">{words ? "范围：" : vision ? "样本：" : image ? "提示词：" : "关键词："}</dt>
           <dd className="inline">
-            {vision ? `${Array.isArray(call.input.samples)?call.input.samples.length:0} 张已查询封面` : image
+            {words ? `第 ${Number(call.input.batch) + 1} 段选定文案` : vision ? `${Array.isArray(call.input.samples)?call.input.samples.length:0} 张已查询封面` : image
               ? imageParameters?.prompt ?? "暂无可信记录"
               : String(call.input.keyword ?? "")}
           </dd>
         </div>
-        <div>
+        {!words && <div>
           <dt className="inline text-ink-4">{vision ? "范围：" : image ? "规格：" : "日期："}</dt>
           <dd className="inline">
             {vision ? "最多20张，每批最多5张，最多4批" : image
               ? imageParameters
                 ? `${imageParameters.resolution.toUpperCase()} · ${imageParameters.count} 张 · ${imageParameters.size}`
                 : "暂无可信记录"
-              : call.name === "search_xhs_covers" ? `${String(call.input.startDate ?? "")} 起（供应商 T+1 数据，无指定截止日）` : `${String(call.input.startDate ?? "")} 至 ${String(call.input.endDate ?? "")}`}
+              : titles ? `${String(call.input.startDate ?? "")} 起` : call.name === "search_xhs_covers" ? `${String(call.input.startDate ?? "")} 起（供应商 T+1 数据，无指定截止日）` : `${String(call.input.startDate ?? "")} 至 ${String(call.input.endDate ?? "")}`}
           </dd>
-        </div>
+        </div>}
       </dl>
       {session.turn?.credits ? <p className="text-[13px] text-ink-2">已包含在本次任务中</p> : call.quote && (
         <p className="text-[13px] text-ink-2">
@@ -155,10 +157,10 @@ export function SearchCallCard({
       )}
       {call.state === "completed" && (
         <p className="text-[12px] text-ink-3">
-          {image ? "图片已保存，可在作品栏查看和下载。" : vision ? "封面视觉分析已保存，封面方案会保留实际观察记录。" : covers ? "封面候选已交回助手，后续视觉分析只使用实际下载的图片。" : "查询结果已交回助手，稿件引用会展示可读来源。"}
+          {words ? "本段检测已完成，可在下方查看结果。" : titles ? "参考标题已交回助手，报告中可查看引用依据。" : image ? "图片已保存，可在作品栏查看和下载。" : vision ? "封面视觉分析已保存，封面方案会保留实际观察记录。" : covers ? "封面候选已交回助手，后续视觉分析只使用实际下载的图片。" : "查询结果已交回助手，稿件引用会展示可读来源。"}
         </p>
       )}
-      {!image && !vision && !covers && call.state === "completed" && (
+      {!words && !image && !vision && !covers && call.state === "completed" && (
         <details className="assistant-search-results">
           <summary className="cursor-pointer text-[13px] text-ink-2">
             查看已保存的检索结果（{research.rows.length} 条）

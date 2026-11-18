@@ -15,7 +15,7 @@ export type AssistantPhase =
   | "stopped"
   | "needs_review";
 export type AssistantSkillSelection = { skillId: string; actionId?: never } | { actionId: string; skillId?: never };
-export interface AssistantTaskChoice { skillId: string; moduleId: string; delivery: "writing" | "plans-only" | "image"; size?: string }
+export interface AssistantTaskChoice { skillId: string; moduleId: string; delivery: "writing" | "plans-only" | "image" | "title-report" | "word-check"; size?: string; wordSource?: {kind:"message";start:number;end:number}|{kind:"input";inputId:string}|{kind:"artifact";artifactId:string;version:number} }
 export interface AssistantTaskOption { actionId?: string; choice: AssistantTaskChoice; label: string; userDescription?: string; sizes: string[] }
 export interface AssistantTaskHint {
   actionId: string;
@@ -69,9 +69,23 @@ export interface AssistantArticleResearch {
   patterns: Array<{ label: string; observation: string }>;
   references: Array<{ sourceId: string; title: string; url: string | null; author?: string; authorUrl?: string; metrics: Array<{ label: string; value: string | number }> }>;
 }
+export interface AssistantWordCheck {
+ source:NonNullable<AssistantTaskChoice['wordSource']>; sourceLabel:string;characters:number;textHash:string;scope:string;checkedAt:string;
+ batches:Array<{index:number;start:number;coreStart:number;end:number;hitCount:number}>;
+ hits:Array<{id:string;start:number;end:number;word:string;types:string[];suspected:boolean}>;
+ originalText:string;modifiedText:string;modificationsComplete:boolean;suggestions:Array<{hitId:string;replacement:string;reason:string;applied:boolean}>;notice:string;
+}
+export interface AssistantTitleReport {
+ mode:'generate'|'score'; summary:string; notice:string;
+ candidates:Array<{title:string;reason:string;match:number;sourceIds:string[];duplicate:boolean}>;
+ evaluations:Array<{title:string;dimensions:Record<'keyword'|'structure'|'benefit'|'emotion'|'creativity'|'safety',{score:number;reason:string}>;summary:string;sourceIds:string[];revisions:Array<{title:string;scenario:string}>;total:number;grade:'S'|'A'|'B'|'C';duplicate:boolean}>;
+ evidence:{queries:Array<{keyword:string;startDate:string;rawCounts:Record<string,number>;deduplicatedCount:number;candidateCount:number;projectedCount:number}>;analyzedCount:number;samples:Array<{sourceId:string;title:string;url:string;categories:string[];authorName:string|null;publicTime:string|null;likes:number|string|null}>};
+}
 export interface AssistantArtifactContent {
   research?: AssistantArticleResearch;
   coverPlan?: AssistantCoverPlan;
+  titleReport?: AssistantTitleReport;
+  wordCheck?: AssistantWordCheck;
   planReference?: {artifactId:string;version:number;schemeId:string};
   prompt?: string;
   resultId?: number;
@@ -98,7 +112,7 @@ export interface AssistantSource {
 export interface AssistantArtifact {
   artifactId: string;
   version: number;
-  kind: "text-draft" | "xhs-note" | "image" | "xhs-cover-plan";
+  kind: "text-draft" | "xhs-note" | "image" | "xhs-cover-plan" | "xhs-title-report" | "xhs-word-check";
   schemaVersion: 1;
   content: AssistantArtifactContent;
   sources: AssistantSource[];
@@ -144,7 +158,7 @@ export interface AssistantCall {
 /** Safe, read-only history of persisted actions; never contains execution payloads. */
 export interface AssistantActivity {
   id: string;
-  kind: "request_received" | "model_request" | "load_skill" | "read_skill_reference" | "ask_question" | "analyze_xhs_covers" | "search_xhs_covers" | "search_xhs_notes" | "analyze_xhs_research" | "search_wechat_articles" | "analyze_wechat_research" | "save_draft" | "save_xhs_cover_plan" | "generate_image";
+  kind: "check_xhs_words" | "save_xhs_word_check" | "search_xhs_titles" | "save_xhs_title_report" | "request_received" | "model_request" | "load_skill" | "read_skill_reference" | "ask_question" | "analyze_xhs_covers" | "search_xhs_covers" | "search_xhs_notes" | "analyze_xhs_research" | "search_wechat_articles" | "analyze_wechat_research" | "save_draft" | "save_xhs_cover_plan" | "generate_image";
   state: "preparing" | "running" | "waiting" | "completed" | "rejected" | "stopped" | "failed" | "needs_review";
   callId?: string;
   keyword?: string;
@@ -210,6 +224,8 @@ export interface AssistantSession {
   artifacts: AssistantArtifact[];
   /** Optional for older API snapshots. Contains no tool inputs or artifact bodies. */
   deliveries?: AssistantArtifactDelivery[];
+  /** Safe persisted query facts, retained when a turn has no complete report. */
+  wordQueries?: Array<{turnId:string;batch:number;hits:Array<{id:string;word:string;context:string;suspected:boolean}>;reportUnavailable?:boolean}>;
   turn: AssistantTurn | null;
   eventSeq: number;
 }

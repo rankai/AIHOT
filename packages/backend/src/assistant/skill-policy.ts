@@ -1,3 +1,5 @@
+import { WORD_CHECK_OPERATION } from "./word-check-contract.ts";
+import { XHS_TITLE_OPERATION } from "../providers/redfox/xhs-title-contract.ts";
 import { hasSavedCoverResearch } from "./cover-plan.ts";
 import { coverVisionModel,coverVisionOutbound } from "./cover-vision-model.ts";
 import { XHS_COVER_OPERATION } from "../providers/redfox/xhs-cover-contract.ts";
@@ -19,18 +21,22 @@ import type { AssistantId, AssistantSkillSelection, AssistantSkillAdminRow } fro
 
 const Policy = z.object({ acceptingNew: z.boolean(), revision: z.number().int().safe().nonnegative() }).strict();
 const capabilityDependencies = {
+ "check-xhs-words@1":["redfox.query / API_1791881343238", "本次选定文案发送至检测服务"],
+ "save-xhs-word-check@1":["完整检测证据及必要修改建议"],
   "generate_image@1": ["redfox.image / gptImage2（1k，单张）", "redfox.poll", "精确接口会员价和成本"],
   "save-xhs-cover-plan@1": ["方案保存与真实视觉研究证据"],
   "save-writing@1": ["会员积分价目、全站与会员预算"],
   "search-xhs-notes@1": ["redfox.query / 3X8FGEEM"],
   "analyze-xhs-research@1": ["助手模型研究分析"],
   "analyze-xhs-cover-images@1": ["assistant.vision", "视觉模型、精确成本和会员价；纳入任务预计上限"],
+  "search-xhs-titles@1": [`redfox.query / ${XHS_TITLE_OPERATION}`, "精确标题查询成本与会员价；纳入任务上限"],
+  "save-xhs-title-report@1": ["本地保存", "实际研究依据及编辑参考分"],
   "search-xhs-covers@1": [`redfox.query / ${XHS_COVER_OPERATION}`, "精确接口会员价和成本；纳入任务预计上限"],
   "search-wechat-hot@1": [`redfox.query / ${WECHAT_HOT_OPERATION}`, "精确接口会员价和成本；纳入任务预计上限"],
   "analyze-wechat-research@1": ["助手模型研究分析"],
 } as const satisfies Record<Capability, readonly string[]>;
 const inputScope = { "writing-input@1": "文本、已选材料与稿件引用", "image-input@1": "文本提示词；gptImage2、1K、单张、无参考图" };
-const deliveryScope = { "writing-delivery@1": "文字稿件或小红书笔记", "wechat-research-writing@1": "真实热文研究、规律分析后交付公众号文章", "xhs-cover-delivery@1": "封面研究方案与可选图片", "image-delivery@1": "本地图片作品，可预览和下载" };
+const deliveryScope = { "xhs-word-check@1":"完整检测结果、必要替换建议与修改稿", "xhs-title-report@1":"真实参考支持的标题生成或评分报告", "writing-delivery@1": "文字稿件或小红书笔记", "wechat-research-writing@1": "真实热文研究、规律分析后交付公众号文章", "xhs-cover-delivery@1": "封面研究方案与可选图片", "image-delivery@1": "本地图片作品，可预览和下载" };
 const keyOf = (id: string) => `assistant.skills.${id}`;
 const unavailable = (message: string) => new AccountError(409, "skill_unavailable", message);
 function registered(id: string) {
@@ -80,7 +86,7 @@ export async function skillAdmission(db: Db, id: AssistantId, selection?: Assist
       actions: actions.filter(a => a.skillId === p.skillId && (!p.acceptingNew||p.reason||health.get(a.actionId)?.length)).map(a => a.label), reason: p.reason ?? (!p.acceptingNew?"已暂停新任务":"部分功能依赖暂不可用") })) };
 }
 const CandidateSchema = z.object({ skillId: z.string(), version: z.string(), packageHash: z.string(), moduleId: z.string(), moduleVersion: z.string(), moduleHash: z.string(), description: z.string() }).strict();
-const Admission = z.object({ version: z.literal(1), candidates: z.array(CandidateSchema).min(1),
+const Admission = z.object({ materialSelection:z.object({inputs:z.boolean(),artifacts:z.boolean()}).strict().optional(), version: z.literal(1), candidates: z.array(CandidateSchema).min(1),
   policies: z.array(z.object({ skillId: z.string(), acceptingNew: z.boolean(), revision: z.number().int().nonnegative() }).strict()),
   unavailableSkills: z.array(z.object({ skillId: z.string(), actions: z.array(z.string()), reason: z.string() }).strict()),
 }).strict();
@@ -147,6 +153,17 @@ export async function skillHealth(db: Db = sql, selectedArtifacts: readonly Reco
     await assertMemberCostEligible(intent); await selectToolPrice(db,intent);
     await checkBudget(db,"redfox.query"); await checkBudget(db,"redfox.query","member");
   } catch(error) { for (const action of capabilityActions("search-wechat-hot@1")) result.get(action)!.push(safeReason(error).replaceAll("笔记检索","公众号查询")); }
+  try {
+    redfoxBaseUrl();assertRedfoxAvailable(XHS_TITLE_OPERATION,'query');
+    const intent={kind:'query' as const,provider:'redfox',model:XHS_TITLE_OPERATION,input:{operationId:XHS_TITLE_OPERATION,parameters:{keyword:'配置校验',startDate:'2026-01-01'}}};
+    await assertMemberCostEligible(intent);await selectToolPrice(db,intent);
+    await checkBudget(db,'redfox.query');await checkBudget(db,'redfox.query','member');
+  }catch(error){for(const action of capabilityActions('search-xhs-titles@1'))result.get(action)!.push(safeReason(error));}
+  try {
+    assertRedfoxAvailable(WORD_CHECK_OPERATION,'query');
+    const intent={kind:'query' as const,provider:'redfox',model:WORD_CHECK_OPERATION,input:{operationId:WORD_CHECK_OPERATION,parameters:{content:'配置校验',platform:'小红书'}}};
+    await assertMemberCostEligible(intent);await selectToolPrice(db,intent);await checkBudget(db,'redfox.query');await checkBudget(db,'redfox.query','member');
+  }catch(error){for(const action of capabilityActions('check-xhs-words@1'))result.get(action)!.push(safeReason(error));}
   const needsCoverResearch=(action:string)=>!hasSavedCoverResearch(selectedArtifacts)||!bindings.some(b=>b.version===currentSkillVersions[b.skillId]&&b.modules.some(m=>m.actionId===action&&m.deliveryContract==="xhs-cover-delivery@1"));
   const coverActions = capabilityActions("search-xhs-covers@1").filter(needsCoverResearch);
   if (coverActions.length) try {

@@ -1,3 +1,4 @@
+import { XHS_TITLE_OPERATION } from "../providers/redfox/xhs-title-contract.ts";
 import { XHS_COVER_OPERATION } from "../providers/redfox/xhs-cover-contract.ts";
 import { WECHAT_HOT_OPERATION } from "../providers/redfox/wechat-hot-contract.ts";
 import { WanInput, WAN_GENERATE, WAN_MODEL } from "../providers/aliyun/wan-contract.ts";
@@ -79,7 +80,7 @@ export async function normalizeToolInput(actor: string, rawKind: unknown, raw: u
       const request = z.object({ provider: z.enum(["redfox", "agentkey"]).default("redfox"), operationId: z.string().min(1), parameters: z.record(z.string(), z.unknown()), sourceResultId: ToolId.optional() }).strict().parse(raw);
       const catalog = await platformToolCatalog();
       const descriptor = catalog.find(operation => operation.id === request.operationId);
-      if ((!descriptor && !(internal?.assistantSearch === true && request.provider === "redfox" && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(request.operationId))) || descriptor?.platform === "redfox-account") throw new AccountError(403, "forbidden", "该接口不对前台用户开放");
+      if ((!descriptor && !(internal?.assistantSearch === true && request.provider === "redfox" && [WECHAT_HOT_OPERATION,XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(request.operationId))) || descriptor?.platform === "redfox-account") throw new AccountError(403, "forbidden", "该接口不对前台用户开放");
       if (request.sourceResultId !== undefined) await ownToolResult(actor, request.sourceResultId);
       provider = request.provider;
       const { provider: _, ...body } = request;

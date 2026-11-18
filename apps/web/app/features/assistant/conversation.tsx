@@ -540,7 +540,7 @@ function ConversationContent({ data }: { data: AssistantSessionData }) {
       ],
     }));
     setView("chat");
-    setNotice(`已引用${artifact.kind === "xhs-cover-plan" ? "封面方案" : "稿件"}版本 ${artifact.version}，可在下次发送时描述修改要求。`);
+    setNotice(`已引用${artifact.kind === "xhs-title-report" ? "标题报告中的标题" : artifact.kind === "xhs-cover-plan" ? "封面方案" : "稿件"}版本 ${artifact.version}，可在下次发送时描述修改要求。`);
   }
   function showArtifacts(target?: { artifactId: string; version: number }) {
     if (target) setArtifactTarget({ ...target });

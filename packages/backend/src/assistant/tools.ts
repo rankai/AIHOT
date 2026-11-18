@@ -1,3 +1,11 @@
+import { CheckWords,SaveWordCheck,WORD_CHECK_DELIVERY,WORD_CHECK_OPERATION } from "./word-check-contract.ts";
+import { freezeWordCheck,wordSourceText } from "./word-check-input.ts";
+import { persistWordCheck } from "./word-check.ts";
+import { wordCheckResults } from "./word-check-results.ts";
+import { assertKnownResearchQuery } from "./research-window.ts";
+import { SaveTitleReport,TITLE_DELIVERY_CONTRACT } from "./title-report-contract.ts";
+import { persistTitleReport } from "./title-report.ts";
+import { XHS_TITLE_OPERATION,XhsTitleInput } from "../providers/redfox/xhs-title-contract.ts";
 import { SaveCoverPlan,CoverPlanReference } from "./cover-plan-contract.ts";
 import { persistCoverPlan,resolveCoverImage,COVER_DELIVERY_CONTRACT } from "./cover-plan.ts";
 import { CoverVisionProposal,CoverVisionInput } from "./cover-vision-contract.ts";
@@ -96,6 +104,10 @@ const dateArgumentsError = (message: string) => new DraftArgumentsError(new z.Zo
 export const businessTools = {
   generate_image: { description:"准备单张1K图片的独立报价，不会外发。仅用户专用批准入口可执行；不支持参考图、编辑、批量或其他模型。提示词应明确主题、构图、风格与文字要求。", schema:z.toJSONSchema(ImageProposal, {io:"input"}) },
   analyze_wechat_research: { description: "分析本激活真实返回标题和摘要的六维规律；显式选样和规律引用共同确定研究样本，只使用真实可用来源并去重。仅有摘要不能声称读过全文、引用原文断言或验证全文开头/段落/结尾；无依据维度如实写不足，缺失互动数未知。有样本直接继续，不为不足10条或摘要截断增加范围确认。", schema: z.toJSONSchema(WechatAnalysis) },
+  check_xhs_words:{description:"检查本次冻结原文的一个批次，batch从0开始，按顺序串行，不传文字或改范围。完成全部批次后才保存报告；重复批次复用原结果，未知结果先核对。",schema:z.toJSONSchema(CheckWords)},
+  save_xhs_word_check:{description:"全部冻结批次完成后保存检测报告。suggestions仅引用真实hitId并给replacement和reason，只替换该命中原文，不全文重写。疑似英文子串误报保留原文，可不给替换；零命中suggestions为空。",schema:z.toJSONSchema(SaveWordCheck)},
+  search_xhs_titles: {description:"按已冻结主题和起始日期查询真实参考标题。1至5个去重词，含逗号最多30单元；仅明确全站主题可空词。生成首查近7天，必要时同词扩期至30天一次；评分仅近30天一次。不传截止日，不自动换词或重发。",schema:z.toJSONSchema(z.object({activationId:z.string().uuid(),keyword:z.string().max(30),startDate:z.iso.date()}).strict())},
+  save_xhs_title_report: {description:"保存真实研究支持的标题生成或评分报告。sampleIds为实际分析样本sourceId；逐条引用同一集合。生成10个不同且最多20码点的标题。评分保留用户原标题，六维0至10，服务端加权分级；非S级给2至3个修改版本和场景，无样本不得保存。",schema:z.toJSONSchema(SaveTitleReport,{io:"input"})},
   save_xhs_cover_plan: {description:"保存恰好三套有真实视觉研究依据的封面方案。summary 概括观察到的设计规律，不另报检索、去重或观察数量；页面使用本版研究记录展示这些数据。仅方案用next=plans-only结束；否则next=choose保存后等待用户选择，选择不等于付款。历史方案仅限本轮明确选中版本，修订使用artifactId/baseVersion。",schema:z.toJSONSchema(SaveCoverPlan,{io:"input"})},
   analyze_xhs_covers: { description: "对本回合已查询的真实封面进行视觉分析，最多20个sourceId并说明选样理由。仅创建独立报价，必须人工专用入口批准，旧检索自动授权无效。不得传URL或声称仅凭元数据看过图。", schema:z.toJSONSchema(CoverVisionProposal) },
   search_xhs_covers: { description: "创建爆款封面候选查询报价，最多5个去重词，含分隔逗号总长最多30个UTF-16单元（emoji计2）。每父回合仅一次，必须专用入口人工确认，旧自动授权无效。startDate默认researchClock.earliestDate，须在冻结近30天范围内；供应商T+1数据，仅支持起始日期，不接受endDate。不自动补查或重试；返回元数据不是看图分析。", schema: z.toJSONSchema(SearchInput.omit({ endDate: true }).extend({ keyword: z.string().min(1).max(30).describe("1–5个去重关键词，用英文逗号分隔；包括逗号总长≤30个UTF-16单元，emoji计2。超限需重新精简选择，不截断或拆成多次查询") })) },
@@ -311,6 +323,20 @@ export async function localCall(
     if (!module.tools.includes(call.name)) throw conflict("当前模块不能分析研究");
     return call.name === "analyze_wechat_research" ? analyzeWechatResearch(tx, turn, call.id, input) : analyzeResearch(tx, turn, call.id, input);
   }
+  if(call.name==='save_xhs_word_check'){
+    assertBusinessTool(turn,call.name);const parsed=SaveWordCheck.safeParse(call.input);
+    if(!parsed.success)throw new DraftArgumentsError(parsed.error,'只对实际命中提供必要替换，不重新查询或重写全文。');
+    const {module}=await activation(tx,turn,parsed.data.activationId);
+    if(module.deliveryContract!==WORD_CHECK_DELIVERY||!module.tools.includes(call.name))throw conflict('模块不能保存检测报告');
+    return persistWordCheck(tx,turn,parsed.data);
+  }
+  if(call.name === "save_xhs_title_report") {
+    assertBusinessTool(turn,call.name);
+    const parsed=SaveTitleReport.safeParse(call.input);if(!parsed.success)throw new DraftArgumentsError(parsed.error,'修正报告字段；不得重新查询或编造样本。');
+    const {module}=await activation(tx,turn,parsed.data.activationId);
+    if(module.deliveryContract!==TITLE_DELIVERY_CONTRACT||!module.tools.includes(call.name)||!module.outputKinds.includes('xhs-title-report'))throw conflict('模块不能保存标题报告');
+    return persistTitleReport(tx,turn,parsed.data);
+  }
   if(call.name === "save_xhs_cover_plan") {
     assertBusinessTool(turn,call.name);
     const parsed=SaveCoverPlan.safeParse(call.input);if(!parsed.success)throw new DraftArgumentsError(parsed.error,"请提供三套封面方案的名称和提示词；构图、配色缺失可省略，不补造观察，来源只使用实际成功观察的图片；方案编号和本任务后续动作由服务端补齐");
@@ -372,6 +398,14 @@ async function proposalQuote(turn:Record<string,any>,intent:import("@aihot/contr
  return {quoteId:charge.quote_id,amount:0,available:0,affordable:true,priceId:null,priceVersion:1,expiresAt:quote!.expires_at.toISOString(),recoveryOfRunId:null};
 }
 export async function prepareCall(turn: Record<string, any>, call: Record<string, any>) {
+  if(call.name==='check_xhs_words'){
+    assertBusinessTool(turn,call.name);const parsed=CheckWords.safeParse(call.input);
+    if(!parsed.success)throw new DraftArgumentsError(parsed.error,'请使用本次冻结批次序号，不传新文字。');
+    const i=parsed.data,scope=freezeWordCheck(turn.snapshot,turn.snapshot.taskScope?.wordCheck),batch=scope.batches[i.batch];if(!batch)throw conflict('检测批次超出授权');
+    await sql.begin(async tx=>{const {module}=await activation(tx,turn,i.activationId);if(module.deliveryContract!==WORD_CHECK_DELIVERY||!module.tools.includes(call.name))throw conflict('模块不能检测文案');});
+    const {text}=wordSourceText(turn.snapshot,scope.source),normalized=await normalizeToolInput(`user:${turn.owner_user_id}`,'query',{provider:'redfox',operationId:WORD_CHECK_OPERATION,parameters:{content:text.slice(batch.start,batch.end),platform:'小红书'}},{assistantSearch:true});
+    await assertMemberCostEligible(normalized.intent);return {normalized,quote:await proposalQuote(turn,normalized.intent)};
+  }
   if(call.name === "analyze_xhs_covers") {
     assertBusinessTool(turn,call.name);
     const parsed=CoverVisionProposal.safeParse(call.input);if(!parsed.success)throw new DraftArgumentsError(parsed.error,"仅选择本回合封面查询返回的sourceId，并填写选样理由");
@@ -407,9 +441,9 @@ export async function prepareCall(turn: Record<string, any>, call: Record<string
   return { normalized, quote: await proposalQuote(turn,normalized.intent), ...(i.planReference ? {correctedInput:i} : {}) };
 }
 export async function prepareSearch(turn: Record<string, any>, call: Record<string, any>) {
-  const wechat = call.name === "search_wechat_articles", cover = call.name === "search_xhs_covers";
+  const wechat = call.name === "search_wechat_articles", cover = call.name === "search_xhs_covers", title = call.name === "search_xhs_titles";
   assertBusinessTool(turn, call.name);
-  const parsed = (cover ? CoverSearchInput : wechat ? WechatSearchInput : SearchInput).safeParse(call.input);
+  const parsed = (title ? XhsTitleInput.extend({activationId:z.string().uuid()}) : cover ? CoverSearchInput : wechat ? WechatSearchInput : SearchInput).safeParse(call.input);
   if (!parsed.success) throw new DraftArgumentsError(parsed.error, searchCorrection);
   const i = parsed.data;
   if ("endDate" in i && typeof i.endDate === "string" && i.startDate > i.endDate) throw dateArgumentsError("开始日期不得晚于结束日期");
@@ -445,8 +479,8 @@ export async function prepareSearch(turn: Record<string, any>, call: Record<stri
   }
   const normalized = await normalizeToolInput(`user:${turn.owner_user_id}`, "query", {
     provider: "redfox",
-    operationId: cover ? XHS_COVER_OPERATION : wechat ? WECHAT_HOT_OPERATION : "3X8FGEEM",
-    parameters: { keyword: i.keyword, startDate: i.startDate, ...("endDate" in i ? {endDate:i.endDate} : {}), ...(wechat || cover ? {} : { pageNum: 1, pageSize: 50 }) },
+    operationId: title ? XHS_TITLE_OPERATION : cover ? XHS_COVER_OPERATION : wechat ? WECHAT_HOT_OPERATION : "3X8FGEEM",
+    parameters: { keyword: i.keyword, startDate: i.startDate, ...("endDate" in i ? {endDate:i.endDate} : {}), ...(wechat || cover || title ? {} : { pageNum: 1, pageSize: 50 }) },
   }, { assistantSearch: true });
   await assertMemberCostEligible(normalized.intent);
   return { normalized, quote: await proposalQuote(turn,normalized.intent), ...(researchTaskPolicy(turn.snapshot)?{correctedInput:i}:{}) };
@@ -539,6 +573,27 @@ export async function refreshCallQuote(userId: number, sessionId: string, callId
 async function startSearch(tx:Tx,userId:number,t:Record<string,any>,call:Record<string,any>,authorizationId?:string){
  if (authorizationId && call.name !== "search_xhs_notes") throw conflict("本次查询需要人工确认");
  const { a } = await activation(tx, t, call.input.activationId);
+ if(call.name==='check_xhs_words'){
+  const [parent]=await tx`SELECT status,generation FROM operation_runs WHERE id=${t.parent_operation_run_id} FOR UPDATE`;
+  const charge=await chargeForRun(tx,t.parent_operation_run_id,true);
+  if(!parent||!['active','waiting'].includes(parent.status)||!charge||charge.state!=='reserved'||charge.quote_id!==call.quote.quoteId)throw conflict('任务已停止或费用已结算，不能重新执行检测');
+  const input=CheckWords.parse(call.input),scope=freezeWordCheck(t.snapshot,t.snapshot.taskScope?.wordCheck),batch=scope.batches[input.batch];
+  if(!batch)throw conflict('检测批次超出授权');
+  const {text}=wordSourceText(t.snapshot,scope.source),expected={content:text.slice(batch.start,batch.end),platform:'小红书'};
+  if(creditHash(expected)!==creditHash(call.result.normalized.commandInput.parameters))throw conflict('批次原文与冻结范围不一致');
+  const [prior]=await tx`SELECT c.*,r.status FROM assistant_tool_calls c JOIN operation_runs r ON r.id=c.child_run_id WHERE c.turn_id=${t.id} AND c.name='check_xhs_words' AND (c.input->>'batch')::int=${input.batch} ORDER BY c.ordinal LIMIT 1`;
+  if(prior){
+    if(prior.input.activationId!==input.activationId)throw conflict('批次激活归属不一致');
+    await assertKnownResearchQuery(tx,prior.child_run_id);
+    const rows=await tx`SELECT kind,data FROM operation_results WHERE run_id=${prior.child_run_id}`;
+    const reused={...wordCheckResults(rows as any,t.snapshot,input.batch),reusedRunId:prior.child_run_id};
+    await tx`UPDATE assistant_tool_calls SET state='completed',result=${tx.json(reused as never)},activation_id=${a.id} WHERE id=${call.id}`;
+    return prior;
+  }
+  const previous=await tx`SELECT DISTINCT c.child_run_id,(c.input->>'batch')::int batch FROM assistant_tool_calls c WHERE c.turn_id=${t.id} AND c.name='check_xhs_words' AND c.child_run_id IS NOT NULL`;
+  if(previous.length!==input.batch||previous.some(p=>p.batch>=input.batch))throw conflict('检测必须按冻结顺序执行');
+  for(const p of previous)await assertKnownResearchQuery(tx,p.child_run_id);
+ }
  const researchInput={...call.input};
  if(await validateResearchSearch(tx,t,call,researchInput)) {
   const parameters=call.result.normalized.commandInput.parameters;
@@ -546,7 +601,7 @@ async function startSearch(tx:Tx,userId:number,t:Record<string,any>,call:Record<
    throw conflict("查询参数与冻结研究范围不一致");
  }
  const [parent] = await tx`SELECT generation FROM operation_runs WHERE id=${t.parent_operation_run_id}`;
- const allocation=t.snapshot.taskScope ? {parentRunId:t.parent_operation_run_id,generation:parent!.generation,callId:call.id} : undefined;
+ const allocation=t.snapshot.taskScope ? {parentRunId:t.parent_operation_run_id,generation:parent!.generation,callId:call.id,...(call.name==='check_xhs_words'?{itemKey:`check-xhs-words@1:${call.input.batch}`}:{})} : undefined;
  const authorization=(intent:import("@aihot/contracts/credits").ToolCreditIntent)=>({quoteId:call.quote.quoteId,intent,...(allocation?{taskAllocation:allocation}:{})});
  const [count]=await tx`SELECT child_calls, (SELECT count(*)::int FROM assistant_tool_calls WHERE turn_id=${t.id} AND child_run_id IS NOT NULL) AS n FROM assistant_turns WHERE id=${t.id}`;
  if(count!.n>=t.snapshot.limits.childCalls||count!.child_calls>=t.snapshot.limits.childCalls)throw conflict("本回合检索次数已达上限");

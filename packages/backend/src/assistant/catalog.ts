@@ -26,11 +26,11 @@ const Module = z
     inputSchema: z.enum(["writing-input@1", "image-input@1"]),
     toolContractVersion: z.literal(1),
     outputSchemaVersion: z.literal(1),
-    deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1"]),
+    deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1", "xhs-title-report@1", "xhs-word-check@1"]),
     entryResource: Id,
     resources: z.array(Id),
-    tools: z.array(z.enum(["save_draft", "save_xhs_cover_plan", "analyze_xhs_covers", "search_xhs_covers", "search_xhs_notes", "analyze_xhs_research", "search_wechat_articles", "analyze_wechat_research", "generate_image"])),
-    outputKinds: z.array(z.enum(["text-draft", "xhs-note", "image", "xhs-cover-plan"])),
+    tools: z.array(z.enum(["check_xhs_words", "save_xhs_word_check", "save_xhs_title_report", "search_xhs_titles", "save_draft", "save_xhs_cover_plan", "analyze_xhs_covers", "search_xhs_covers", "search_xhs_notes", "analyze_xhs_research", "search_wechat_articles", "analyze_wechat_research", "generate_image"])),
+    outputKinds: z.array(z.enum(["text-draft", "xhs-note", "image", "xhs-cover-plan", "xhs-title-report", "xhs-word-check"])),
     modelCapabilities: z.array(z.literal("text-tools")),
     fixtures: z.array(z.string()).min(3),
   })
@@ -110,7 +110,7 @@ export async function validatePackage(root: string, raw: unknown): Promise<Loade
       throw catalogError("resource_missing", "模块资源不存在");
     // These finite delivery contracts require real capabilities, independent of package identity.
     const hasTools = (...tools: string[]) => tools.every(tool => (module.tools as string[]).includes(tool));
-    if ((hasTools("generate_image") && !module.outputKinds.includes("image")) || ((module.deliveryContract === "xhs-cover-delivery@1" || hasTools("save_xhs_cover_plan")) &&
+    if ((module.deliveryContract === "xhs-word-check@1" && (!hasTools("check_xhs_words","save_xhs_word_check") || !module.outputKinds.includes("xhs-word-check"))) || (module.deliveryContract === "xhs-title-report@1" && (!hasTools("search_xhs_titles","save_xhs_title_report") || !module.outputKinds.includes("xhs-title-report"))) || (hasTools("generate_image") && !module.outputKinds.includes("image")) || ((module.deliveryContract === "xhs-cover-delivery@1" || hasTools("save_xhs_cover_plan")) &&
         (module.deliveryContract !== "xhs-cover-delivery@1" || !hasTools("search_xhs_covers","analyze_xhs_covers","save_xhs_cover_plan") || !module.outputKinds.includes("xhs-cover-plan"))) || ((module.deliveryContract === "wechat-research-writing@1" || module.tools.includes("analyze_wechat_research")) &&
         (module.deliveryContract !== "wechat-research-writing@1" || !hasTools("search_wechat_articles", "analyze_wechat_research", "save_draft") || !module.outputKinds.includes("text-draft"))) ||
       (module.deliveryContract === "image-delivery@1" &&
@@ -251,7 +251,7 @@ export async function additionalFeeKinds(candidates: Candidate[]): Promise<Assis
   const kinds = new Set<AssistantAdditionalFeeKind>();
   for (const candidate of candidates) {
     const { module } = await resolveCandidate([candidate], candidate.skillId, candidate.moduleId);
-    if (module.tools.some(tool => tool === "search_xhs_covers" || tool === "search_xhs_notes" || tool === "search_wechat_articles")) kinds.add("search");
+    if (module.tools.some(tool => tool === "check_xhs_words" || tool === "search_xhs_titles" || tool === "search_xhs_covers" || tool === "search_xhs_notes" || tool === "search_wechat_articles")) kinds.add("search");
     if (module.tools.includes("analyze_xhs_covers")) kinds.add("vision");
     if (module.tools.includes("generate_image")) kinds.add("image");
   }

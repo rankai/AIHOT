@@ -38,7 +38,8 @@ export async function enqueueMessage(userId: number, sessionId: string, raw: unk
     const selected=await selectedArtifactVersions(tx,sessionId,versions);
     const admission = await skillAdmission(tx, s.assistant_id, input.skillSelection as never, true,selected);
     if (input.autoAuthorizationId && !(await tx`SELECT id FROM assistant_fee_authorizations WHERE id=${input.autoAuthorizationId} AND session_id=${sessionId}`)[0]) throw conflict("费用授权不属于本会话");
-    const id = randomUUID(), frozen = { ...input, inputIds, artifactVersions: versions };
+    const id = randomUUID(), frozen = { ...input, inputIds, artifactVersions:versions };
+    Object.assign(admission,{materialSelection:{inputs:input.inputIds!==undefined,artifacts:input.artifactVersions!==undefined}});
     await tx`INSERT INTO assistant_message_queue(id,session_id,command_key,command_hash,input,admission_snapshot) VALUES (${id},${sessionId},${c.key},${c.hash},${tx.json(frozen as never)},${tx.json(admission as never)})`;
     await event(tx, sessionId, "queue", id);
     return { entryId: id, state: "pending", turnId: null };

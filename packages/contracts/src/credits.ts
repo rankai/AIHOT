@@ -15,7 +15,7 @@ export interface ToolCreditIntent {
   recoveryRunId?: number;
 }
 
-export interface ToolAuthorization { quoteId: string; intent: ToolCreditIntent; taskAllocation?: { parentRunId: number; generation: number; callId: string } }
+export interface ToolAuthorization { quoteId: string; intent: ToolCreditIntent; taskAllocation?: { parentRunId: number; generation: number; callId: string; itemKey?: string } }
 export interface ToolPrice {
   id: string;
   kind: ToolCreditKind;

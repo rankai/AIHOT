@@ -40,7 +40,7 @@ export function currentImageTarget(session: AssistantSession): ArtifactTarget | 
 }
 
 export function artifactDisplayName(artifact: AssistantArtifact) {
-  return artifact.kind === "xhs-cover-plan" ? "三套设计方案" : artifact.kind === "image" ? isCoverImage(artifact) ? "生成的封面" : "生成的图片" : artifact.kind === "xhs-note" ? "笔记" : "文章";
+  return artifact.kind === "xhs-word-check" ? "检测报告" : artifact.kind === "xhs-title-report" ? "标题报告" : artifact.kind === "xhs-cover-plan" ? "三套设计方案" : artifact.kind === "image" ? isCoverImage(artifact) ? "生成的封面" : "生成的图片" : artifact.kind === "xhs-note" ? "笔记" : "文章";
 }
 
 /** Older snapshots can identify images, but cannot safely associate old drafts with a turn. */
@@ -102,6 +102,8 @@ export function deliverySummary(deliveries: AssistantArtifactDelivery[]): string
   if (deliveries.length !== 1) return "本次作品已保存。";
   const delivery = deliveries[0]!;
   if (delivery.kind === "image") return "图片已生成。";
+  if (delivery.kind === "xhs-word-check") return "检测报告已保存。";
+  if (delivery.kind === "xhs-title-report") return "标题报告已保存。";
   if (delivery.kind === "xhs-cover-plan") return "三套封面方案已保存。";
   return delivery.version > 1 ? `已保存第 ${delivery.version} 版。` : `《${delivery.title}》写好了。`;
 }

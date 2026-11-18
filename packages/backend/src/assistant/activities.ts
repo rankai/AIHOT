@@ -12,11 +12,15 @@ interface Turn {
   pending_question: { questionId: string } | null;
 }
 const publicTools = new Set<AssistantActivity["kind"]>([
+  "check_xhs_words",
+  "save_xhs_word_check",
   "load_skill",
   "read_skill_reference",
   "ask_question",
   "search_xhs_notes",
   "analyze_xhs_covers",
+  "search_xhs_titles",
+  "save_xhs_title_report",
   "search_xhs_covers",
   "search_wechat_articles",
   "generate_image",
@@ -36,7 +40,7 @@ export async function readActivities(tx: Tx, turn: Turn): Promise<{ activities: 
     FROM assistant_model_steps s LEFT JOIN receipts p ON p.id=s.receipt_id
     WHERE s.turn_id=${turn.id} ORDER BY s.model_ordinal`;
   const calls = await tx`SELECT c.id,c.model_step_id,c.name,c.state,
-    CASE WHEN c.name IN ('analyze_xhs_covers','search_xhs_covers','search_xhs_notes','search_wechat_articles') AND jsonb_typeof(c.input->'keyword')='string'
+    CASE WHEN c.name IN ('search_xhs_titles','analyze_xhs_covers','search_xhs_covers','search_xhs_notes','search_wechat_articles') AND jsonb_typeof(c.input->'keyword')='string'
       THEN left(c.input->>'keyword',120) END AS keyword,
     a.candidate AS candidate, r.status AS child_status,p.error AS child_error,p.status AS child_receipt_status
     FROM assistant_tool_calls c JOIN assistant_model_steps s ON s.id=c.model_step_id
@@ -86,7 +90,7 @@ export async function readActivities(tx: Tx, turn: Turn): Promise<{ activities: 
         callId: call.id,
         ...(call.name === "search_wechat_articles" && call.child_error?.includes("Redfox insufficient balance") ? { failureMessage:"数据查询暂不可用，请稍后重新发起" } : {}),
         ...(call.name === "save_draft" && delivery?.deliveryContract === "wechat-research-writing@1" && delivery.outputKinds.includes("text-draft") ? { artifactLabel:"公众号稿件" } : {}),
-        ...(["search_xhs_covers", "search_xhs_notes", "search_wechat_articles"].includes(call.name) && typeof call.keyword === "string" ? { keyword: call.keyword } : {}),
+        ...(["search_xhs_titles", "search_xhs_covers", "search_xhs_notes", "search_wechat_articles"].includes(call.name) && typeof call.keyword === "string" ? { keyword: call.keyword } : {}),
       });
     }
   }

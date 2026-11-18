@@ -96,6 +96,8 @@ export function artifactTags(content: AssistantArtifactContent): string {
   return artifactTagValues(content).map(tag => `#${tag}`).join(" ");
 }
 export function artifactText(content: AssistantArtifactContent, format: "markdown" | "plain" = "markdown"): string {
+  if(content.wordCheck)return content.wordCheck.modifiedText;
+  if(content.titleReport)return (content.titleReport.mode === "generate" ? content.titleReport.candidates : content.titleReport.evaluations).map(row=>row.title).join("\n");
   if (content.coverPlan) {
     const plan = content.coverPlan;
     return [
@@ -173,17 +175,17 @@ export function researchResults(raw: unknown): {
       !value ||
       typeof value !== "object" ||
       typeof value.title !== "string" ||
-      typeof value.text !== "string"
+      (value.text !== undefined && typeof value.text !== "string")
     )
       continue;
     rows.push({
       id: String(value.id ?? rows.length),
       title: value.title,
-      text: value.text,
+      text: value.text ?? "",
       url: typeof value.url === "string" ? safeSourceHref(value.url) : null,
     });
   }
-  return { rows, limited: "limited" in raw && raw.limited === true };
+  return { rows, limited: raw.results.length > 50 || ("limited" in raw && raw.limited === true) };
 }
 
 /** Match complete route segments; /agent and /assistant-other retain their existing shells. */
@@ -234,6 +236,10 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
         save_draft: "稿件内容已返回",
         ask_question: "已提出需要补充的问题",
         analyze_xhs_covers: "已提出封面视觉分析需求",
+        check_xhs_words: "已提出文案检测需求",
+        save_xhs_word_check: "检测建议已返回",
+        search_xhs_titles: "查找参考标题",
+        save_xhs_title_report: "标题建议已返回",
         search_xhs_covers: "已提出封面查询需求",
         search_wechat_articles: "已提出公众号查询需求",
         generate_image: "已提出图片生成需求",
@@ -250,6 +256,10 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
     search_xhs_notes: `查询${activity.keyword ? `“${activity.keyword}”` : "参考笔记"}`,
     analyze_xhs_research: "整理爆款规律",
     analyze_xhs_covers: "分析真实封面图片",
+    check_xhs_words: "检查文案",
+    save_xhs_word_check: "保存检测报告",
+    search_xhs_titles: "查找参考标题",
+    save_xhs_title_report: "保存标题报告",
     search_xhs_covers: "查询爆款封面",
     search_wechat_articles: "查询公众号热文",
     generate_image: "生成图片",
@@ -264,6 +274,10 @@ export function activityLabel(activity: AssistantActivity, activities?: readonly
     search_xhs_notes: `${action} · 查询结果已返回`, save_draft: activity.artifactLabel ? `已保存${activity.artifactLabel}` : "稿件已保存",
     analyze_xhs_research: "已保存爆款规律分析",
     analyze_xhs_covers: "封面视觉报告已保存",
+    check_xhs_words: "检测结果已返回",
+    save_xhs_word_check: "检测报告已保存",
+    search_xhs_titles: "参考标题已返回",
+    save_xhs_title_report: "标题报告已保存",
     search_xhs_covers: "封面候选查询结果已返回",
     search_wechat_articles: "公众号热文查询结果已返回",
     generate_image: "图片已保存，可在作品栏查看和下载",

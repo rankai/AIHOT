@@ -6,7 +6,7 @@ export const mediaToolOperations = {
  "9Q2PQBKU": {path:"/story/api/parseWork/audioExtract/bilibili",method:"POST",platform:"tools",group:"media",purpose:"media",label:"获取哔哩哔哩音频地址",schema:UrlInput},
  "API_1792053861083": {path:"/story/api/parseWork/videoSubtitle/bili",method:"POST",platform:"tools",group:"subtitle",purpose:"transcript",label:"哔哩哔哩视频字幕提取",schema:UrlInput},
  "API_1792051516512": {path:"/story/api/parseWork/videoSubtitle/youtube",method:"POST",platform:"tools",group:"subtitle",purpose:"transcript",label:"YouTube视频字幕提取",schema:UrlInput},
- "API_1791881343238": {path:"/story/api/cozeSkill/sensitiveWordSearch",method:"POST",platform:"tools",group:"text-check",purpose:"query",label:"多平台违禁词查询",schema:TextInput},
+ "API_1791881343238": {path:"/story/api/cozeSkill/sensitiveWordSearch",method:"POST",platform:"tools",group:"text-check",purpose:"query",label:"多平台违禁词查询",schema:TextInput.extend({platform:z.literal("小红书").optional()}).refine(v=>v.platform!=="小红书"||v.content.length<=2000,{path:["content"],message:"小红书检测每次最多2000个UTF-16单元（含前文重叠）"})},
  "AWUTFI4V": {path:"/story/api/parseWork/parse",method:"POST",platform:"tools",group:"media",purpose:"media",label:"短视频下载器",schema:UrlInput},
  "D52IUEIM": {path:"/story/api/parseWork/videoDownload/youtube",method:"POST",platform:"tools",group:"media",purpose:"media",label:"YouTube视频下载",schema:UrlInput},
  "7UW1PT1F": {path:"/story/api/parseWork/videoDownload/x",method:"POST",platform:"tools",group:"media",purpose:"media",label:"X(Twitter)视频下载",schema:UrlInput},

@@ -12,6 +12,12 @@ test("independent command records survive refresh, interleaved tabs, ordinary ed
   Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
   try {
     const scope = "member-a:session", a: Recovery = { kind: "turn", value: { commandKey: "turn-a", input, quoteId: quote.quoteId, hasUnknownResult: true, attachments: [{ id: "file", name: "local.txt", state: "ready", file: new File(["private"], "local.txt") }] } };
+    const titleRecord: Recovery = {kind:"turn",value:{commandKey:"title-unknown",input:{...input,taskChoice:{skillId:"xiaohongshu-creator",moduleId:"M3-A",delivery:"title-report"}},quoteId:quote.quoteId,hasUnknownResult:true}};
+    saveRecovery("title-session",titleRecord);
+    assert.deepEqual(readRecoveries("title-session")[0]?.value,titleRecord.value,"unknown title submission retains the frozen choice through refresh");
+    clearRecovery("title-session",titleRecord);
+    const wordRecord: Recovery={kind:'turn',value:{commandKey:'word-unknown',input:{...input,taskChoice:{skillId:'xiaohongshu-creator',moduleId:'M5',delivery:'word-check',wordSource:{kind:'message',start:0,end:3}}},quoteId:quote.quoteId,hasUnknownResult:true}};
+    saveRecovery('word-session',wordRecord);assert.deepEqual(readRecoveries('word-session')[0]?.value,wordRecord.value);clearRecovery('word-session',wordRecord);
     const b: Recovery = { kind: "queue", value: { kind: "enqueue", key: "queue-b", input, unknown: true } };
     for (const skillSelection of [{ skillId: "xiaohongshu-creator" }, { actionId: "xiaohongshu-rewrite" }]) {
       const frozen = { ...input, skillSelection, taskHint: { actionId: "xiaohongshu-rewrite" } };

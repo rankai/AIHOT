@@ -1,3 +1,5 @@
+import { XHS_WORD_OPERATION,XHS_WORD_SOURCE } from "./xhs-words.ts";
+import { XHS_TITLE_OPERATION, XHS_TITLE_SOURCE, XhsTitleInput } from "./xhs-title-contract.ts";
 import { XHS_COVER_OPERATION, XHS_COVER_SOURCE, XhsCoverInput } from "./xhs-cover-contract.ts";
 import { WECHAT_HOT_OPERATION, WECHAT_HOT_SOURCE } from "./wechat-hot-contract.ts";
 import {xhsCommentPaths} from "./xhs-comments-contract.ts";
@@ -35,7 +37,7 @@ import { paidRequest, estimatedCatalogCost, type PaidRequestOptions } from "../r
 import { douyinOperations } from "./douyin-contract.ts";
 import { wechatOperations } from "./wechat-contract.ts";
 import { weiboOperations } from "./weibo-contract.ts";
-const paths = { [XHS_COVER_OPERATION]: "/story/api/cozeSkill/getXhsCozeSkillData",
+const paths = { [XHS_TITLE_OPERATION]: "/story/api/cozeSkill/getXhsCozeSkillData", [XHS_COVER_OPERATION]: "/story/api/cozeSkill/getXhsCozeSkillData",
   [WECHAT_HOT_OPERATION]: "/story/api/gzh/search/hotArticleNew", ...xhsCommentPaths, ...videoPaths, ...newImagePaths, ...aiSearchPaths, "6L178PZD":"/story/api/parseWork/videoGen/uploadFile", ...Object.fromEntries(Object.entries(mediaToolOperations).map(([id,o])=>[id,o.path])) as {[K in keyof typeof mediaToolOperations]:typeof mediaToolOperations[K]["path"]}, ...transcriptionPaths, ...Object.fromEntries(Object.entries(socialResearchOperations).map(([id,o])=>[id,o.path])) as {[K in keyof typeof socialResearchOperations]:typeof socialResearchOperations[K]["path"]}, ...Object.fromEntries(Object.entries(redfoxAccountOperations).map(([id,o])=>[id,o.path])) as {[K in keyof typeof redfoxAccountOperations]:typeof redfoxAccountOperations[K]["path"]}, ...Object.fromEntries(Object.entries(hotResearchOperations).map(([id,o])=>[id,o.path])) as {[K in keyof typeof hotResearchOperations]:typeof hotResearchOperations[K]["path"]}, ...Object.fromEntries(Object.entries(xResearchOperations).map(([id,o])=>[id,o.path])) as {[K in keyof typeof xResearchOperations]:typeof xResearchOperations[K]["path"]}, ...Object.fromEntries(Object.entries(qichezhijiaOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof qichezhijiaOperations]: typeof qichezhijiaOperations[K]["path"] }, ...Object.fromEntries(Object.entries(dongchediOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof dongchediOperations]: typeof dongchediOperations[K]["path"] }, ...Object.fromEntries(Object.entries(yicheOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof yicheOperations]: typeof yicheOperations[K]["path"] }, ...Object.fromEntries(Object.entries(baijiahaoOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof baijiahaoOperations]: typeof baijiahaoOperations[K]["path"] }, ...Object.fromEntries(Object.entries(zhihuOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof zhihuOperations]: typeof zhihuOperations[K]["path"] },  ...Object.fromEntries(Object.entries(toutiaoOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof toutiaoOperations]: typeof toutiaoOperations[K]["path"] }, ...Object.fromEntries(Object.entries(kuaishouOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof kuaishouOperations]: typeof kuaishouOperations[K]["path"] }, ...Object.fromEntries(Object.entries(shipinhaoOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof shipinhaoOperations]: typeof shipinhaoOperations[K]["path"] }, ...Object.fromEntries(Object.entries(instagramOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof instagramOperations]: typeof instagramOperations[K]["path"] }, ...Object.fromEntries(Object.entries(youtubeOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof youtubeOperations]: typeof youtubeOperations[K]["path"] }, ...Object.fromEntries(Object.entries(bilibiliOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof bilibiliOperations]: typeof bilibiliOperations[K]["path"] }, ...Object.fromEntries(Object.entries(tiktokOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof tiktokOperations]: typeof tiktokOperations[K]["path"] }, ...Object.fromEntries(Object.entries(xiaohongshuOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof xiaohongshuOperations]: typeof xiaohongshuOperations[K]["path"] }, ...Object.fromEntries(Object.entries(douyinOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof douyinOperations]: typeof douyinOperations[K]["path"] }, ...Object.fromEntries(Object.entries(wechatOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof wechatOperations]: typeof wechatOperations[K]["path"] }, ...Object.fromEntries(Object.entries(weiboOperations).map(([id,operation])=>[id,operation.path])) as { [K in keyof typeof weiboOperations]: typeof weiboOperations[K]["path"] }, AKFHJMXQ: "/story/api/x/userInfo", API_1790148502632: "/story/api/x/userTimeline", QCP75W33: "/story/api/x/tweetDetail", FXDGJO1V: "/story/api/parseWork/imageGen/uploadImage", ATY07YGY: "/story/api/parseWork/imageGen/gptImage2Submit", "849ONCDF": "/story/api/parseWork/imageGen/gptImage2Result" } as const;
 export type XOperation = "AKFHJMXQ" | "API_1790148502632" | "QCP75W33";
 type Operation = keyof typeof paths;
@@ -97,8 +99,8 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
     const encodedKey=new URLSearchParams({apiKey:key}).toString().slice("apiKey=".length);
     const redact = (text: string | null) => text === null ? null : [key,encodeURIComponent(key),encodedKey].reduce((value,secret)=>value.split(secret).join("[REDACTED]"),text);
     const accountQuery=operation in redfoxAccountOperations;
-    const method=operation===XHS_COVER_OPERATION?"GET":accountQuery?"GET":operation in hotResearchOperations?hotResearchOperations[operation as keyof typeof hotResearchOperations].method:operation in xiaohongshuOperations?xiaohongshuOperations[operation as keyof typeof xiaohongshuOperations].method:operation in wechatOperations?wechatOperations[operation as keyof typeof wechatOperations].method:"POST";
-    let wireInput = operation === XHS_COVER_OPERATION ? {...input, source: XHS_COVER_SOURCE} : operation === WECHAT_HOT_OPERATION ? {...input, source: WECHAT_HOT_SOURCE} : operation in tiktokOperations ? tiktokWireInput(operation as TiktokOperation,input) : input;
+    const method=[XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(operation)?"GET":accountQuery?"GET":operation in hotResearchOperations?hotResearchOperations[operation as keyof typeof hotResearchOperations].method:operation in xiaohongshuOperations?xiaohongshuOperations[operation as keyof typeof xiaohongshuOperations].method:operation in wechatOperations?wechatOperations[operation as keyof typeof wechatOperations].method:"POST";
+    let wireInput = operation===XHS_WORD_OPERATION&&input.platform==='小红书'?{...input,source:XHS_WORD_SOURCE}: operation === XHS_TITLE_OPERATION ? {...input, source: XHS_TITLE_SOURCE} : operation === XHS_COVER_OPERATION ? {...input, source: XHS_COVER_SOURCE} : operation === WECHAT_HOT_OPERATION ? {...input, source: WECHAT_HOT_SOURCE} : operation in tiktokOperations ? tiktokWireInput(operation as TiktokOperation,input) : input;
     if(operation === "API_1789095347662") {
       // Keep persisted inputs and receipt identity stable; Redfox now expects keyword on the wire.
       const {keword,...parameters}=input;
@@ -106,7 +108,7 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
     }
     let body: string | FormData | undefined = method==="GET"?undefined:JSON.stringify(wireInput);
     let suffix = "";
-    const headers: Record<string,string> = accountQuery?{}:[WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(operation) ? { "X-API-KEY": key } : { "REDFOX_API_KEY": key };
+    const headers: Record<string,string> = accountQuery?{}:([WECHAT_HOT_OPERATION,XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(operation)||operation===XHS_WORD_OPERATION&&input.platform==='小红书') ? { "X-API-KEY": key } : { "REDFOX_API_KEY": key };
     if(operation === "FXDGJO1V" || operation === "6L178PZD") {
       if(!upload) throw new Error("Missing upload transport");
       if(!uploadBody)throw new Error("Upload was not prepared");
@@ -126,11 +128,15 @@ export async function redfoxRequest(operation: Operation, input: Record<string, 
       cost: operation==="5AM3X4HZ" ? null : estimatedCatalogCost(priceSnapshot, null) };
   }, { ...options, onReceipt: async (tx, id, info) => {
     if (info.kind === "call") {
-      if (operation === XHS_COVER_OPERATION) {
-        const normalized = XhsCoverInput.parse(input);
-        if (normalized.keyword !== input.keyword) throw new Error("封面查询关键词须在外发前规范化，不能改变已冻结请求身份");
+      if ([XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(operation)) {
+        const normalized = (operation===XHS_TITLE_OPERATION?XhsTitleInput:XhsCoverInput).parse(input);
+        if (normalized.keyword !== input.keyword) throw new Error("研究查询关键词须在外发前规范化，不能改变已冻结请求身份");
       }
-      if ([WECHAT_HOT_OPERATION,XHS_COVER_OPERATION].includes(operation)) {
+      if(operation===XHS_WORD_OPERATION&&input.platform==='小红书'){
+        const [attempts]=await tx`SELECT attempts FROM receipts WHERE id=${id}`;
+        if(attempts!.attempts>1)throw new RedfoxResponseError('检测请求已尝试，请核对原回执，不自动重发');
+      }
+      if ([WECHAT_HOT_OPERATION,XHS_COVER_OPERATION,XHS_TITLE_OPERATION].includes(operation)) {
         const [attempts] = await tx`SELECT attempts FROM receipts WHERE id=${id}`;
         if (attempts!.attempts > 1) throw new RedfoxResponseError("研究查询已尝试，不允许自动重发，请核对原回执");
         const [price] = await tx`SELECT per_request FROM service_prices WHERE service='redfox.query' AND model=${operation} AND currency='CNY' AND per_request IS NOT NULL AND per_request>=0 AND source_url IS NOT NULL`;

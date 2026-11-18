@@ -3,6 +3,10 @@ import { z } from "zod";
 import type { AssistantId } from "@aihot/contracts/assistant";
 /** Executable capabilities are implemented in code; binding data never contains a handler or expression. */
 export const capabilities = {
+  "check-xhs-words@1": "check_xhs_words",
+  "save-xhs-word-check@1": "save_xhs_word_check",
+  "search-xhs-titles@1": "search_xhs_titles",
+  "save-xhs-title-report@1": "save_xhs_title_report",
   "generate_image@1": "generate_image",
   "save-xhs-cover-plan@1": "save_xhs_cover_plan",
   "save-writing@1": "save_draft",
@@ -19,11 +23,11 @@ export type Capability = keyof typeof capabilities;
 export const Binding = z.object({ formatVersion: z.literal(1), skillId: id, version: z.string().regex(/^\d+$/), name: z.string().max(80),
   modules: z.array(z.object({ moduleId: id, profiles: z.array(z.enum(["creative", "xiaohongshu"])).min(1), actionId: id,
     label: z.string().max(80), userDescription: z.string().trim().min(1).max(160).optional(), entry: id, capabilities: z.array(capability).min(1), inputContract: z.enum(["writing-input@1", "image-input@1"]),
-    deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1"]), references: z.array(id),
-    researchPolicy: z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1"]).optional(),
+    deliveryContract: z.enum(["writing-delivery@1", "wechat-research-writing@1", "image-delivery@1", "xhs-cover-delivery@1", "xhs-title-report@1", "xhs-word-check@1"]), references: z.array(id),
+    researchPolicy: z.enum(["xhs-empty-window@1", "wechat-low-raw-window@1", "xhs-title-generate@1", "xhs-title-score@1"]).optional(),
     tasks: z.array(z.object({
-      delivery: z.enum(["writing", "plans-only", "image"]), label: z.string().min(1).max(120),
-      units: z.array(z.object({ capability: z.enum(["creation", "search-xhs-covers@1", "search-xhs-notes@1", "search-wechat-hot@1", "analyze-xhs-cover-images@1", "generate_image@1"]), maximum: z.number().int().min(1).max(2) }).strict()).min(1).max(5),
+      delivery: z.enum(["writing", "plans-only", "image", "title-report", "word-check"]), label: z.string().min(1).max(120),
+      units: z.array(z.object({ capability: z.enum(["creation", "check-xhs-words@1", "search-xhs-titles@1", "search-xhs-covers@1", "search-xhs-notes@1", "search-wechat-hot@1", "analyze-xhs-cover-images@1", "generate_image@1"]), maximum: z.number().int().min(1).max(6) }).strict()).min(1).max(5),
     }).strict()).min(1).max(3).optional(),
     scriptBindings: z.array(z.object({ path: z.string().regex(/^upstream\/scripts\/[a-zA-Z0-9_-]+\.py$/), capability }).strict()),
   }).strict()).min(1),
@@ -33,10 +37,13 @@ export const Binding = z.object({ formatVersion: z.literal(1), skillId: id, vers
     const seen=new Set<string>();
     for(const task of module.tasks){
       const units=new Map(task.units.map(unit=>[unit.capability,unit.maximum]));
-      const paid=module.capabilities.filter(c=>['search-xhs-covers@1','search-xhs-notes@1','search-wechat-hot@1','analyze-xhs-cover-images@1'].includes(c));
+      const paid=module.capabilities.filter(c=>['check-xhs-words@1','search-xhs-titles@1','search-xhs-covers@1','search-xhs-notes@1','search-wechat-hot@1','analyze-xhs-cover-images@1'].includes(c));
       if(seen.has(task.delivery)||units.size!==task.units.length||units.get('creation')!==1||
+        task.units.some(u=>u.capability!=='check-xhs-words@1'&&u.maximum>2)||
         task.units.some(u=>u.capability!=='creation'&&!module.capabilities.includes(u.capability))||
         paid.some(c=>!units.has(c as never))||
+        (task.delivery==='word-check'&&module.deliveryContract!=='xhs-word-check@1')||
+        (task.delivery==='title-report'&&module.deliveryContract!=='xhs-title-report@1')||
         (task.delivery==='plans-only'&&module.deliveryContract!=='xhs-cover-delivery@1')||
         (task.delivery==='writing'&&!module.capabilities.includes('save-writing@1'))||
         (task.delivery==='image'?units.get('generate_image@1')!==1:units.has('generate_image@1')))

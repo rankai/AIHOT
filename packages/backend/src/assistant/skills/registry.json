@@ -75,12 +75,18 @@
       "directory": "wechat-write-tasks-v3"
     },
     {
-      "directory": "xiaohongshu-creator-v9",
-      "currentVersion": "9"
+      "directory": "xiaohongshu-creator-v9"
     },
     {
       "directory": "wechat-write-tasks-v4",
       "currentVersion": "5"
+    },
+    {
+      "directory": "xiaohongshu-creator-v10"
+    },
+    {
+      "directory": "xiaohongshu-creator-v11",
+      "currentVersion": "11"
     }
   ]
 }
